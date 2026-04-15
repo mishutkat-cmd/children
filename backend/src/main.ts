@@ -175,7 +175,9 @@ async function bootstrap() {
     await app.listen(listenTarget);
     if (isSocket) {
       try {
-        chmodSync(portStr, 0o666);
+        // 0o775 needed: unix-socket connect requires execute permission
+        // for the connecting process. Without it nginx returns 502.
+        chmodSync(portStr, 0o775);
       } catch (_) {}
       console.log('[Server] Listening on socket:', portStr);
     } else {
