@@ -1,0 +1,19 @@
+# Документация
+*.md
+docs/
+
+# Зависимости
+node_modules/
+.next/
+dist/
+build/
+.cache/
+
+# Логи и временные файлы
+*.log
+*.lock
+.env.local
+.env.*.local
+
+# Git
+.git/

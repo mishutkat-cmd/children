@@ -1,0 +1,91 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+**/dist/
+**/build/
+*.log
+
+# Environment variables & secrets (CRITICAL - never commit)
+.env
+.env.local
+.env.*.local
+*.env
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Firebase & service account keys (CRITICAL - never commit)
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+**/serviceAccount*.json
+**/*-firebase-adminsdk-*.json
+firebase-sa.json
+**/firebase-sa.json
+.secrets/
+**/.secrets/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+*.db
+*.db-journal
+prisma/migrations/
+!prisma/migrations/migration_lock.toml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Uploaded files
+uploads/
+**/uploads/
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Testing
+.nyc_output/
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# Backend specific
+backend/dist/
+backend/.env
+backend/*.db
+backend/*.db-journal
+
+# Frontend specific
+web/dist/
+web/.env
+frontend/dist/
+frontend/.env
+backend/logs/
+frontend/build/
+deploy.tar.gz
+mobile/

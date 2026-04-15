@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Аватары пользователей - доступны для чтения всем, запись только аутентифицированным
+    match /avatars/{fileName} {
+      allow read: if true; // Публичное чтение для аватаров
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024  // Максимум 5MB
+                   && request.resource.contentType.matches('image/.*'); // Только изображения
+    }
+
+    // Фотографии для заданий (proofs) - доступны только аутентифицированным пользователям
+    match /proofs/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Фотографии наград/желаний - доступны для чтения всем, запись только аутентифицированным
+    match /rewards/{fileName} {
+      allow read: if true; // Публичное чтение
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Фотографии бейджей - доступны для чтения всем, запись только аутентифицированным
+    match /badges/{fileName} {
+      allow read: if true; // Публичное чтение
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Фотографии желаний (wishlist) - доступны для чтения всем, запись только аутентифицированным
+    match /wishlist/{fileName} {
+      allow read: if true; // Публичное чтение
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Общее правило для всех остальных файлов - только для аутентифицированных пользователей
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

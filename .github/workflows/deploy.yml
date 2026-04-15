@@ -1,0 +1,41 @@
+# CI/CD: on push to main → build & deploy to server via SSH.
+#
+# Required GitHub secrets:
+#   DEPLOY_HOST       — ssh host (e.g. children.evolvenext.net)
+#   DEPLOY_USER       — ssh user (e.g. pf246008)
+#   DEPLOY_SSH_KEY    — private key (id_ed25519 contents)
+#   DEPLOY_PATH       — absolute path to project root on server
+#   DEPLOY_BRANCH     — (optional) branch to deploy, default: main
+#
+# The server must have:
+#   - the repo cloned at $DEPLOY_PATH
+#   - node/npm installed
+#   - scripts/deploy.sh executable
+#   - at least one of: PM2, systemd unit, ISPmanager, or auto-restart.sh running
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            ./scripts/deploy.sh "${{ secrets.DEPLOY_BRANCH || 'main' }}"

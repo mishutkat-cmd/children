@@ -1,0 +1,16 @@
+{
+  "name": "kids-motivation",
+  "private": true,
+  "description": "Kids Motivation App — backend + web",
+  "scripts": {
+    "build:web": "cd web && npm ci && npm run build",
+    "build:backend": "cd backend && npm ci && npm run build",
+    "build": "npm run build:web && npm run build:backend",
+    "check": "cd backend && npm run check",
+    "start:backend": "cd backend && npm run start:prod",
+    "deploy:pack": "npm run build:web && tar -czf deploy.tar.gz --exclude=backend/node_modules --exclude=web/node_modules --exclude=backend/dist --exclude=backend/.env --exclude='backend/*.db' --exclude='backend/serviceAccount*.json' --exclude=.secrets backend web docs DEPLOY.md"
+  },
+  "dependencies": {
+    "firebase": "^12.8.0"
+  }
+}

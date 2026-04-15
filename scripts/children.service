@@ -1,0 +1,51 @@
+# systemd unit for children backend.
+#
+# Install:
+#   sudo cp scripts/children.service /etc/systemd/system/children.service
+#   # edit User, WorkingDirectory, and PORT to match your host
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now children.service
+#
+# Inspect:
+#   systemctl status children.service
+#   journalctl -u children.service -f
+#
+# The Restart=always + RestartSec settings give automatic recovery on crash,
+# and StartLimit* prevents a hard tight-loop on a broken deploy.
+
+[Unit]
+Description=Children backend (NestJS + Firestore)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pf246008
+WorkingDirectory=/home/pf246008/evolvenext.net/children/backend
+ExecStart=/usr/bin/env node server.js
+# Always restart on crash or non-zero exit, never abandon the process.
+Restart=always
+RestartSec=5s
+# If the service fails more than 5 times in 2 minutes, stop retrying so we don't
+# hammer a broken build. Manual `systemctl start` resets the counter.
+StartLimitBurst=5
+StartLimitIntervalSec=120s
+
+# Resource & safety limits
+LimitNOFILE=65536
+TimeoutStopSec=20s
+KillMode=mixed
+
+# Env (override here or use EnvironmentFile=...)
+Environment=NODE_ENV=production
+Environment=FRONTEND_ENABLED=true
+# EnvironmentFile=/home/pf246008/evolvenext.net/.secrets/children.env
+# Port / socket:
+# Environment=PORT=3000
+# or: Environment=PORT=/home/pf246008/.system/nodejs/children.evolvenext.net.sock
+
+StandardOutput=append:/home/pf246008/evolvenext.net/children/backend/logs/server.log
+StandardError=append:/home/pf246008/evolvenext.net/children/backend/logs/server.err
+
+[Install]
+WantedBy=multi-user.target
