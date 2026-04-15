@@ -163,7 +163,9 @@ async function bootstrap() {
   // Удаляем файл только если bind упал с EADDRINUSE — тогда он точно stale
   // (ни один процесс на нём не слушает, иначе bind не дошёл бы до этой ошибки
   // через файл — он бы залип на kernel-уровне). Повторяем listen один раз.
-  const tryListen = async (): Promise<void> => app.listen(listenTarget);
+  const tryListen = async (): Promise<void> => {
+    await app.listen(listenTarget);
+  };
 
   try {
     await tryListen();
