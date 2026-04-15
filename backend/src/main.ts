@@ -154,38 +154,49 @@ async function bootstrap() {
   console.log('[Server] process.env.PORT:', process.env.PORT ?? '(not set)');
   console.log('[Server] listen type:', isSocket ? 'socket' : 'tcp', '| target:', listenTarget);
 
-  if (isSocket) {
-    // Remove stale socket file to avoid EADDRINUSE
-    if (existsSync(portStr)) {
-      try {
-        unlinkSync(portStr);
-        console.log('[Server] Removed stale socket:', portStr);
-      } catch (e: any) {
-        console.error('[Server] Failed to remove stale socket:', e?.message || e);
-        process.exit(1);
-      }
-    }
-  }
-
   if (process.env.ISPMANAGER === '1' && !isSocket) {
     console.warn('[Server] Expected unix socket, got numeric port. Set PORT to socket path in ISPmanager.');
   }
 
+  // Безопасный listen: НЕ удаляем сокет «на всякий случай», иначе тестовый
+  // запуск рядом с боевым процессом убивает inode прод-листенера.
+  // Удаляем файл только если bind упал с EADDRINUSE — тогда он точно stale
+  // (ни один процесс на нём не слушает, иначе bind не дошёл бы до этой ошибки
+  // через файл — он бы залип на kernel-уровне). Повторяем listen один раз.
+  const tryListen = async (): Promise<void> => app.listen(listenTarget);
+
   try {
-    await app.listen(listenTarget);
-    if (isSocket) {
-      try {
-        // 0o775 needed: unix-socket connect requires execute permission
-        // for the connecting process. Without it nginx returns 502.
-        chmodSync(portStr, 0o775);
-      } catch (_) {}
-      console.log('[Server] Listening on socket:', portStr);
-    } else {
-      console.log('[Server] Listening on port:', listenTarget);
-    }
+    await tryListen();
   } catch (err: any) {
-    console.error('[Server] Listen failed:', err?.message || err);
-    process.exit(1);
+    if (isSocket && err?.code === 'EADDRINUSE') {
+      console.warn('[Server] Socket EADDRINUSE — removing stale file and retrying:', portStr);
+      try {
+        unlinkSync(portStr);
+      } catch (unlinkErr: any) {
+        console.error('[Server] Failed to remove stale socket:', unlinkErr?.message || unlinkErr);
+        process.exit(1);
+      }
+      try {
+        await tryListen();
+      } catch (retryErr: any) {
+        console.error('[Server] Listen retry failed:', retryErr?.message || retryErr);
+        process.exit(1);
+      }
+    } else {
+      console.error('[Server] Listen failed:', err?.message || err);
+      process.exit(1);
+    }
+  }
+
+  if (isSocket) {
+    try {
+      // 0o775 needed: unix-socket connect requires execute permission
+      // for the connecting process. Without it nginx returns 502.
+      chmodSync(portStr, 0o775);
+    } catch (_) {}
+    console.log('[Server] Listening on socket:', portStr);
+  } else {
+    console.log('[Server] Listening on port:', listenTarget);
   }
 }
 
