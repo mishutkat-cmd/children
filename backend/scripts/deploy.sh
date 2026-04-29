@@ -5,7 +5,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$(dirname "$SCRIPT_DIR")"
-SOCKET_PATH="${SOCKET_PATH:-/home/pf246008/.system/nodejs/children.evolvenext.net.sock}"
+SOCKET_PATH="${SOCKET_PATH:?SOCKET_PATH env var required, e.g. /run/children.sock}"
 LOG_FILE="${LOG_FILE:-/tmp/children-backend.out}"
 
 cd "$BACKEND_DIR"

@@ -38,9 +38,7 @@ export function loadEnvFiles(): Record<string, string> {
       console.warn('[EnvLoader] Failed to load secrets .env:', error.message);
     }
   } else {
-    // Try alternative locations (including ISPmanager children.evolvenext.net path)
     const altPaths = [
-      '/home/pf246008/evolvenext.net/.secrets/children.env',
       join(homeDir, '.secrets', `${projectName}.env`),
       join('/home', process.env.USER || 'user', '.secrets', `${projectName}.env`),
     ];
@@ -93,7 +91,7 @@ export function getFirebaseCredentialsPath(): string | null {
     console.warn('[EnvLoader] FIREBASE_SA_PATH specified but file not found:', path);
   }
 
-  // Priority 2: Standard secrets location (including ISPmanager path)
+  // Priority 2: Standard secrets location
   const homeDir = process.env.HOME || process.env.HOMEPATH || '/home';
   const siteName = process.env.SITE_NAME || process.env.DOMAIN || 'default';
   const defaultPath = join(homeDir, siteName, '.secrets', 'firebase-sa.json');
@@ -102,12 +100,6 @@ export function getFirebaseCredentialsPath(): string | null {
     return defaultPath;
   }
 
-  const evolvenextPath = '/home/pf246008/evolvenext.net/.secrets/firebase-sa.json';
-  if (existsSync(evolvenextPath)) {
-    return evolvenextPath;
-  }
-
-  // Try alternative locations
   const altPaths = [
     join(homeDir, '.secrets', 'firebase-sa.json'),
     join('/home', process.env.USER || 'user', '.secrets', 'firebase-sa.json'),

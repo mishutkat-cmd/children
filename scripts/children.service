@@ -20,8 +20,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pf246008
-WorkingDirectory=/home/pf246008/evolvenext.net/children/backend
+User=<deploy-user>
+WorkingDirectory=<project-root>/backend
 ExecStart=/usr/bin/env node server.js
 # Always restart on crash or non-zero exit, never abandon the process.
 Restart=always
@@ -39,13 +39,13 @@ KillMode=mixed
 # Env (override here or use EnvironmentFile=...)
 Environment=NODE_ENV=production
 Environment=FRONTEND_ENABLED=true
-# EnvironmentFile=/home/pf246008/evolvenext.net/.secrets/children.env
+# EnvironmentFile=<absolute-path-to>/children.env
 # Port / socket:
 # Environment=PORT=3000
-# or: Environment=PORT=/home/pf246008/.system/nodejs/children.evolvenext.net.sock
+# or: Environment=PORT=<absolute-path-to>/children.sock
 
-StandardOutput=append:/home/pf246008/evolvenext.net/children/backend/logs/server.log
-StandardError=append:/home/pf246008/evolvenext.net/children/backend/logs/server.err
+StandardOutput=append:<project-root>/backend/logs/server.log
+StandardError=append:<project-root>/backend/logs/server.err
 
 [Install]
 WantedBy=multi-user.target

@@ -2,10 +2,11 @@
 
 /**
  * Production entry point for children.evolvenext.net.
- * 1. Loads env from .env or .secrets/children.env (never crash if missing).
+ * 1. Loads env from backend/.env (typically a symlink to a secret store
+ *    outside the repo, e.g. ~/.secrets/children/children.env).
  * 2. Logs only presence of env keys (never values).
- * 3. Bootstraps NestJS (dist/main.js).
- * ISPmanager sets process.env.PORT (Unix socket or port); we listen on it.
+ * 3. Bootstraps NestJS (dist/main.js); listens on process.env.PORT
+ *    (TCP port number or Unix socket path).
  */
 
 const path = require('path');
@@ -46,28 +47,11 @@ function loadDotenv(filePath) {
 }
 
 function envLoader() {
-  const cwd = process.cwd();
-  const tried = [];
-  let used = null;
-
-  // 1) backend/.env (or symlink)
-  const localEnv = path.join(cwd, '.env');
+  const localEnv = path.join(process.cwd(), '.env');
   if (loadDotenv(localEnv)) {
-    tried.push(localEnv);
-    used = localEnv;
-  }
-
-  // 2) /home/pf246008/evolvenext.net/.secrets/children.env
-  const secretsEnv = '/home/pf246008/evolvenext.net/.secrets/children.env';
-  if (loadDotenv(secretsEnv)) {
-    tried.push(secretsEnv);
-    if (!used) used = secretsEnv;
-  }
-
-  if (!used) {
-    console.warn('[server.js] No .env file loaded. Tried: ' + tried.join(', ') || 'backend/.env and ' + secretsEnv);
+    console.log('[server.js] Loaded env from: ' + localEnv);
   } else {
-    console.log('[server.js] Loaded env from: ' + used);
+    console.warn('[server.js] No .env file at ' + localEnv + ' (symlink or file expected).');
   }
 
   // Log only presence of keys (never values)

@@ -1,7 +1,7 @@
 /**
  * Env loader BEFORE Nest bootstrap. Import as the first line in main.ts.
- * Order: 1) backend/.env  2) /home/<user>/<domain>/.secrets/<project>.env
- * Merge: second overrides first. Never log secret values. Export envFileUsed for /diagnostics.
+ * Loads backend/.env (typically a symlink to a secrets store outside the repo).
+ * Never log secret values. Export envFileUsed for /diagnostics.
  *
  * IMPORTANT: dotenv is optional — if not installed (production --omit=dev), we parse manually.
  */
@@ -41,23 +41,17 @@ function parseEnvFile(content: string): Record<string, string> {
   return result;
 }
 
-// 1) backend/.env (or symlink)  2) .secrets/<project>.env
 const BACKEND_ENV = join(process.cwd(), '.env');
-const SECRETS_ENV = '/home/pf246008/evolvenext.net/.secrets/children.env';
 
 let envFileUsed: string | null = null;
 
-function loadOne(path: string, merge = true): boolean {
+function loadOne(path: string): boolean {
   if (!existsSync(path)) return false;
   try {
     const content = readFileSync(path, 'utf8');
     const parsed = dotenvParse ? dotenvParse(content) : parseEnvFile(content);
     for (const [key, value] of Object.entries(parsed)) {
-      if (value !== undefined) {
-        if (merge || process.env[key] === undefined) {
-          process.env[key] = String(value);
-        }
-      }
+      if (value !== undefined) process.env[key] = String(value);
     }
     envFileUsed = path;
     return true;
@@ -67,12 +61,10 @@ function loadOne(path: string, merge = true): boolean {
   }
 }
 
-const loaded1 = loadOne(BACKEND_ENV);
-const loaded2 = loadOne(SECRETS_ENV);
-if (loaded1) console.log('[EnvLoader] Loaded:', BACKEND_ENV);
-if (loaded2) console.log('[EnvLoader] Loaded:', SECRETS_ENV);
-if (!loaded1 && !loaded2) {
-  console.warn('[EnvLoader] No .env files found, using process.env only');
+if (loadOne(BACKEND_ENV)) {
+  console.log('[EnvLoader] Loaded:', BACKEND_ENV);
+} else {
+  console.warn('[EnvLoader] No .env file at', BACKEND_ENV, '— using process.env only');
 }
 
 export { envFileUsed };

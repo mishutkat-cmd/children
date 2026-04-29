@@ -60,17 +60,10 @@ async function bootstrap() {
     if (!buildPath) {
       const projectRoot = process.cwd();
       const discoveryPaths = [
-        // Priority: frontend/build (matches FRONTEND_BUILD_PATH on server)
-        '/home/pf246008/evolvenext.net/children/frontend/build',
-        '/home/pf246008/evolvenext.net/children/frontend/dist',
         join(projectRoot, '..', 'frontend', 'build'),
         join(projectRoot, '..', 'frontend', 'dist'),
-        // Fallback: web/* for legacy compatibility
-        '/home/pf246008/evolvenext.net/children/web/build',
-        '/home/pf246008/evolvenext.net/children/web/dist',
         join(projectRoot, '..', 'web', 'build'),
         join(projectRoot, '..', 'web', 'dist'),
-        // Other fallbacks
         join(projectRoot, 'frontend', 'build'),
         join(projectRoot, 'frontend', 'dist'),
         join(projectRoot, 'backend', 'frontend', 'build'),
@@ -135,28 +128,14 @@ async function bootstrap() {
     expressApp.get('/', (_req: any, res: any) => res.type('html').send(backendStatusHtml));
   }
 
-  // PORT: Unix socket path or TCP port number
-  // Socket if: starts with "/" OR ends with ".sock"
-  const SOCKET_PATH_HOSTING = '/home/pf246008/.system/nodejs/children.evolvenext.net.sock';
-  let portRaw = process.env.PORT;
-  if (portRaw == null || String(portRaw).trim() === '') {
-    if (existsSync('/home/pf246008/.system/nodejs')) {
-      portRaw = SOCKET_PATH_HOSTING;
-      console.log('[Server] PORT not set, using default socket for hosting');
-    } else {
-      portRaw = '3000';
-    }
-  }
+  // PORT: Unix socket path (starts with "/" or ends with ".sock") or TCP port number
+  const portRaw = process.env.PORT && String(process.env.PORT).trim() !== '' ? process.env.PORT : '3000';
   const portStr = String(portRaw).trim();
   const isSocket = portStr.startsWith('/') || portStr.endsWith('.sock');
   const listenTarget = isSocket ? portStr : Number(portStr) || 3000;
 
   console.log('[Server] process.env.PORT:', process.env.PORT ?? '(not set)');
   console.log('[Server] listen type:', isSocket ? 'socket' : 'tcp', '| target:', listenTarget);
-
-  if (process.env.ISPMANAGER === '1' && !isSocket) {
-    console.warn('[Server] Expected unix socket, got numeric port. Set PORT to socket path in ISPmanager.');
-  }
 
   // Безопасный listen: НЕ удаляем сокет «на всякий случай», иначе тестовый
   // запуск рядом с боевым процессом убивает inode прод-листенера.

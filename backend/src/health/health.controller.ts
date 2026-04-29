@@ -86,19 +86,11 @@ export class HealthController {
         existsIndex: existsSync(indexPath),
       });
     } else {
-      // Priority 2: Discovery paths (including ISPmanager evolvenext path)
       const discoveryPaths = [
-        // Priority: frontend/build (matches FRONTEND_BUILD_PATH on server)
-        '/home/pf246008/evolvenext.net/children/frontend/build',
-        '/home/pf246008/evolvenext.net/children/frontend/dist',
         join(projectRoot, '..', 'frontend', 'build'),
         join(projectRoot, '..', 'frontend', 'dist'),
-        // Fallback: web/* for legacy compatibility
-        '/home/pf246008/evolvenext.net/children/web/build',
-        '/home/pf246008/evolvenext.net/children/web/dist',
         join(projectRoot, '..', 'web', 'build'),
         join(projectRoot, '..', 'web', 'dist'),
-        // Other fallbacks
         join(projectRoot, 'frontend', 'build'),
         join(projectRoot, 'frontend', 'dist'),
         join(projectRoot, 'backend', 'frontend', 'build'),
@@ -148,11 +140,10 @@ export class HealthController {
     } catch (e: any) {
       firebaseAdminResolvable = { error: e?.message || 'not found' };
     }
-    const childrenEnvPath = '/home/pf246008/evolvenext.net/.secrets/children.env';
-    const firebaseSaPath = '/home/pf246008/evolvenext.net/.secrets/firebase-sa.json';
+    const firebaseSaConfigured = process.env.FIREBASE_SA_PATH;
     const secretsPathsExist = {
-      childrenEnv: fs.existsSync(childrenEnvPath),
-      firebaseSa: fs.existsSync(firebaseSaPath),
+      backendEnv: fs.existsSync(join(cwd, '.env')),
+      firebaseSa: firebaseSaConfigured ? fs.existsSync(firebaseSaConfigured) : null,
     };
     const configuredPath = process.env.FRONTEND_BUILD_PATH;
     const frontendConfiguredPathExists =
