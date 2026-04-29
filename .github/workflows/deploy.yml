@@ -1,8 +1,9 @@
 # CI/CD: on push to main → build & deploy to server via SSH.
 #
 # Required GitHub secrets:
-#   DEPLOY_HOST       — ssh host (e.g. children.evolvenext.net)
-#   DEPLOY_USER       — ssh user (e.g. pf246008)
+#   DEPLOY_HOST       — ssh host (e.g. 91.227.181.162 or children.evolvenext.net)
+#   DEPLOY_PORT       — ssh port (e.g. 22022; defaults to 22 if unset)
+#   DEPLOY_USER       — ssh user (e.g. odoo)
 #   DEPLOY_SSH_KEY    — private key (id_ed25519 contents)
 #   DEPLOY_PATH       — absolute path to project root on server
 #   DEPLOY_BRANCH     — (optional) branch to deploy, default: main
@@ -32,6 +33,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script_stop: true
