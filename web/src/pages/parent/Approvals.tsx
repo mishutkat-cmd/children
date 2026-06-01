@@ -4,7 +4,11 @@ import {
   Box,
   Tabs,
   Tab,
+  Button,
+  Snackbar,
+  Alert,
 } from '@mui/material'
+import DoneAllIcon from '@mui/icons-material/DoneAll'
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Layout from '../../components/Layout'
@@ -78,6 +82,65 @@ export default function ParentApprovals() {
   const approveExchange = useApproveExchange()
   const rejectExchange = useRejectExchange()
   const markDelivered = useMarkDeliveredExchange()
+
+  const [bulkApproving, setBulkApproving] = useState(false)
+  const [bulkResult, setBulkResult] = useState<{
+    open: boolean
+    severity: 'success' | 'warning' | 'error'
+    text: string
+  }>({ open: false, severity: 'success', text: '' })
+
+  const handleApproveAll = async () => {
+    const isCompletionsTab = validTabIndex === 0
+    const ids = isCompletionsTab
+      ? (pendingCompletions || []).map((c: Completion) => c.id)
+      : (pendingExchanges || []).map((e: Exchange) => e.id)
+    if (ids.length === 0) return
+
+    const labelPlural = isCompletionsTab ? 'заданий' : 'обменов'
+    const ok = window.confirm(
+      `Одобрить все ${ids.length} ${labelPlural}?\nДействие нельзя отменить.`
+    )
+    if (!ok) return
+
+    setBulkApproving(true)
+    const approveFn = isCompletionsTab
+      ? (id: string) => approveCompletion.mutateAsync(id)
+      : (id: string) => approveExchange.mutateAsync(id)
+    let failures = 0
+    for (const id of ids) {
+      try {
+        await approveFn(id)
+      } catch {
+        failures += 1
+      }
+    }
+    setBulkApproving(false)
+    if (failures === 0) {
+      setBulkResult({
+        open: true,
+        severity: 'success',
+        text: `Одобрено ${ids.length} ${labelPlural}`,
+      })
+    } else if (failures < ids.length) {
+      setBulkResult({
+        open: true,
+        severity: 'warning',
+        text: `Одобрено ${ids.length - failures} из ${ids.length}. Ошибок: ${failures}`,
+      })
+    } else {
+      setBulkResult({
+        open: true,
+        severity: 'error',
+        text: `Не удалось одобрить ${ids.length} ${labelPlural}`,
+      })
+    }
+  }
+
+  const currentTabCount =
+    validTabIndex === 0
+      ? (pendingCompletions?.length || 0)
+      : (pendingExchanges?.length || 0)
 
   return (
     <Layout>
@@ -168,6 +231,37 @@ export default function ParentApprovals() {
           <Tab label={`Задания (${pendingCompletions?.length || 0})`} />
           <Tab label={`Обмены (${pendingExchanges?.length || 0})`} />
         </Tabs>
+
+        {currentTabCount > 0 && (
+          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="contained"
+              color="success"
+              startIcon={
+                bulkApproving ? (
+                  <CircularProgress size={16} sx={{ color: '#fff' }} />
+                ) : (
+                  <DoneAllIcon />
+                )
+              }
+              onClick={handleApproveAll}
+              disabled={bulkApproving}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                px: 2.5,
+                py: 1,
+                borderRadius: 2,
+                boxShadow: '0 4px 12px rgba(52, 199, 89, 0.3)',
+                '&:hover': {
+                  boxShadow: '0 6px 16px rgba(52, 199, 89, 0.4)',
+                },
+              }}
+            >
+              {bulkApproving ? 'Одобряем…' : `Одобрить все (${currentTabCount})`}
+            </Button>
+          </Box>
+        )}
 
         {validTabIndex === 0 ? (
           <>
@@ -286,6 +380,21 @@ export default function ParentApprovals() {
             )}
           </>
         )}
+
+        <Snackbar
+          open={bulkResult.open}
+          autoHideDuration={4000}
+          onClose={() => setBulkResult((s) => ({ ...s, open: false }))}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert
+            severity={bulkResult.severity}
+            onClose={() => setBulkResult((s) => ({ ...s, open: false }))}
+            sx={{ fontWeight: 600 }}
+          >
+            {bulkResult.text}
+          </Alert>
+        </Snackbar>
       </Box>
     </Layout>
   )

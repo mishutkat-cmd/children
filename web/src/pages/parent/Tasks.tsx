@@ -46,6 +46,9 @@ import WarningIcon from '@mui/icons-material/Warning'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ViewModuleIcon from '@mui/icons-material/ViewModule'
 import ViewListIcon from '@mui/icons-material/ViewList'
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import EditIcon from '@mui/icons-material/Edit'
 import ArchiveIcon from '@mui/icons-material/Archive'
 import Layout from '../../components/Layout'
@@ -309,11 +312,17 @@ function WeekCalendar({
   )
 }
 
-// Вспомогательные функции
-const parseDaysOfWeek = (daysOfWeekString?: string): number[] => {
-  if (!daysOfWeekString) return []
+// Вспомогательные функции.
+// Backend used to return daysOfWeek as a JSON-stringified array; after the
+// "native types" migration it returns a real number[] (or null). Accept both
+// shapes so an older deploy hitting newer data — or vice versa — doesn't
+// silently drop the user's day selection.
+const parseDaysOfWeek = (raw?: string | number[] | null): number[] => {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw as number[]
   try {
-    return JSON.parse(daysOfWeekString) as number[]
+    const parsed = JSON.parse(raw as string)
+    return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
   }
@@ -384,7 +393,16 @@ export default function ParentTasks() {
     requiresParentApproval: true,
   })
   const [error, setError] = useState('')
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
+  const [viewMode, setViewMode] = useState<'grid' | 'table' | 'diary'>('grid')
+  // Начало недели для режима «дневник» (понедельник 00:00)
+  const [diaryWeekStart, setDiaryWeekStart] = useState<Date>(() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    const day = d.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    d.setDate(d.getDate() + diff)
+    return d
+  })
   const [statusFilter, setStatusFilter] = useState<'ACTIVE' | 'ARCHIVED'>('ACTIVE')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
@@ -719,6 +737,7 @@ export default function ParentTasks() {
               >
                 <ToggleButton value="grid"><ViewModuleIcon fontSize="small" /></ToggleButton>
                 <ToggleButton value="table"><ViewListIcon fontSize="small" /></ToggleButton>
+                <ToggleButton value="diary"><CalendarMonthIcon fontSize="small" /></ToggleButton>
               </ToggleButtonGroup>
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
@@ -1177,6 +1196,213 @@ export default function ParentTasks() {
               </TableContainer>
             </Paper>
           )
+
+          // ── ДНЕВНИК ─────────────────────────────────────────────────────────
+          if (viewMode === 'diary') {
+            const parseDow = (raw: any): number[] => {
+              if (!raw) return []
+              if (Array.isArray(raw)) return raw as number[]
+              try {
+                const parsed = JSON.parse(raw)
+                return Array.isArray(parsed) ? parsed : []
+              } catch {
+                return String(raw)
+                  .split(',')
+                  .map((s) => parseInt(s.trim(), 10))
+                  .filter((n) => !Number.isNaN(n))
+              }
+            }
+            const isTaskOnDay = (task: Task, dayOfWeek: number): boolean => {
+              if (task.frequency === 'CUSTOM') {
+                return parseDow((task as any).daysOfWeek).includes(dayOfWeek)
+              }
+              return true
+            }
+            const addDaysLocal = (d: Date, n: number) => {
+              const r = new Date(d); r.setDate(r.getDate() + n); return r
+            }
+            const isSameDayLocal = (a: Date, b: Date) =>
+              a.getFullYear() === b.getFullYear() &&
+              a.getMonth() === b.getMonth() &&
+              a.getDate() === b.getDate()
+            const today = new Date(); today.setHours(0, 0, 0, 0)
+            const weekDays = Array.from({ length: 7 }, (_, i) => {
+              const date = addDaysLocal(diaryWeekStart, i)
+              return { date, dayOfWeek: date.getDay(), isToday: isSameDayLocal(date, today) }
+            })
+            const DAY_NAMES_FULL = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
+            const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+            const weekEnd = addDaysLocal(diaryWeekStart, 6)
+            const weekLabel = diaryWeekStart.getMonth() === weekEnd.getMonth()
+              ? `${diaryWeekStart.getDate()}–${weekEnd.getDate()} ${MONTHS_GEN[diaryWeekStart.getMonth()]}`
+              : `${diaryWeekStart.getDate()} ${MONTHS_GEN[diaryWeekStart.getMonth()]} – ${weekEnd.getDate()} ${MONTHS_GEN[weekEnd.getMonth()]}`
+            const onCurrentWeek = isSameDayLocal(diaryWeekStart, (() => {
+              const d = new Date(); d.setHours(0, 0, 0, 0)
+              const day = d.getDay()
+              d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day))
+              return d
+            })())
+
+            return (
+              <Box>
+                {/* Навигатор недели */}
+                <Paper sx={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  px: 1, py: 0.75, mb: 2, borderRadius: 3,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06)',
+                }}>
+                  <IconButton onClick={() => setDiaryWeekStart(addDaysLocal(diaryWeekStart, -7))} sx={{ color: colors.primary.main }}>
+                    <ChevronLeftIcon />
+                  </IconButton>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: '1rem', textTransform: 'capitalize' }}>
+                      {weekLabel}
+                    </Typography>
+                    {!onCurrentWeek && (
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          const d = new Date(); d.setHours(0, 0, 0, 0)
+                          const day = d.getDay()
+                          d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day))
+                          setDiaryWeekStart(d)
+                        }}
+                        sx={{ textTransform: 'none', fontWeight: 600, minWidth: 'auto', px: 1 }}
+                      >
+                        Сегодня
+                      </Button>
+                    )}
+                  </Box>
+                  <IconButton onClick={() => setDiaryWeekStart(addDaysLocal(diaryWeekStart, 7))} sx={{ color: colors.primary.main }}>
+                    <ChevronRightIcon />
+                  </IconButton>
+                </Paper>
+
+                {/* 7 секций-страниц */}
+                {weekDays.map(({ date, dayOfWeek, isToday: dayIsToday }) => {
+                  const dayTasks = filteredTasks.filter((t: Task) => isTaskOnDay(t, dayOfWeek))
+                  return (
+                    <Paper
+                      key={date.toISOString()}
+                      sx={{
+                        mb: 2,
+                        p: 2,
+                        borderRadius: 3,
+                        borderLeft: dayIsToday ? `4px solid ${colors.primary.main}` : 'none',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06)',
+                      }}
+                    >
+                      {/* Заголовок дня */}
+                      <Box sx={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        pb: 1.5, mb: 1.5, borderBottom: '1px solid #F2F2F7',
+                      }}>
+                        <Box>
+                          <Typography sx={{
+                            fontWeight: 700, fontSize: '1.05rem', letterSpacing: '-0.3px',
+                            color: dayIsToday ? colors.primary.main : colors.text.primary,
+                            textTransform: 'capitalize',
+                          }}>
+                            {DAY_NAMES_FULL[dayOfWeek]}
+                          </Typography>
+                          <Typography sx={{
+                            fontSize: '0.78rem',
+                            color: dayIsToday ? colors.primary.dark : colors.text.secondary,
+                            fontWeight: dayIsToday ? 600 : 400,
+                            mt: 0.25,
+                          }}>
+                            {date.getDate()} {MONTHS_GEN[date.getMonth()]}
+                          </Typography>
+                        </Box>
+                        {dayIsToday && (
+                          <Chip label="сегодня" size="small" sx={{
+                            backgroundColor: colors.primary.main,
+                            color: '#fff',
+                            fontWeight: 700,
+                            fontSize: '0.65rem',
+                            letterSpacing: '0.4px',
+                            textTransform: 'uppercase',
+                            height: 22,
+                          }} />
+                        )}
+                      </Box>
+
+                      {/* Строки задач */}
+                      {dayTasks.length === 0 ? (
+                        <Typography sx={{ fontSize: '0.85rem', fontStyle: 'italic', color: '#C7C7CC', py: 0.5 }}>
+                          — нет задач
+                        </Typography>
+                      ) : (
+                        dayTasks.map((task: Task, i: number) => {
+                          const assignedChildName = (() => {
+                            if (task.assignedTo === 'ALL') return 'Все'
+                            const c = (childrenStats || []).find((s: any) =>
+                              s.childId === task.assignedTo || (s as any).childProfileId === task.assignedTo
+                            )
+                            return c?.childName || ''
+                          })()
+                          return (
+                            <Box
+                              key={task.id}
+                              onClick={() => handleOpen(task)}
+                              sx={{
+                                display: 'flex', alignItems: 'center', gap: 1,
+                                py: 1, cursor: 'pointer',
+                                borderBottom: i === dayTasks.length - 1 ? 'none' : '1px solid #F7F7F9',
+                                transition: 'background 0.15s',
+                                '&:hover': { background: colors.primary.main + '08' },
+                              }}
+                            >
+                              <Typography sx={{ width: 22, color: '#C7C7CC', fontSize: '0.85rem', fontWeight: 600 }}>
+                                {i + 1}.
+                              </Typography>
+                              <Box sx={{
+                                width: 30, height: 30, borderRadius: 1.5,
+                                background: colors.primary.main + '14',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '1rem', flexShrink: 0,
+                              }}>
+                                {sanitizeIcon(task.icon)}
+                              </Box>
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography sx={{
+                                  fontSize: '0.92rem', fontWeight: 600, color: colors.text.primary,
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                }}>
+                                  {task.title}
+                                </Typography>
+                                <Box sx={{ display: 'flex', gap: 0.75, mt: 0.25, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  {assignedChildName && (
+                                    <Typography sx={{ fontSize: '0.72rem', color: colors.text.secondary }}>
+                                      {assignedChildName}
+                                    </Typography>
+                                  )}
+                                  {task.requiresParentApproval && (
+                                    <Typography sx={{ fontSize: '0.72rem', color: '#FF9F0A', fontWeight: 600 }}>
+                                      · проверка
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </Box>
+                              <Box sx={{
+                                display: 'inline-flex', alignItems: 'center', gap: 0.4,
+                                px: 1, py: 0.25, borderRadius: 10, background: '#FF9F0A18',
+                              }}>
+                                <StarIcon sx={{ fontSize: '0.8rem', color: '#FF9F0A' }} />
+                                <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#FF9F0A' }}>
+                                  {task.points}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          )
+                        })
+                      )}
+                    </Paper>
+                  )
+                })}
+              </Box>
+            )
+          }
 
           // ── КАРТОЧКИ (grid) ─────────────────────────────────────────────────
           return (
