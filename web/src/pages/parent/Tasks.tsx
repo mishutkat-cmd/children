@@ -1693,85 +1693,187 @@ export default function ParentTasks() {
                   }}
                 />
 
-                {/* Периодичность */}
-                <FormControl fullWidth size="small">
-                  <InputLabel>Периодичность</InputLabel>
-                  <Select
-                    value={formData.frequency}
-                    onChange={(e: SelectChangeEvent) =>
-                      setFormData({ 
-                        ...formData, 
-                        frequency: e.target.value as 'ONCE' | 'DAILY' | 'WEEKLY' | 'CUSTOM', 
-                        daysOfWeek: [] 
-                      })
-                    }
-                    label="Периодичность"
-                  >
-                    <MenuItem value="ONCE">Один раз</MenuItem>
-                    <MenuItem value="DAILY">Ежедневно</MenuItem>
-                    <MenuItem value="WEEKLY">Еженедельно</MenuItem>
-                    <MenuItem value="CUSTOM">Выборочные дни</MenuItem>
-                  </Select>
-                </FormControl>
+                {/* ─── Расписание (как в календаре) ─────────────────────────── */}
+                <Box>
+                  <Typography variant="body2" sx={{ mb: 1, fontWeight: 700, fontSize: '0.875rem', color: colors.text.primary, display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <CalendarMonthIcon sx={{ fontSize: '1.1rem', color: colors.primary.main }} />
+                    Расписание
+                  </Typography>
 
-                {/* Дни недели */}
-                {formData.frequency === 'CUSTOM' && (
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1.5, fontWeight: 600, fontSize: '0.875rem', color: colors.text.primary }}>
-                      Выберите дни недели для повтора:
-                    </Typography>
-                    <Box sx={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: 'repeat(7, 1fr)', 
-                      gap: 1,
-                      p: 1.5,
-                      borderRadius: 2,
-                      background: colors.background.light,
-                    }}>
-                      {DAYS_OF_WEEK_LABELS.map((label, index) => {
-                        const isSelected = formData.daysOfWeek.includes(index)
-                        return (
+                  {/* 4 карточки выбора периодичности */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(4, 1fr)' }, gap: 1, mb: 2 }}>
+                    {([
+                      { value: 'ONCE',   label: 'Один раз',     icon: '📅', hint: 'Без повтора' },
+                      { value: 'DAILY',  label: 'Ежедневно',    icon: '🔁', hint: 'Каждый день' },
+                      { value: 'WEEKLY', label: 'Еженедельно',  icon: '📆', hint: 'Раз в неделю' },
+                      { value: 'CUSTOM', label: 'Свои дни',     icon: '⚙️', hint: 'Выбрать вручную' },
+                    ] as const).map((opt) => {
+                      const isActive = formData.frequency === opt.value
+                      return (
+                        <Box
+                          key={opt.value}
+                          onClick={() => {
+                            setFormData({
+                              ...formData,
+                              frequency: opt.value,
+                              daysOfWeek: opt.value === 'CUSTOM' ? formData.daysOfWeek : [],
+                            })
+                          }}
+                          sx={{
+                            cursor: 'pointer',
+                            p: 1.5,
+                            borderRadius: 2,
+                            border: `2px solid ${isActive ? colors.primary.main : '#E5E5EA'}`,
+                            background: isActive ? colors.primary.main + '0F' : '#fff',
+                            transition: 'all 0.15s',
+                            textAlign: 'center',
+                            '&:hover': {
+                              borderColor: colors.primary.main,
+                              background: isActive ? colors.primary.main + '15' : colors.primary.main + '08',
+                              transform: 'translateY(-1px)',
+                            },
+                          }}
+                        >
+                          <Box sx={{ fontSize: '1.4rem', mb: 0.25 }}>{opt.icon}</Box>
+                          <Typography sx={{
+                            fontSize: '0.82rem', fontWeight: 700,
+                            color: isActive ? colors.primary.main : colors.text.primary,
+                            lineHeight: 1.2,
+                          }}>
+                            {opt.label}
+                          </Typography>
+                          <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, mt: 0.25 }}>
+                            {opt.hint}
+                          </Typography>
+                        </Box>
+                      )
+                    })}
+                  </Box>
+
+                  {/* Пресеты + дни недели для CUSTOM */}
+                  {formData.frequency === 'CUSTOM' && (
+                    <Box sx={{ p: 1.5, borderRadius: 2, background: '#F5F5F7', border: '1px solid #E5E5EA' }}>
+                      {/* Быстрые пресеты */}
+                      <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.5 }}>
+                        {([
+                          { label: 'Будни',         days: [1, 2, 3, 4, 5] },
+                          { label: 'Выходные',      days: [6, 0] },
+                          { label: 'Каждый день',   days: [0, 1, 2, 3, 4, 5, 6] },
+                          { label: 'Чёт. (Пн/Ср/Пт)', days: [1, 3, 5] },
+                          { label: 'Нечёт. (Вт/Чт)',  days: [2, 4] },
+                        ] as const).map((preset) => {
+                          const isMatch = preset.days.length === formData.daysOfWeek.length &&
+                            preset.days.every((d) => formData.daysOfWeek.includes(d))
+                          return (
+                            <Box
+                              key={preset.label}
+                              onClick={() => setFormData({ ...formData, daysOfWeek: [...preset.days] })}
+                              sx={{
+                                cursor: 'pointer',
+                                px: 1.25, py: 0.5,
+                                borderRadius: 10,
+                                background: isMatch ? colors.primary.main : '#fff',
+                                color: isMatch ? '#fff' : colors.text.primary,
+                                border: `1px solid ${isMatch ? colors.primary.main : '#D2D2D7'}`,
+                                fontSize: '0.78rem',
+                                fontWeight: 600,
+                                transition: 'all 0.15s',
+                                '&:hover': {
+                                  borderColor: colors.primary.main,
+                                  color: isMatch ? '#fff' : colors.primary.main,
+                                },
+                              }}
+                            >
+                              {preset.label}
+                            </Box>
+                          )
+                        })}
+                        {formData.daysOfWeek.length > 0 && (
                           <Box
-                            key={index}
-                            onClick={() => handleDayToggle(index)}
+                            onClick={() => setFormData({ ...formData, daysOfWeek: [] })}
                             sx={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              p: 1.5,
-                              borderRadius: 2,
                               cursor: 'pointer',
-                              transition: 'all 0.2s',
-                              background: isSelected ? colors.primary.main : 'transparent',
-                              color: isSelected ? 'white' : colors.text.secondary,
-                              border: `2px solid ${isSelected ? colors.primary.dark : colors.background.light}`,
-                              fontWeight: isSelected ? 700 : 500,
-                              fontSize: '0.875rem',
-                              '&:hover': {
-                                transform: 'scale(1.05)',
-                                borderColor: isSelected ? colors.primary.dark : colors.primary.main,
-                                background: isSelected ? colors.primary.main : colors.primary.light + '20',
-                              },
+                              px: 1.25, py: 0.5,
+                              borderRadius: 10,
+                              background: 'transparent',
+                              color: colors.error.main,
+                              border: `1px solid ${colors.error.main}40`,
+                              fontSize: '0.78rem',
+                              fontWeight: 600,
+                              '&:hover': { background: colors.error.main + '10' },
                             }}
                           >
-                            <Typography variant="caption" sx={{ fontSize: '0.7rem', opacity: 0.8, mb: 0.25 }}>
-                              {DAYS_OF_WEEK_FULL[index].slice(0, 2)}
-                            </Typography>
-                            <Typography variant="body2" sx={{ fontWeight: 'inherit', fontSize: '0.875rem' }}>
-                              {label}
-                            </Typography>
+                            × Очистить
                           </Box>
-                        )
-                      })}
+                        )}
+                      </Box>
+
+                      {/* Кружки дней — Пн..Вс */}
+                      <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center', flexWrap: 'wrap' }}>
+                        {[1, 2, 3, 4, 5, 6, 0].map((dayIdx) => {
+                          const isSelected = formData.daysOfWeek.includes(dayIdx)
+                          return (
+                            <Box
+                              key={dayIdx}
+                              onClick={() => handleDayToggle(dayIdx)}
+                              sx={{
+                                width: 44, height: 44,
+                                borderRadius: '50%',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer',
+                                background: isSelected ? colors.primary.main : '#fff',
+                                color: isSelected ? '#fff' : colors.text.primary,
+                                border: `2px solid ${isSelected ? colors.primary.main : '#D2D2D7'}`,
+                                fontWeight: 700,
+                                fontSize: '0.85rem',
+                                transition: 'all 0.15s',
+                                boxShadow: isSelected ? '0 2px 8px rgba(0,122,255,0.3)' : 'none',
+                                '&:hover': {
+                                  borderColor: colors.primary.main,
+                                  transform: 'scale(1.08)',
+                                },
+                              }}
+                            >
+                              {DAYS_OF_WEEK_LABELS[dayIdx]}
+                            </Box>
+                          )
+                        })}
+                      </Box>
                     </Box>
-                    {formData.daysOfWeek.length > 0 && (
-                      <Typography variant="caption" sx={{ mt: 1, display: 'block', color: colors.success.main, fontWeight: 600 }}>
-                        ✓ Выбрано дней: {formData.daysOfWeek.length}
-                      </Typography>
-                    )}
+                  )}
+
+                  {/* Превью расписания */}
+                  <Box sx={{
+                    mt: 1.5,
+                    px: 1.5, py: 1,
+                    borderRadius: 2,
+                    background: colors.success.main + '0F',
+                    border: `1px solid ${colors.success.main}30`,
+                    display: 'flex', alignItems: 'center', gap: 1,
+                  }}>
+                    <Box sx={{ fontSize: '1rem' }}>📋</Box>
+                    <Typography sx={{ fontSize: '0.82rem', color: colors.text.primary, lineHeight: 1.35 }}>
+                      {(() => {
+                        if (formData.frequency === 'ONCE') {
+                          return <>Будет показано <b>один раз</b>. Без повтора.</>
+                        }
+                        if (formData.frequency === 'DAILY') {
+                          return <>Будет показано <b>каждый день</b>.</>
+                        }
+                        if (formData.frequency === 'WEEKLY') {
+                          return <>Будет показано <b>раз в неделю</b>.</>
+                        }
+                        if (formData.daysOfWeek.length === 0) {
+                          return <span style={{ color: colors.error.main }}>Выберите хотя бы один день недели</span>
+                        }
+                        const names = [...formData.daysOfWeek]
+                          .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b))
+                          .map((d) => DAYS_OF_WEEK_FULL[d].toLowerCase())
+                        return <>Будет повторяться по: <b>{names.join(', ')}</b></>
+                      })()}
+                    </Typography>
                   </Box>
-                )}
+                </Box>
 
                 {/* Назначить */}
                 <FormControl fullWidth size="small">
