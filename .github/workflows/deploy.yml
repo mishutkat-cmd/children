@@ -61,14 +61,19 @@ jobs:
       # optionals it actually needs. This is a test-only job; the deploy
       # job still goes through `npm ci --omit=optional` in
       # scripts/deploy.sh on the server.
-      - name: Install web deps
+      - name: Diagnose npm versions + lockfile shape
         working-directory: web
-        # --legacy-peer-deps: react-router-dom@6 peer range doesn't cleanly
-        # satisfy strict react@18.x in npm-11 resolution; same flag we use
-        # locally to regenerate the lockfile.
-        # --no-save: this is a test-only install; never mutate the committed
-        # lockfile from CI.
-        run: npm install --no-audit --no-fund --no-save --legacy-peer-deps
+        run: |
+          echo "node:"; node --version
+          echo "npm:";  npm --version
+          echo "lockfileVersion:"; node -e "console.log(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')).lockfileVersion)"
+          echo "first 5 packages keys:"; node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')).packages).slice(0,5))"
+      - name: Install web deps (verbose)
+        working-directory: web
+        # --legacy-peer-deps: peer dep mismatch (react-router-dom@6 vs react@18 strict).
+        # --no-save: test-only install; never mutate the committed lockfile.
+        # --loglevel verbose: surface which package the resolver chokes on.
+        run: npm install --no-audit --no-fund --no-save --legacy-peer-deps --loglevel verbose 2>&1 | tail -60
       - name: Run web unit tests (vitest)
         working-directory: web
         run: npm test
