@@ -3,9 +3,10 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import { CircularProgress, Box } from '@mui/material'
 
-// Auth pages — small, loaded eagerly
-import LoginPage from './pages/auth/LoginPage'
-import RegisterPage from './pages/auth/RegisterPage'
+// Auth pages — lazy-loaded too, so the initial chunk stays minimal until
+// we know which side of the auth gate the user is on.
+const LoginPage = lazy(() => import('./pages/auth/LoginPage'))
+const RegisterPage = lazy(() => import('./pages/auth/RegisterPage'))
 
 // Child pages — lazy loaded
 const ChildDashboard = lazy(() => import('./pages/child/Dashboard'))

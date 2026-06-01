@@ -12,7 +12,7 @@ import {
   IconButton,
   CircularProgress,
 } from '@mui/material'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from './motion-shim'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useAuthStore } from '../../store/authStore'

@@ -8,11 +8,14 @@ export default defineConfig({
     target: 'ES2020',
     rollupOptions: {
       output: {
+        // Only force react into a stable shared chunk. Forcing @mui/material into
+        // a single vendor-mui chunk defeated per-route splitting — every lazy
+        // page pulled the full ~95KB gz of MUI components used anywhere in the
+        // app. Letting Rollup split MUI naturally puts each lazy page on a
+        // diet (initial cost drops, page chunks share a smaller MUI core).
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-mui': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
           'vendor-query': ['@tanstack/react-query'],
-          'vendor-motion': ['framer-motion'],
         },
       },
     },
@@ -30,6 +33,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom', '@mui/material', '@tanstack/react-query', 'framer-motion'],
+    include: ['react', 'react-dom', 'react-router-dom', '@mui/material', '@tanstack/react-query'],
   },
 })
