@@ -49,16 +49,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-      # `npm ci` fails here because vitest@4 pulls optional native deps
-      # (@emnapi/core, esbuild platform variants) that only resolve to a
-      # full lock entry on the OS where `npm install` was run. The lock
-      # was generated on macOS — so Linux-only entries are missing and
-      # `npm ci` refuses to proceed. `npm install` walks the resolver on
-      # CI's Linux and grabs the matching optionals at install time. This
-      # is a test-only job; the deploy job still uses `npm ci` from
-      # scripts/deploy.sh on the server for reproducible production builds.
+          # No `cache: 'npm'` here on purpose: combined with `npm install`
+          # (not `npm ci`) the cache layer sometimes hands a corrupted
+          # state to the resolver and the install bails with
+          # "Invalid Version:". The install is fast enough without it (~5s).
+      # `npm ci` would fail here because vitest@4 pulls optional native
+      # deps (@emnapi/core, esbuild platform variants) that only resolve
+      # to a full lock entry on the OS where `npm install` was run. Our
+      # lock is generated on macOS — Linux entries are missing. `npm
+      # install` walks the resolver on CI's Linux and grabs whatever
+      # optionals it actually needs. This is a test-only job; the deploy
+      # job still goes through `npm ci --omit=optional` in
+      # scripts/deploy.sh on the server.
       - name: Install web deps
         working-directory: web
         run: npm install --no-audit --no-fund --no-save
