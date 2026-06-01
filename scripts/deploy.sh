@@ -46,7 +46,13 @@ git reset --hard "origin/$BRANCH"
 
 # ---- 2. Build ----
 echo "==> Installing and building web"
-(cd web && npm ci && npm run build)
+# `--omit=optional` skips optional native deps that vitest's transitive
+# tree carries (@emnapi/core, esbuild platform variants). The Mac-
+# generated lockfile doesn't record their Linux entries, so a plain
+# `npm ci` on the Linux server refuses with "Missing X from lock file".
+# We don't need any optional deps for the production build — vite + tsc
+# are regular devDependencies and stay installed.
+(cd web && npm ci --omit=optional && npm run build)
 
 echo "==> Installing and building backend (clean dist to avoid stale incremental cache)"
 (cd backend && npm ci && rm -rf dist tsconfig.tsbuildinfo && npm run build)
