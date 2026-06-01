@@ -68,12 +68,17 @@ jobs:
         #     native packages (@rollup/rollup-linux-{x64,arm64,riscv64}…).
         #     One of those (riscv64-gnu@4.61.0) has a broken manifest on
         #     npm — semver.gte() crashes inside arborist dedup with
-        #     "Invalid Version: ". We don't need it on x64 CI.
+        #     "Invalid Version: ". So we have to skip the optional set.
         #   --legacy-peer-deps: peer dep mismatch
         #     (react-router-dom@6 vs react@18 strict).
-        #   --no-save: test-only install; never mutate the committed
-        #     lockfile.
+        #   --no-save: test-only install; never mutate the committed lockfile.
         run: npm install --no-audit --no-fund --no-save --legacy-peer-deps --omit=optional
+      - name: Install rollup x64-gnu native binding
+        working-directory: web
+        # vitest -> vite -> rollup needs the matching native binding at
+        # runtime; --omit=optional skipped it. Re-add the one we actually
+        # need on x64 Linux CI explicitly.
+        run: npm install @rollup/rollup-linux-x64-gnu --no-save --no-audit --no-fund
       - name: Run web unit tests (vitest)
         working-directory: web
         run: npm test
