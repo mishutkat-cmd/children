@@ -1,16 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { FirestoreService } from '../firestore/firestore.service';
-
-type LedgerType = 'EARN' | 'SPEND' | 'BONUS' | 'PENALTY' | 'ADJUST';
-
-function computeBalanceDelta(type: LedgerType, amount: number): number {
-  const a = amount || 0;
-  if (type === 'EARN' || type === 'BONUS') return Math.abs(a);
-  if (type === 'SPEND' || type === 'PENALTY') return -Math.abs(a);
-  if (type === 'ADJUST') return a;
-  return 0;
-}
+import { computeBalanceDelta } from './balance-delta';
 
 /**
  * Daily safety-net for the denormalized pointsBalance.

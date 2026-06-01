@@ -2,23 +2,9 @@ import { Injectable } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { FirestoreService } from '../firestore/firestore.service';
 import { BadgesService } from '../badges/badges.service';
-// Enums заменены на строки для SQLite
-type LedgerType = 'EARN' | 'SPEND' | 'BONUS' | 'PENALTY' | 'ADJUST';
-type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
+import { LedgerType, computeBalanceDelta } from './balance-delta';
 
-/**
- * Map a ledger entry (type + raw amount) to the signed delta applied
- * to childProfiles.pointsBalance. Mirrors the legacy reducer in
- * updateChildBalance(); both functions must stay in sync or backfill
- * results will disagree with createEntry results.
- */
-function computeBalanceDelta(type: LedgerType, amount: number): number {
-  const a = amount || 0;
-  if (type === 'EARN' || type === 'BONUS') return Math.abs(a);
-  if (type === 'SPEND' || type === 'PENALTY') return -Math.abs(a);
-  if (type === 'ADJUST') return a;
-  return 0;
-}
+type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
 
 @Injectable()
 export class LedgerService {
