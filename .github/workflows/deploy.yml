@@ -61,16 +61,20 @@ jobs:
       # optionals it actually needs. This is a test-only job; the deploy
       # job still goes through `npm ci --omit=optional` in
       # scripts/deploy.sh on the server.
+      - name: Show env (debug)
+        working-directory: web
+        run: |
+          echo "node:"; node --version
+          echo "npm:";  npm --version
+          echo "lockfileVersion:"; node -e "console.log(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')).lockfileVersion)"
       - name: Install web deps
         working-directory: web
-        # --legacy-peer-deps: peer dep mismatch (react-router-dom@6 vs react@18 strict).
-        # --no-save: test-only install; never mutate the committed lockfile.
-        # Don't pipe through `tail` here — pipefail-less bash swallows
-        # npm's non-zero exit and we end up trying to run vitest from an
-        # empty node_modules (a previous version of this step did exactly
-        # that and the failure read as "vitest: not found" instead of
-        # what npm actually said).
         run: npm install --no-audit --no-fund --no-save --legacy-peer-deps
+      - name: Dump npm debug log on failure
+        if: failure()
+        run: |
+          ls -la /home/runner/.npm/_logs/ || true
+          tail -200 /home/runner/.npm/_logs/*-debug-0.log || true
       - name: Run web unit tests (vitest)
         working-directory: web
         run: npm test
