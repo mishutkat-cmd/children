@@ -238,21 +238,25 @@ export class ChildrenService {
             ? parseFloat(familySettings.conversionRate)
             : familySettings?.conversionRate) || 10;
 
-        // The frontend dashboard wants "how much has the child saved up
-        // towards this goal" and "how close are they (%)". The legacy
-        // implementation answered both from wishlist.moneySpent — but
-        // that field only grows when the parent marks a wishlist item
-        // delivered. Until then it's literally 0, so the parent dashboard
-        // showed "Собрано 0 ₴ · 0%" no matter how many points the child
-        // had actually accumulated.
+        // "Собрано" on the dashboard has two real contributors:
+        //   1. live pointsBalance — what the child currently has in
+        //      points, converted to cents at the family conversion rate;
+        //   2. wishlist.moneySpent on this item — money already physically
+        //      paid out for this goal via past exchanges
+        //      (ExchangesService.deliverExchange grows this field). That
+        //      money is no longer in pointsBalance but DID contribute to
+        //      the goal, so it must still count.
         //
-        // Same calculation as the frontend's favoriteWishProgress (in
-        // pages/parent/Home.tsx and pages/child/Dashboard.tsx) — keeping
-        // it consistent so both blocks agree.
+        // Cap at rewardCostCents so the progress bar / "Осталось" stay
+        // sane when the child is over-funded.
         const pointsBalance = profile?.pointsBalance || 0;
         const accumulatedCents = Math.round((pointsBalance / conversionRate) * 100);
+        const alreadyPaidCents = activeWishlistItem.moneySpent || 0;
         const rewardCostCents = Math.round((reward.costPoints / conversionRate) * 100);
-        const moneySpentOnThis = Math.min(accumulatedCents, rewardCostCents);
+        const moneySpentOnThis = Math.min(
+          accumulatedCents + alreadyPaidCents,
+          rewardCostCents,
+        );
         const remainingCents = Math.max(0, rewardCostCents - moneySpentOnThis);
         const progressPercent = rewardCostCents > 0
           ? Math.min(100, Math.round((moneySpentOnThis / rewardCostCents) * 100))
@@ -260,6 +264,8 @@ export class ChildrenService {
 
         wishlistGoal = {
           rewardGoal: reward,
+          // "Доступно" = what's still in the child's hand (current points,
+          // in cents). Not including alreadyPaidCents — that's been spent.
           availableMoneyCents: accumulatedCents,
           moneySpentOnThis,
           remainingCents,
