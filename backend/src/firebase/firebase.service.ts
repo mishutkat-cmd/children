@@ -109,37 +109,12 @@ export class FirebaseService implements OnModuleInit {
       this.firestore = admin.firestore();
       this.auth = admin.auth();
 
-      // Test connection (simple operation)
-      try {
-        // Try to get a collection (this will fail fast if permissions are wrong)
-        await this.firestore.collection('_test').limit(1).get();
-      } catch (testError: any) {
-        if (testError.code === 7 || testError.code === 'PERMISSION_DENIED') {
-          this.status = {
-            enabled: false,
-            reason: 'Firebase permission denied. Check IAM roles and Firestore rules.',
-            errorType: FirebaseErrorType.PERMISSION_DENIED,
-          };
-          this.logger.warn(`[Firebase] ${this.status.reason}`);
-          // Clear firestore/auth but don't throw
-          this.firestore = null;
-          this.auth = null;
-          return;
-        }
-        if (testError.code === 8 || testError.code === 'UNAVAILABLE' || testError.message?.includes('SERVICE_DISABLED')) {
-          this.status = {
-            enabled: false,
-            reason: 'Firebase service disabled. Enable Firestore API in GCP Console.',
-            errorType: FirebaseErrorType.SERVICE_DISABLED,
-          };
-          this.logger.warn(`[Firebase] ${this.status.reason}`);
-          this.firestore = null;
-          this.auth = null;
-          return;
-        }
-        // Other errors might be fine (e.g., network), just log
-        this.logger.debug(`[Firebase] Test query warning: ${testError.message}`);
-      }
+      // No synchronous test query here on purpose: a network round-trip to
+      // Firestore on boot can hang up to the gRPC deadline (~30s) when the
+      // host has DNS or egress hiccups, which previously blocked
+      // app.listen() for the same duration. Real errors (permission denied,
+      // service disabled) surface on the first actual request — same place
+      // they'd surface five seconds later anyway.
 
       this.status = {
         enabled: true,

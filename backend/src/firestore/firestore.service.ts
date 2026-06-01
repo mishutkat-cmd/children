@@ -13,23 +13,19 @@ export class FirestoreService implements OnModuleInit {
 
   constructor(private firebaseService: FirebaseService) {}
 
-  async onModuleInit() {
-    // Ждём инициализации Firebase (один раз, без спама в лог)
-    const maxAttempts = 60;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      this.firestore = this.firebaseService.getFirestore();
-      if (this.firestore) {
-        this.logger.log('[FirestoreService] ✅ Initialized successfully');
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    const status = this.firebaseService.getStatus();
-    if (!status.enabled) {
-      this.logger.error(`[FirestoreService] Firestore not initialized. Reason: ${status.reason || 'Unknown'}. Check Firebase credentials and enable Firestore API in GCP.`);
+  onModuleInit() {
+    // Nest dependency-resolution guarantees FirebaseService.onModuleInit
+    // already ran before this one (FirebaseService is injected via the
+    // constructor). The previous implementation slept up to 60 * 500 ms
+    // = 30 s waiting for it; that's what produced the boot-time stall.
+    // The collection() getter below also lazily resolves on first use,
+    // so it's safe if Firebase wasn't ready synchronously.
+    this.firestore = this.firebaseService.getFirestore();
+    if (this.firestore) {
+      this.logger.log('[FirestoreService] Initialized');
     } else {
-      this.logger.warn('[FirestoreService] Firestore not ready after waiting. Will retry on first use.');
+      const status = this.firebaseService.getStatus();
+      this.logger.warn(`[FirestoreService] Not ready at bootstrap (reason: ${status.reason || 'unknown'}); will retry on first use.`);
     }
   }
 
