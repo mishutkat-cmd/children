@@ -142,9 +142,11 @@ export class StreakService {
       streakState[ruleId] = state;
     }
 
-    // Сохраняем обновленное состояние
+    // Сохраняем обновленное состояние. Native Firestore map — readers
+    // remain backward-compatible via the typeof-string fallback, but new
+    // writes never store stringified JSON.
     await this.firestore.update('childProfiles', child.id, {
-      streakState: JSON.stringify(streakState),
+      streakState,
     });
 
     return bonuses;

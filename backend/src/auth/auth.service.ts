@@ -57,7 +57,7 @@ export class AuthService {
         avatarUrl: null, // При регистрации avatarUrl не передается
         pointsBalance: 0,
         moneyBalanceCents: 0,
-        streakState: JSON.stringify({}),
+        streakState: {},
       }, childProfileId);
     }
 

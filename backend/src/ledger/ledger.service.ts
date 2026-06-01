@@ -47,7 +47,7 @@ export class LedgerService {
         refType,
         refId: refId ?? null, // Firestore не принимает undefined
         amount,
-        metaJson: metaJson ? JSON.stringify(metaJson) : null,
+        metaJson: metaJson || null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };

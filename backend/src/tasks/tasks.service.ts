@@ -153,7 +153,7 @@ export class TasksService {
         category: dto.category || null,
         points: dto.points,
         frequency: dto.frequency,
-        daysOfWeek: dto.daysOfWeek ? JSON.stringify(dto.daysOfWeek) : null,
+        daysOfWeek: dto.daysOfWeek && dto.daysOfWeek.length > 0 ? dto.daysOfWeek : null,
         assignedTo: dto.assignedTo || 'ALL',
         requiresProof: dto.requiresProof || false,
         requiresParentApproval: dto.requiresParentApproval !== false, // По умолчанию true
@@ -222,7 +222,7 @@ export class TasksService {
       if (dto.points !== undefined) updateData.points = dto.points;
       if (dto.frequency !== undefined) updateData.frequency = dto.frequency;
       if (dto.daysOfWeek !== undefined) {
-        updateData.daysOfWeek = dto.daysOfWeek && dto.daysOfWeek.length > 0 ? JSON.stringify(dto.daysOfWeek) : null;
+        updateData.daysOfWeek = dto.daysOfWeek && dto.daysOfWeek.length > 0 ? dto.daysOfWeek : null;
       }
       if (dto.assignedTo !== undefined) updateData.assignedTo = dto.assignedTo || 'ALL';
       if (dto.requiresProof !== undefined) updateData.requiresProof = dto.requiresProof || false;

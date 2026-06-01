@@ -40,9 +40,11 @@ export class ChallengesService {
       imageUrl: dto.imageUrl || null,
       startDate: startDate,
       endDate: endDate,
-      ruleJson: JSON.stringify(dto.rule),
-      rewardJson: JSON.stringify(dto.reward),
-      participantsJson: JSON.stringify(dto.participants || []),
+      // Native Firestore types from the start — readers still tolerate
+      // the legacy stringified form via typeof checks.
+      ruleJson: dto.rule,
+      rewardJson: dto.reward,
+      participantsJson: dto.participants || [],
       penaltyEnabled: dto.penaltyEnabled || false,
       penaltyValue: dto.penaltyValue || 0,
       penaltyAfterDays: dto.penaltyAfterDays || 1,
@@ -240,9 +242,9 @@ export class ChallengesService {
     if (dto.imageUrl !== undefined) updateData.imageUrl = dto.imageUrl || null;
     if (dto.startDate) updateData.startDate = new Date(dto.startDate);
     if (dto.endDate) updateData.endDate = new Date(dto.endDate);
-    if (dto.rule) updateData.ruleJson = JSON.stringify(dto.rule);
-    if (dto.reward) updateData.rewardJson = JSON.stringify(dto.reward);
-    if (dto.participants) updateData.participantsJson = JSON.stringify(dto.participants);
+    if (dto.rule) updateData.ruleJson = dto.rule;
+    if (dto.reward) updateData.rewardJson = dto.reward;
+    if (dto.participants) updateData.participantsJson = dto.participants;
     if (dto.penaltyEnabled !== undefined) updateData.penaltyEnabled = dto.penaltyEnabled;
     if (dto.penaltyValue !== undefined) updateData.penaltyValue = dto.penaltyValue || 0;
     if (dto.status) updateData.status = dto.status;

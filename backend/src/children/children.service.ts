@@ -71,7 +71,7 @@ export class ChildrenService {
       avatarUrl: dto.avatarUrl || null, // Firestore не принимает undefined
       pointsBalance: 0,
       moneyBalanceCents: 0,
-      streakState: JSON.stringify({}),
+      streakState: {},
       selectedCharacterId: null, // По умолчанию нет выбранного персонажа
     }, profileId);
 
