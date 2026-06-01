@@ -81,17 +81,19 @@ export class CleanupService {
       }
     }
 
-    // -- 2. taskAssignments — pointing to non-existent tasks --
-    const allAssignments = await this.firestore.findMany('taskAssignments', {});
-    for (const a of allAssignments) {
-      if (a.taskId && !activeTaskIds.has(a.taskId) && !archivedTaskIds.has(a.taskId)) {
-        // Only count assignments tied to a task that no longer exists at all
+    // -- 2. taskAssignments — only those pointing to THIS family's tasks --
+    // Previously findMany('taskAssignments', {}) scanned globally and then
+    // anything whose taskId wasn't in OUR active/archived sets was deleted
+    // as "orphan" — which silently dropped other families' assignments.
+    // Now we only fetch assignments tied to this family's task ids.
+    const familyTaskIds = [...activeTaskIds, ...archivedTaskIds];
+    const familyAssignments = familyTaskIds.length
+      ? await this.firestore.findMany('taskAssignments', { taskId: { in: familyTaskIds } })
+      : [];
+    for (const a of familyAssignments) {
+      if (archivedTaskIds.has(a.taskId)) {
         counts.orphanedTaskAssignments++;
         if (apply) await this.firestore.delete('taskAssignments', a.id);
-      } else if (apply && archivedTaskIds.has(a.taskId)) {
-        // Also clean up assignments for tasks we are about to archive
-        counts.orphanedTaskAssignments++;
-        await this.firestore.delete('taskAssignments', a.id);
       }
     }
 
@@ -117,11 +119,13 @@ export class CleanupService {
     // wishlist.childId = childProfileId — фильтруем по семье через childProfiles
     const familyChildProfiles = await this.collectFamilyChildProfiles(familyId);
     const familyChildProfileIds = new Set(familyChildProfiles.map((p) => p.id));
+    const familyChildProfileIdsArr = Array.from(familyChildProfileIds);
     const familyChildUserIds = new Set(familyChildProfiles.map((p) => p.userId));
 
-    const allWishlistItems = await this.firestore.findMany('wishlist', {});
-    for (const w of allWishlistItems) {
-      if (!familyChildProfileIds.has(w.childId)) continue;
+    const familyWishlistItems = familyChildProfileIdsArr.length
+      ? await this.firestore.findMany('wishlist', { childId: { in: familyChildProfileIdsArr } })
+      : [];
+    for (const w of familyWishlistItems) {
       const rewardExists = activeRewardIds.has(w.rewardId);
       const rewardArchived = archivedRewardIds.has(w.rewardId);
       if (!rewardExists) {
@@ -137,9 +141,10 @@ export class CleanupService {
     }
 
     // -- 5. Completions — orphaned (taskId points to deleted/archived task) --
-    const allCompletions = await this.firestore.findMany('completions', {});
-    for (const c of allCompletions) {
-      if (!familyChildProfileIds.has(c.childId)) continue;
+    const familyCompletions = familyChildProfileIdsArr.length
+      ? await this.firestore.findMany('completions', { childId: { in: familyChildProfileIdsArr } })
+      : [];
+    for (const c of familyCompletions) {
       const taskGone = !activeTaskIds.has(c.taskId);
       if (taskGone) {
         counts.orphanedCompletions++;
@@ -163,21 +168,14 @@ export class CleanupService {
     // Soft-orphan rule: if refId is set and the referenced doc no longer exists,
     // we drop the ledger entry to keep balances consistent with reality.
     const allLedger = await this.firestore.findMany('ledgerEntries', { familyId });
-    for (const e of allLedger) {
-      if (!familyChildUserIds.has(e.childId)) continue;
-      if (!e.refId) continue; // manual bonus/penalty/decay without refId — keep
-      let exists = true;
-      if (e.refType === 'COMPLETION') {
-        // completion was just deleted in step 5? cross-check the active set after deletion
-        const c = await this.firestore.findFirst('completions', { id: e.refId });
-        exists = !!c;
-      } else if (e.refType === 'EXCHANGE') {
-        const ex = await this.firestore.findFirst('exchanges', { id: e.refId });
-        exists = !!ex;
-      } else if (e.refType === 'CHALLENGE') {
-        const ch = await this.firestore.findFirst('challenges', { id: e.refId });
-        exists = !!ch;
-      }
+    const ledgerCandidates = allLedger.filter(
+      (e: any) => familyChildUserIds.has(e.childId) && e.refId,
+    );
+    // Batch-fetch all referenced docs once per refType instead of N findFirst.
+    const existingByRefType = await this.lookupRefsByType(ledgerCandidates);
+    for (const e of ledgerCandidates) {
+      const set = existingByRefType.get(e.refType);
+      const exists = set ? set.has(e.refId) : true; // unknown refType → keep
       if (!exists) {
         counts.orphanedLedgerEntries++;
         if (apply) await this.firestore.delete('ledgerEntries', e.id);
@@ -187,19 +185,11 @@ export class CleanupService {
 
     // -- 8. Notifications — orphaned refs --
     const allNotifications = await this.firestore.findMany('notifications', { familyId });
-    for (const n of allNotifications) {
-      if (!n.refId || !n.refType) continue;
-      let exists = true;
-      if (n.refType === 'COMPLETION') {
-        const c = await this.firestore.findFirst('completions', { id: n.refId });
-        exists = !!c;
-      } else if (n.refType === 'BADGE') {
-        const cb = await this.firestore.findFirst('childBadges', { id: n.refId });
-        exists = !!cb;
-      } else if (n.refType === 'CHALLENGE') {
-        const ch = await this.firestore.findFirst('challenges', { id: n.refId });
-        exists = !!ch;
-      }
+    const notifCandidates = allNotifications.filter((n: any) => n.refId && n.refType);
+    const existingByRefTypeN = await this.lookupRefsByType(notifCandidates);
+    for (const n of notifCandidates) {
+      const set = existingByRefTypeN.get(n.refType);
+      const exists = set ? set.has(n.refId) : true;
       if (!exists) {
         counts.orphanedNotifications++;
         if (apply) await this.firestore.delete('notifications', n.id);
@@ -209,9 +199,10 @@ export class CleanupService {
     // -- 9. childBadges — orphaned (badge no longer exists) --
     const familyBadges = await this.firestore.findMany('badges', { familyId });
     const familyBadgeIds = new Set(familyBadges.map((b: any) => b.id));
-    const allChildBadges = await this.firestore.findMany('childBadges', {});
-    for (const cb of allChildBadges) {
-      if (!familyChildProfileIds.has(cb.childId)) continue;
+    const familyChildBadges = familyChildProfileIdsArr.length
+      ? await this.firestore.findMany('childBadges', { childId: { in: familyChildProfileIdsArr } })
+      : [];
+    for (const cb of familyChildBadges) {
       if (!familyBadgeIds.has(cb.badgeId)) {
         counts.orphanedChildBadges++;
         if (apply) await this.firestore.delete('childBadges', cb.id);
@@ -234,15 +225,47 @@ export class CleanupService {
     return { ...counts, affectedChildren: Array.from(affectedChildren) };
   }
 
+  // Map refType -> collection name. Keep in sync with refType values used
+  // by ledgerEntries and notifications.
+  private static readonly REF_TYPE_TO_COLLECTION: Record<string, string> = {
+    COMPLETION: 'completions',
+    EXCHANGE: 'exchanges',
+    CHALLENGE: 'challenges',
+    BADGE: 'childBadges',
+  };
+
+  /**
+   * For a batch of records that each carry { refType, refId }, return one
+   * Set<refId> per refType containing only the IDs that actually exist in
+   * the corresponding collection. Replaces per-record findFirst loops.
+   */
+  private async lookupRefsByType(records: Array<{ refType?: string; refId?: string }>) {
+    const byType = new Map<string, Set<string>>();
+    for (const r of records) {
+      if (!r.refType || !r.refId) continue;
+      if (!byType.has(r.refType)) byType.set(r.refType, new Set());
+      byType.get(r.refType)!.add(r.refId);
+    }
+    const existingByType = new Map<string, Set<string>>();
+    await Promise.all(
+      Array.from(byType.entries()).map(async ([refType, ids]) => {
+        const collection = CleanupService.REF_TYPE_TO_COLLECTION[refType];
+        if (!collection || ids.size === 0) return;
+        const docs = await this.firestore.findMany(collection, { id: { in: Array.from(ids) } });
+        existingByType.set(refType, new Set(docs.map((d: any) => d.id)));
+      }),
+    );
+    return existingByType;
+  }
+
   private async collectFamilyChildProfiles(familyId: string) {
     const children = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
-    const profiles: Array<{ id: string; userId: string }> = [];
-    for (const child of children) {
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: child.id });
-      for (const p of childProfiles) {
-        profiles.push({ id: p.id, userId: child.id });
-      }
-    }
-    return profiles;
+    const childIds = children.map((c: any) => c.id);
+    if (childIds.length === 0) return [];
+    // One batched fetch via `in` chunks instead of N sequential findMany calls.
+    const allProfiles = await this.firestore.findMany('childProfiles', {
+      userId: { in: childIds },
+    });
+    return allProfiles.map((p: any) => ({ id: p.id, userId: p.userId }));
   }
 }

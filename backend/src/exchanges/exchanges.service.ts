@@ -130,69 +130,63 @@ export class ExchangesService {
 
   async findAll(childId: string, familyId: string) {
     const exchanges = await this.firestore.findMany('exchanges', { childId, familyId }, { createdAt: 'desc' });
-    
-    const result = [];
-    for (const exchange of exchanges) {
-      const reward = exchange.rewardId ? await this.firestore.findFirst('rewards', { id: exchange.rewardId }) : null;
-      result.push({
+    return Promise.all(
+      exchanges.map(async (exchange) => ({
         ...exchange,
-        rewardGoal: reward,
-      });
-    }
-    
-    return result;
+        rewardGoal: exchange.rewardId
+          ? await this.firestore.findFirst('rewards', { id: exchange.rewardId })
+          : null,
+      })),
+    );
   }
 
   async findHistory(familyId: string) {
     const exchanges = await this.firestore.findMany('exchanges', { familyId }, { createdAt: 'desc' });
-    const cashExchanges = exchanges.filter((e: any) => e.cashCents != null && (e.status === 'APPROVED' || e.status === 'DELIVERED'));
-
-    const result = [];
-    for (const exchange of cashExchanges) {
-      let childProfile = await this.firestore.findFirst('childProfiles', { id: exchange.childId });
-      if (!childProfile) {
-        childProfile = await this.firestore.findFirst('childProfiles', { userId: exchange.childId });
-      }
-      result.push({
-        ...exchange,
-        childName: childProfile?.name || 'Ребенок',
-      });
-    }
-    return result;
+    const cashExchanges = exchanges.filter(
+      (e: any) => e.cashCents != null && (e.status === 'APPROVED' || e.status === 'DELIVERED'),
+    );
+    return Promise.all(
+      cashExchanges.map(async (exchange) => {
+        const childProfile = await this.resolveChildProfile(exchange.childId);
+        return { ...exchange, childName: childProfile?.name || 'Ребенок' };
+      }),
+    );
   }
 
   async findPending(familyId: string) {
-    try {
-      const exchanges = await this.firestore.findMany('exchanges', { familyId, status: 'PENDING' }, { createdAt: 'desc' });
-      
-      const result = [];
-      for (const exchange of exchanges) {
+    const exchanges = await this.firestore.findMany(
+      'exchanges',
+      { familyId, status: 'PENDING' },
+      { createdAt: 'desc' },
+    );
+    const enriched = await Promise.all(
+      exchanges.map(async (exchange) => {
         try {
-          const reward = exchange.rewardId ? await this.firestore.findFirst('rewards', { id: exchange.rewardId }) : null;
-          
-          // childId в exchange может быть userId или childProfileId
-          let childProfile = null;
-          if (exchange.childId) {
-            const childProfileByUserId = await this.firestore.findFirst('childProfiles', { userId: exchange.childId });
-            const childProfileById = await this.firestore.findFirst('childProfiles', { id: exchange.childId });
-            childProfile = childProfileByUserId || childProfileById;
-          }
-          
-          result.push({
-            ...exchange,
-            rewardGoal: reward,
-            child: childProfile,
-          });
+          const [reward, childProfile] = await Promise.all([
+            exchange.rewardId
+              ? this.firestore.findFirst('rewards', { id: exchange.rewardId })
+              : Promise.resolve(null),
+            this.resolveChildProfile(exchange.childId),
+          ]);
+          return { ...exchange, rewardGoal: reward, child: childProfile };
         } catch (error: any) {
           console.error('[ExchangesService] Error processing exchange:', error.message);
+          return null;
         }
-      }
+      }),
+    );
+    return enriched.filter((e): e is NonNullable<typeof e> => e !== null);
+  }
 
-      return result;
-    } catch (error: any) {
-      console.error('[ExchangesService] Error in findPending:', error.message);
-      throw error;
-    }
+  // exchange.childId carries either childProfile.id or userId, depending on
+  // the historical call site — probe both shapes in parallel.
+  private async resolveChildProfile(childId?: string) {
+    if (!childId) return null;
+    const [byId, byUserId] = await Promise.all([
+      this.firestore.findFirst('childProfiles', { id: childId }),
+      this.firestore.findFirst('childProfiles', { userId: childId }),
+    ]);
+    return byId || byUserId || null;
   }
 
   async approve(id: string, familyId: string) {

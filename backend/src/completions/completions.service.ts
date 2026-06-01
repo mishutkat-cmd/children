@@ -292,71 +292,63 @@ export class CompletionsService {
       });
     }
     
-    // Add task for each completion
-    const result = [];
-    for (const completion of filtered) {
-      const task = await this.firestore.findFirst('tasks', { id: completion.taskId });
-      result.push({
+    // Enrich every completion with its task — in parallel.
+    return Promise.all(
+      filtered.map(async (completion) => ({
         ...completion,
-        task,
-      });
-    }
-    
-    return result;
+        task: await this.firestore.findFirst('tasks', { id: completion.taskId }),
+      })),
+    );
   }
 
   async findPending(familyId: string) {
-    try {
-      console.log('[CompletionsService] findPending called for familyId:', familyId);
-      const completions = await this.firestore.findMany('completions', { familyId, status: 'PENDING' }, { createdAt: 'desc' });
-      console.log('[CompletionsService] Found pending completions:', completions.length);
+    const completions = await this.firestore.findMany(
+      'completions',
+      { familyId, status: 'PENDING' },
+      { createdAt: 'desc' },
+    );
 
-      const result = [];
-      for (const completion of completions) {
+    // Enrich every pending completion in parallel; per-item lookups
+    // (task + childProfile + user) also run concurrently. Previously this
+    // was sequential for-of doing up to 4 round-trips per item, ie ~120
+    // sequential reads for 30 pending completions on the parent dashboard.
+    return Promise.all(
+      completions.map(async (completion) => {
         try {
-          const task = await this.firestore.findFirst('tasks', { id: completion.taskId });
-          
-          // childId в completion это childProfileId, но проверим оба варианта
-          let childProfile = null;
-          let user = null;
-          if (completion.childId) {
-            const childProfileById = await this.firestore.findFirst('childProfiles', { id: completion.childId });
-            const childProfileByUserId = await this.firestore.findFirst('childProfiles', { userId: completion.childId });
-            childProfile = childProfileById || childProfileByUserId;
-            
-            // Получаем user для получения login и email
-            if (childProfile) {
-              user = await this.firestore.findFirst('users', { id: childProfile.userId, familyId });
-            }
-          }
-          
-          // Формируем объект child с полной информацией
+          const [task, childProfile] = await Promise.all([
+            this.firestore.findFirst('tasks', { id: completion.taskId }),
+            this.resolveChildProfile(completion.childId),
+          ]);
+          const user = childProfile
+            ? await this.firestore.findFirst('users', { id: childProfile.userId, familyId })
+            : null;
           const childData: any = {
             ...childProfile,
-            childProfile: childProfile, // Для совместимости с фронтендом
-            user: user, // Добавляем user для получения login
+            childProfile,
+            user,
             login: user?.login || null,
             email: user?.email || null,
-            // Добавляем name напрямую для удобства
             name: childProfile?.name || user?.login || null,
           };
-          
-          result.push({
-            ...completion,
-            task,
-            child: childData,
-          });
+          return { ...completion, task, child: childData };
         } catch (error: any) {
           console.error('[CompletionsService] Error processing completion:', error.message);
-          // Продолжаем обработку других completions
+          return null;
         }
-      }
-      return result;
-    } catch (error: any) {
-      console.error('[CompletionsService] Error in findPending:', error.message);
-      console.error('[CompletionsService] Error stack:', error.stack);
-      throw error;
-    }
+      }),
+    ).then((rows) => rows.filter((r): r is NonNullable<typeof r> => r !== null));
+  }
+
+  // completions.childId can hold either a childProfile.id or a userId
+  // depending on the call site — historical inconsistency. Resolve in one
+  // parallel probe instead of two sequential awaits.
+  private async resolveChildProfile(childId?: string) {
+    if (!childId) return null;
+    const [byId, byUserId] = await Promise.all([
+      this.firestore.findFirst('childProfiles', { id: childId }),
+      this.firestore.findFirst('childProfiles', { userId: childId }),
+    ]);
+    return byId || byUserId || null;
   }
 
   async approve(id: string, familyId: string) {

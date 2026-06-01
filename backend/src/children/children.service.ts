@@ -19,18 +19,12 @@ export class ChildrenService {
 
   async findAll(familyId: string) {
     const users = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
-    const result = [];
-    
-    for (const user of users) {
-      const profiles = await this.firestore.findMany('childProfiles', { userId: user.id });
-      const childProfile = profiles.length > 0 ? profiles[0] : null;
-      result.push({
-        ...user,
-        childProfile,
-      });
-    }
-    
-    return result;
+    return Promise.all(
+      users.map(async (user) => {
+        const profiles = await this.firestore.findMany('childProfiles', { userId: user.id });
+        return { ...user, childProfile: profiles[0] ?? null };
+      }),
+    );
   }
 
   async findOne(id: string, familyId: string) {

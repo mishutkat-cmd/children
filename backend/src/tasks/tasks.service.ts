@@ -62,46 +62,36 @@ export class TasksService {
         }
       }
       
-      // Добавляем taskAssignments для каждой задачи
-      const result = [];
-      for (const task of filteredTasks) {
-        try {
-          const assignments = await this.firestore.findMany('taskAssignments', { taskId: task.id });
-          const assignmentsWithChildren = [];
-          for (const assignment of assignments) {
-            try {
-              const childProfile = await this.firestore.findFirst('childProfiles', { id: assignment.childId });
-              assignmentsWithChildren.push({
-                ...assignment,
-                child: childProfile,
-              });
-            } catch (error: any) {
-              if (process.env.NODE_ENV === 'development') {
-                console.error('[TasksService] Error loading child profile for assignment:', error.message);
-              }
-              // Продолжаем без child profile
-              assignmentsWithChildren.push({
-                ...assignment,
-                child: null,
-              });
+      // Enrich tasks with their assignments — and each assignment with its
+      // child profile — fully in parallel. Previously this was a nested
+      // sequential for-of, taking O(tasks × assignments) round-trips.
+      const result = await Promise.all(
+        filteredTasks.map(async (task) => {
+          try {
+            const assignments = await this.firestore.findMany('taskAssignments', { taskId: task.id });
+            const assignmentsWithChildren = await Promise.all(
+              assignments.map(async (assignment) => {
+                try {
+                  const childProfile = await this.firestore.findFirst('childProfiles', { id: assignment.childId });
+                  return { ...assignment, child: childProfile };
+                } catch (error: any) {
+                  if (process.env.NODE_ENV === 'development') {
+                    console.error('[TasksService] Error loading child profile for assignment:', error.message);
+                  }
+                  return { ...assignment, child: null };
+                }
+              }),
+            );
+            return { ...task, taskAssignments: assignmentsWithChildren };
+          } catch (error: any) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error('[TasksService] Error processing task:', error.message);
             }
+            return { ...task, taskAssignments: [] };
           }
-          result.push({
-            ...task,
-            taskAssignments: assignmentsWithChildren,
-          });
-        } catch (error: any) {
-          if (process.env.NODE_ENV === 'development') {
-            console.error('[TasksService] Error processing task:', error.message);
-          }
-          // Продолжаем обработку других задач
-          result.push({
-            ...task,
-            taskAssignments: [],
-          });
-        }
-      }
-      
+        }),
+      );
+
       return result;
     } catch (error: any) {
       // Всегда логируем ошибки
