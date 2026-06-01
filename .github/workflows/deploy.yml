@@ -63,7 +63,12 @@ jobs:
       # scripts/deploy.sh on the server.
       - name: Install web deps
         working-directory: web
-        run: npm install --no-audit --no-fund --no-save
+        # --legacy-peer-deps: react-router-dom@6 peer range doesn't cleanly
+        # satisfy strict react@18.x in npm-11 resolution; same flag we use
+        # locally to regenerate the lockfile.
+        # --no-save: this is a test-only install; never mutate the committed
+        # lockfile from CI.
+        run: npm install --no-audit --no-fund --no-save --legacy-peer-deps
       - name: Run web unit tests (vitest)
         working-directory: web
         run: npm test
