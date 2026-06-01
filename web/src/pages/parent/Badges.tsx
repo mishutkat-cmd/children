@@ -26,6 +26,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import ImageIcon from '@mui/icons-material/Image'
 import { api } from '../../lib/api'
+import { parseJsonField } from '../../lib/parseJsonField'
 import Layout from '../../components/Layout'
 import { colors } from '../../theme'
 import { motion } from 'framer-motion'
@@ -172,13 +173,12 @@ export default function ParentBadges() {
       let conditionChallengeId = ''
       
       if (badge.conditionJson) {
-        try {
-          const condition = JSON.parse(badge.conditionJson)
+        // Accepts both legacy stringified blob and native Firestore object.
+        const condition = parseJsonField<any>(badge.conditionJson, null)
+        if (condition) {
           conditionType = condition.type || 'NONE'
           conditionValue = condition.value || 0
           conditionChallengeId = condition.challengeId || ''
-        } catch (e) {
-          console.error('Failed to parse conditionJson:', e)
         }
       }
       

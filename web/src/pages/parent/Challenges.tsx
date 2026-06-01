@@ -32,6 +32,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import { api } from '../../lib/api'
+import { parseJsonField } from '../../lib/parseJsonField'
 import Layout from '../../components/Layout'
 import { colors } from '../../theme'
 import { motion } from 'framer-motion'
@@ -187,9 +188,9 @@ export default function ParentChallenges() {
   const handleOpen = (challenge?: any) => {
     if (challenge) {
       setEditingChallenge(challenge)
-      const rule = JSON.parse(challenge.ruleJson)
-      const reward = JSON.parse(challenge.rewardJson)
-      const participants = JSON.parse(challenge.participantsJson)
+      const rule = parseJsonField<any>(challenge.ruleJson, {})
+      const reward = parseJsonField<any>(challenge.rewardJson, {})
+      const participants = parseJsonField<string[]>(challenge.participantsJson, [])
       setFormData({
         title: challenge.title,
         description: challenge.description || '',
@@ -337,9 +338,9 @@ export default function ParentChallenges() {
         <Grid container spacing={2}>
           {challenges && challenges.length > 0 ? (
             challenges.map((challenge: any) => {
-              const rule = JSON.parse(challenge.ruleJson)
-              const reward = JSON.parse(challenge.rewardJson)
-              const participants = JSON.parse(challenge.participantsJson)
+              const rule = parseJsonField<any>(challenge.ruleJson, {})
+              const reward = parseJsonField<any>(challenge.rewardJson, {})
+              const participants = parseJsonField<string[]>(challenge.participantsJson, [])
               const isActive =
                 challenge.status === 'ACTIVE' &&
                 new Date(challenge.startDate) <= new Date() &&
