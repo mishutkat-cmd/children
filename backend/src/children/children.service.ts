@@ -313,236 +313,162 @@ export class ChildrenService {
 
   async getChildrenStats(familyId: string, dateString?: string) {
     try {
-      console.log('[ChildrenService] getChildrenStats called:', { familyId, dateString });
       const children = await this.findAll(familyId);
-      console.log('[ChildrenService] Found children:', children.length);
-      const stats = [];
 
-      // Определяем целевую дату (выбранная дата или сегодня)
-      let targetDate: Date;
+      // Parse target date once (fallback to today on bad input).
+      let targetDate = new Date();
       if (dateString) {
-        try {
-          targetDate = new Date(dateString + 'T00:00:00');
-          if (isNaN(targetDate.getTime())) {
-            console.warn('[ChildrenService] Invalid date string, using today:', dateString);
-            targetDate = new Date();
-          }
-        } catch (dateErr) {
-          console.warn('[ChildrenService] Error parsing date, using today:', dateErr.message);
-          targetDate = new Date();
-        }
-      } else {
-        targetDate = new Date();
+        const parsed = new Date(dateString + 'T00:00:00');
+        if (!isNaN(parsed.getTime())) targetDate = parsed;
       }
       targetDate.setHours(0, 0, 0, 0);
       const nextDay = new Date(targetDate);
       nextDay.setDate(nextDay.getDate() + 1);
 
-    for (const child of children) {
-      try {
-        const childId = child.id;
-        const childProfileId = child.childProfile?.id;
+      // Compute every child's stats concurrently. Was sequential for-of;
+      // a family with 3 children meant 3x getSummary-level cascades back
+      // to back. Now each child's reads also fan out inside the helper.
+      const stats = await Promise.all(
+        children.map((child) => this.computeChildStats(child, targetDate, nextDay)),
+      );
+      return stats.filter((s): s is NonNullable<typeof s> => s !== null);
+    } catch (error: any) {
+      console.error('[ChildrenService] Error in getChildrenStats:', error?.message);
+      return [];
+    }
+  }
 
-        if (!childProfileId) {
-          console.warn('[ChildrenService] Child without profile, skipping:', childId);
-          continue;
-        }
+  /** Per-child block extracted from getChildrenStats so it can be Promise.all'd. */
+  private async computeChildStats(child: any, targetDate: Date, nextDay: Date) {
+    const childId = child.id;
+    const childProfileId = child.childProfile?.id;
+    if (!childProfileId) return null;
 
-      // Пересчитываем баланс из ledger entries для актуальности
-      try {
-        console.log('[ChildrenService] Recalculating balance for stats:', { childId, childProfileId });
-        await this.ledgerService.updateChildBalance(childId);
-        // Обновляем childProfile после пересчета
-        const updatedProfile = await this.firestore.findFirst('childProfiles', { id: childProfileId });
-        if (updatedProfile) {
-          child.childProfile = updatedProfile;
+    try {
+      // Refresh balance, then re-read profile — chained so the rest of
+      // the reads can still go in parallel.
+      const balanceRefreshChain = this.ledgerService
+        .updateChildBalance(childId)
+        .then(() => this.firestore.findFirst('childProfiles', { id: childProfileId }))
+        .catch((err: any) => {
+          console.error('[ChildrenService] Error recalculating balance in stats:', err?.message);
+          return null;
+        });
+
+      const [refreshedProfile, allEntries, completedCompletions] = await Promise.all([
+        balanceRefreshChain,
+        this.firestore.findMany('ledgerEntries', { childId }),
+        this.firestore.findMany('completions', { childId: childProfileId, status: 'APPROVED' }),
+      ]);
+      if (refreshedProfile) child.childProfile = refreshedProfile;
+
+      // Aggregate earned/spent in one pass.
+      let totalPointsEarned = 0;
+      let totalPointsSpent = 0;
+      const earnedEntries: any[] = [];
+      for (const e of allEntries) {
+        const amt = e.amount || 0;
+        if (e.type === 'EARN' || e.type === 'BONUS') {
+          totalPointsEarned += amt;
+          earnedEntries.push(e);
+        } else if (e.type === 'SPEND') {
+          totalPointsSpent += Math.abs(amt);
         }
-      } catch (error: any) {
-        console.error('[ChildrenService] Error recalculating balance in stats:', error.message);
-        // Продолжаем с текущим балансом
       }
 
-      // Получаем общее количество заработанных баллов (EARN + BONUS)
-      const allEarnedEntries = await this.firestore.findMany('ledgerEntries', { childId });
-      const earnedEntries = allEarnedEntries.filter(e => e.type === 'EARN' || e.type === 'BONUS');
-      const totalPointsEarned = earnedEntries.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+      // Target-date balance: batch-fetch the referenced completions
+      // instead of one findFirst per entry.
+      const refIds = Array.from(
+        new Set(
+          earnedEntries
+            .filter((e: any) => e.refType === 'COMPLETION' && e.refId)
+            .map((e: any) => e.refId as string),
+        ),
+      );
+      const refCompletions = refIds.length
+        ? await this.firestore.findMany('completions', { id: { in: refIds } })
+        : [];
+      const completionsById = new Map<string, any>(refCompletions.map((c: any) => [c.id, c]));
 
-      // Рассчитываем баллы за выбранную дату для сытости
-      // ВАЖНО: Используем дату выполнения задания (performedAt), а не дату создания ledger entry
+      const toDate = (v: any): Date => (v?.toDate ? v.toDate() : new Date(v));
+      const inWindow = (d: Date) => d >= targetDate && d < nextDay;
+      const dayMatch = (d: Date) => {
+        const m = new Date(d);
+        m.setHours(0, 0, 0, 0);
+        return m.getTime() === targetDate.getTime();
+      };
+
       let todayPointsBalance = 0;
-      try {
-        // Фильтруем записи за выбранную дату по дате выполнения задания
-        const targetDateEntries = [];
-        for (const entry of allEarnedEntries) {
-          // Если это запись для completion, получаем дату выполнения из completion
-          if (entry.refType === 'COMPLETION' && entry.refId) {
-            try {
-              const completion = await this.firestore.findFirst('completions', { id: entry.refId });
-              if (completion) {
-                // Проверяем, что completion имеет статус APPROVED (только подтвержденные задания считаются)
-                if (completion.status !== 'APPROVED') {
-                  continue;
-                }
-
-                if (completion.performedAt) {
-                  const performedAt = completion.performedAt?.toDate 
-                    ? completion.performedAt.toDate() 
-                    : new Date(completion.performedAt);
-                  performedAt.setHours(0, 0, 0, 0);
-                  
-                  // Проверяем, что выполнение было в выбранную дату
-                  if (performedAt.getTime() === targetDate.getTime()) {
-                    targetDateEntries.push(entry);
-                  }
-                } else {
-                  // Если нет performedAt, используем createdAt как fallback
-                  if (entry.createdAt) {
-                    try {
-                      const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-                      if (!isNaN(createdAt.getTime()) && createdAt >= targetDate && createdAt < nextDay) {
-                        targetDateEntries.push(entry);
-                      }
-                    } catch (dateErr) {
-                      console.warn('[ChildrenService] Invalid createdAt date:', entry.createdAt);
-                    }
-                  }
-                }
-              } else {
-                // Если не удалось найти completion, используем createdAt как fallback
-                if (entry.createdAt) {
-                  try {
-                    const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-                    if (!isNaN(createdAt.getTime()) && createdAt >= targetDate && createdAt < nextDay) {
-                      targetDateEntries.push(entry);
-                    }
-                  } catch (dateErr) {
-                    console.warn('[ChildrenService] Invalid createdAt date:', entry.createdAt);
-                  }
-                }
-              }
-            } catch (err: any) {
-              // Если не удалось найти completion, используем createdAt как fallback
-              if (entry.createdAt) {
-                try {
-                  const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-                  if (!isNaN(createdAt.getTime()) && createdAt >= targetDate && createdAt < nextDay) {
-                    targetDateEntries.push(entry);
-                  }
-                } catch (dateErr) {
-                  console.warn('[ChildrenService] Invalid createdAt date:', entry.createdAt);
-                }
-              }
-            }
-          } else {
-            // Для других типов записей (BONUS и т.д.) используем createdAt
-            if (entry.createdAt) {
-              try {
-                const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-                if (!isNaN(createdAt.getTime()) && createdAt >= targetDate && createdAt < nextDay) {
-                  targetDateEntries.push(entry);
-                }
-              } catch (dateErr) {
-                console.warn('[ChildrenService] Invalid createdAt date:', entry.createdAt);
-              }
+      for (const entry of earnedEntries) {
+        const amt = entry.amount || 0;
+        if (entry.refType === 'COMPLETION' && entry.refId) {
+          const completion = completionsById.get(entry.refId);
+          if (completion) {
+            if (completion.status !== 'APPROVED') continue;
+            if (completion.performedAt) {
+              if (dayMatch(toDate(completion.performedAt))) todayPointsBalance += amt;
+              continue;
             }
           }
+          // Missing completion or no performedAt → fall back to createdAt window.
         }
-
-        todayPointsBalance = targetDateEntries.reduce((sum, entry) => {
-          return sum + (entry.amount || 0);
-        }, 0);
-
-        console.log('[ChildrenService] Points balance for date:', {
-          userId: childId,
-          date: dateString || 'today',
-          todayPointsBalance,
-          entriesCount: targetDateEntries.length,
-        });
-      } catch (error: any) {
-        console.error('[ChildrenService] Error calculating date points balance in stats:', error.message);
-        todayPointsBalance = 0;
+        if (entry.createdAt) {
+          const created = toDate(entry.createdAt);
+          if (!isNaN(created.getTime()) && inWindow(created)) todayPointsBalance += amt;
+        }
       }
 
-      // Получаем общее количество потраченных баллов (SPEND)
-      const spentEntries = allEarnedEntries.filter(e => e.type === 'SPEND');
-      const totalPointsSpent = Math.abs(spentEntries.reduce((sum, entry) => sum + (entry.amount || 0), 0));
-
-      // Получаем общее количество денег из childProfile.moneyBalanceCents (накапливается при каждой конвертации)
-      // Или считаем из exchanges если moneyBalanceCents еще не установлен (для обратной совместимости)
+      // Money earned (legacy fallback for old profiles where
+      // moneyBalanceCents was never backfilled).
       let totalMoneyEarned = child.childProfile?.moneyBalanceCents || 0;
-      
-      // Если moneyBalanceCents не установлен, рассчитываем из exchanges (для старых данных)
       if (totalMoneyEarned === 0) {
         const allExchanges = await this.firestore.findMany('exchanges', { childId });
-        const moneyExchanges = allExchanges.filter(e => 
-          e.cashCents != null && (e.status === 'APPROVED' || e.status === 'DELIVERED')
-        );
-        totalMoneyEarned = moneyExchanges.reduce((sum, exchange) => sum + (exchange.cashCents || 0), 0);
-        
-        // Обновляем moneyBalanceCents для будущих запросов
-        if (totalMoneyEarned > 0 && childProfileId) {
-          await this.firestore.update('childProfiles', childProfileId, {
-            moneyBalanceCents: totalMoneyEarned,
-          }).catch(err => console.warn('[ChildrenService] Failed to update moneyBalanceCents:', err.message));
+        totalMoneyEarned = allExchanges
+          .filter((e: any) => e.cashCents != null && (e.status === 'APPROVED' || e.status === 'DELIVERED'))
+          .reduce((sum: number, e: any) => sum + (e.cashCents || 0), 0);
+        if (totalMoneyEarned > 0) {
+          this.firestore
+            .update('childProfiles', childProfileId, { moneyBalanceCents: totalMoneyEarned })
+            .catch((err: any) =>
+              console.warn('[ChildrenService] Failed to update moneyBalanceCents:', err?.message),
+            );
         }
       }
 
-      // Получаем количество выполненных заданий (APPROVED)
-      const completedCompletions = await this.firestore.findMany('completions', { childId: childProfileId, status: 'APPROVED' });
-      const completedTasksCount = completedCompletions.length;
-
-      // Получаем максимальный streak из streakState
+      // Max streak from streakState blob.
       let maxStreak = 0;
-      if (child.childProfile?.streakState) {
+      const rawStreak = child.childProfile?.streakState;
+      if (rawStreak) {
         try {
-          const streakState = typeof child.childProfile.streakState === 'string' 
-            ? JSON.parse(child.childProfile.streakState) 
-            : child.childProfile.streakState;
-          for (const ruleId in streakState) {
-            const state = streakState[ruleId];
-            if (state.currentStreak > maxStreak) {
-              maxStreak = state.currentStreak;
-            }
+          const parsed = typeof rawStreak === 'string' ? JSON.parse(rawStreak) : rawStreak;
+          for (const ruleId in parsed) {
+            const s = parsed[ruleId];
+            if (s?.currentStreak > maxStreak) maxStreak = s.currentStreak;
           }
-        } catch (e) {
-          // Invalid JSON, ignore
+        } catch {
+          // Invalid blob — leave maxStreak at 0.
         }
       }
 
-      stats.push({
+      return {
         childId,
         childProfileId,
         childName: child.childProfile?.name || child.login,
         totalPointsEarned,
         totalPointsSpent,
         currentBalance: child.childProfile?.pointsBalance || 0,
-        todayPointsBalance, // Баллы за сегодня для расчета сытости
-        totalMoneyEarned: totalMoneyEarned / 100, // Конвертируем центы в рубли
+        todayPointsBalance,
+        totalMoneyEarned: totalMoneyEarned / 100,
         totalMoneyEarnedCents: totalMoneyEarned,
-        completedTasksCount,
+        completedTasksCount: completedCompletions.length,
         maxStreak,
+      };
+    } catch (childError: any) {
+      console.error('[ChildrenService] Error processing child stats:', {
+        childId,
+        error: childError?.message,
       });
-      } catch (childError: any) {
-        console.error('[ChildrenService] Error processing child stats:', {
-          childId: child?.id,
-          error: childError.message,
-          stack: childError.stack,
-        });
-        // Продолжаем обработку других детей даже если один вызвал ошибку
-      }
-    }
-
-    console.log('[ChildrenService] getChildrenStats completed:', { statsCount: stats.length });
-    return stats;
-    } catch (error: any) {
-      console.error('[ChildrenService] Error in getChildrenStats:', {
-        familyId,
-        dateString,
-        error: error.message,
-        stack: error.stack,
-      });
-      // Возвращаем пустой массив при ошибке, чтобы фронтенд не упал
-      return [];
+      return null;
     }
   }
 
