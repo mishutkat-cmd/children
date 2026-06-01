@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from './config/config.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { FirestoreModule } from './firestore/firestore.module';
@@ -20,6 +22,8 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // Default soft global limit; tight per-route limits on /auth/* via @Throttle().
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     ConfigModule,
     FirebaseModule,
     FirestoreModule,
@@ -37,5 +41,6 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
     BadgesModule,
     NotificationsModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

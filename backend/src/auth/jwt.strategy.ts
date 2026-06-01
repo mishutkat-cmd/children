@@ -17,9 +17,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private configService: ConfigService,
     private firestore: FirestoreService,
   ) {
-    const jwtSecret = configService.get<string>('JWT_SECRET') || 'your-secret-key-change-in-production';
-    if (!configService.get<string>('JWT_SECRET')) {
-      console.warn('[JwtStrategy] JWT_SECRET not found in environment, using default. Please set JWT_SECRET in .env file!');
+    const jwtSecret = configService.get<string>('JWT_SECRET');
+    if (!jwtSecret) {
+      throw new Error('[JwtStrategy] JWT_SECRET is required (refusing to boot with a default secret)');
     }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

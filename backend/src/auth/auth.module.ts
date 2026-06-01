@@ -18,9 +18,9 @@ import { LedgerModule } from '../ledger/ledger.module';
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const jwtSecret = config.get<string>('JWT_SECRET') || 'your-secret-key-change-in-production';
-        if (!config.get<string>('JWT_SECRET')) {
-          console.warn('[AuthModule] JWT_SECRET not found in environment, using default. Please set JWT_SECRET in .env file!');
+        const jwtSecret = config.get<string>('JWT_SECRET');
+        if (!jwtSecret) {
+          throw new Error('[AuthModule] JWT_SECRET is required (refusing to boot with a default secret)');
         }
         return {
           secret: jwtSecret,

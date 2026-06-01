@@ -1,4 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Patch, Get, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto, ChildPinLoginDto, UpdateProfileDto, ChangePasswordDto } from './dto/auth.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -9,6 +10,7 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async register(@Body() dto: RegisterDto) {
     try {
       console.log('[AuthController] Register attempt:', { email: dto.email, login: dto.login, role: dto.role });
@@ -24,21 +26,22 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async login(@Body() dto: LoginDto) {
     try {
-      console.log('[AuthController] Login attempt:', JSON.stringify(dto));
+      console.log('[AuthController] Login attempt:', { loginOrEmail: dto.loginOrEmail });
       const result = await this.authService.login(dto);
       console.log('[AuthController] Login successful');
       return result;
     } catch (error: any) {
       console.error('[AuthController] Login error:', error.message);
-      console.error('[AuthController] Error stack:', error.stack);
       throw error;
     }
   }
 
   @Post('child-pin-login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async childPinLogin(@Body() dto: ChildPinLoginDto) {
     return this.authService.childPinLogin(dto);
   }
@@ -48,7 +51,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async updateProfile(@User() user: RequestUser, @Body() dto: UpdateProfileDto) {
     try {
-      console.log('[AuthController] updateProfile called:', { userId: user.userId, dto });
+      console.log('[AuthController] updateProfile called:', { userId: user.userId });
       const result = await this.authService.updateProfile(user.userId, dto);
       console.log('[AuthController] updateProfile successful');
       return result;

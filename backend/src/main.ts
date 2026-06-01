@@ -29,8 +29,17 @@ async function bootstrap() {
     }),
   );
 
+  // CORS: explicit allowlist from env. `origin: true` would reflect any Origin —
+  // combined with `credentials: true` that lets any site send authed requests.
+  const corsOriginsRaw = process.env.CORS_ORIGINS || '';
+  const corsOrigins = corsOriginsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (corsOrigins.length === 0) {
+    console.warn('[CORS] CORS_ORIGINS not set — refusing all cross-origin requests with credentials.');
+  } else {
+    console.log('[CORS] Allowed origins:', corsOrigins.join(', '));
+  }
   app.enableCors({
-    origin: true,
+    origin: corsOrigins,
     credentials: true,
   });
 

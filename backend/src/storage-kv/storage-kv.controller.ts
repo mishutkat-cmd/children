@@ -12,15 +12,13 @@ import {
 import { FirebaseService } from '../firebase/firebase.service';
 
 const KV_COLLECTION = '_kv';
-const STORAGE_API_KEY = process.env.STORAGE_API_KEY;
 
-function requireApiKey(): boolean {
-  return Boolean(STORAGE_API_KEY);
-}
-
+// Fail closed: if STORAGE_API_KEY is unset we refuse, instead of leaving the
+// KV endpoints world-accessible.
 function checkApiKey(xApiKey: string | undefined): boolean {
-  if (!requireApiKey()) return true;
-  return xApiKey === STORAGE_API_KEY;
+  const expected = process.env.STORAGE_API_KEY;
+  if (!expected) return false;
+  return xApiKey === expected;
 }
 
 @Controller('api/v1/storage')

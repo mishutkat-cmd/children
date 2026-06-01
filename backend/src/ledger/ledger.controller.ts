@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, UseGuards, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { LedgerService } from './ledger.service';
 import { CleanupService } from './cleanup.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { User } from '../common/decorators/user.decorator';
+import { User, RequestUser } from '../common/decorators/user.decorator';
 import { FirestoreService } from '../firestore/firestore.service';
 
 @Controller('ledger')
@@ -15,6 +15,38 @@ export class LedgerController {
     private firestore: FirestoreService,
     private cleanupService: CleanupService,
   ) {}
+
+  /**
+   * Resolve a path param (child userId or childProfile.id) into the canonical
+   * userId, and enforce that the caller is allowed to touch it:
+   *   - PARENT: child must be in caller's familyId
+   *   - CHILD:  must be the caller themselves
+   * Throws Forbidden/NotFound on mismatch — never silently exposes other families' data.
+   */
+  private async resolveChildAndCheckAccess(rawChildId: string, user: RequestUser): Promise<string> {
+    let userId: string | null = null;
+    const byUserId = await this.firestore.findFirst('childProfiles', { userId: rawChildId });
+    if (byUserId) {
+      userId = rawChildId;
+    } else {
+      const byProfileId = await this.firestore.findFirst('childProfiles', { id: rawChildId });
+      if (!byProfileId) throw new NotFoundException('Child not found');
+      const raw = (byProfileId as any).userId;
+      userId = typeof raw === 'string' ? raw : (raw && typeof raw.id === 'string' ? raw.id : null);
+    }
+    if (!userId) throw new NotFoundException('Child not found');
+
+    if (user.role === 'PARENT') {
+      const inFamily = await this.firestore.findFirst('users', { id: userId, familyId: user.familyId });
+      if (!inFamily) throw new ForbiddenException('Child is not in your family');
+      return userId;
+    }
+    if (user.role === 'CHILD') {
+      if (userId !== user.userId) throw new ForbiddenException('Access denied');
+      return userId;
+    }
+    throw new ForbiddenException('Access denied');
+  }
 
   /** Ручное начисление или штраф баллов ребёнку (только родитель). type: 'bonus' | 'penalty'. */
   @Post('bonus')
@@ -63,19 +95,11 @@ export class LedgerController {
   }
 
   @Get('diagnostics/:childId')
-  async getDiagnostics(@Param('childId') childId: string, @User() user: any) {
-    console.log('[LedgerController] Diagnostics requested for child:', childId);
-    
-    // Получаем childProfile для проверки userId
-    const childProfile = await this.firestore.findFirst('childProfiles', { userId: childId });
-    if (!childProfile) {
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
-      if (!childProfileById) {
-        return { error: 'Child not found' };
-      }
-    }
-    
-    const userId = childProfile?.userId || childId;
+  @UseGuards(RolesGuard)
+  @Roles('PARENT')
+  async getDiagnostics(@Param('childId') childId: string, @User() user: RequestUser) {
+    const userId = await this.resolveChildAndCheckAccess(childId, user);
+    const childProfile = await this.firestore.findFirst('childProfiles', { userId });
     const childProfileId = childProfile?.id || childId;
     
     // Получаем все ledger entries
@@ -157,23 +181,11 @@ export class LedgerController {
   }
 
   @Post('fix-balance/:childId')
-  async fixBalance(@Param('childId') childId: string, @User() user: any) {
-    console.log('[LedgerController] Fix balance requested for child:', childId);
-    
-    // Получаем childProfile для проверки userId
-    const childProfile = await this.firestore.findFirst('childProfiles', { userId: childId });
-    if (!childProfile) {
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
-      if (!childProfileById) {
-        return { error: 'Child not found' };
-      }
-    }
-    
-    const userId = childProfile?.userId || childId;
-    
-    // Пересчитываем баланс
+  @UseGuards(RolesGuard)
+  @Roles('PARENT')
+  async fixBalance(@Param('childId') childId: string, @User() user: RequestUser) {
+    const userId = await this.resolveChildAndCheckAccess(childId, user);
     const newBalance = await this.ledgerService.updateChildBalance(userId);
-    
     return {
       success: true,
       childId: userId,
@@ -183,7 +195,9 @@ export class LedgerController {
   }
 
   @Post('fix-all-balances')
-  async fixAllBalances(@User() user: any) {
+  @UseGuards(RolesGuard)
+  @Roles('PARENT')
+  async fixAllBalances(@User() user: RequestUser) {
     console.log('[LedgerController] Fix all balances requested for family:', user.familyId);
     
     // Получаем всех детей из семьи пользователя
@@ -298,19 +312,10 @@ export class LedgerController {
   }
 
   @Post('remove-duplicates/:childId')
-  async removeDuplicates(@Param('childId') childId: string, @User() user: any) {
-    console.log('[LedgerController] Remove duplicates requested for child:', childId);
-    
-    // Получаем childProfile для проверки userId
-    const childProfile = await this.firestore.findFirst('childProfiles', { userId: childId });
-    if (!childProfile) {
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
-      if (!childProfileById) {
-        return { error: 'Child not found' };
-      }
-    }
-    
-    const userId = childProfile?.userId || childId;
+  @UseGuards(RolesGuard)
+  @Roles('PARENT')
+  async removeDuplicates(@Param('childId') childId: string, @User() user: RequestUser) {
+    const userId = await this.resolveChildAndCheckAccess(childId, user);
     
     // Получаем все ledger entries
     const allEntries = await this.firestore.findMany('ledgerEntries', { childId: userId });
@@ -446,16 +451,8 @@ export class LedgerController {
   }
 
   @Get('child/:childId')
-  async getChildLedger(@Param('childId') childId: string, @User() user: any) {
-    const childProfile = await this.firestore.findFirst('childProfiles', { userId: childId });
-    if (!childProfile) {
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
-      if (!childProfileById) {
-        return { error: 'Child not found' };
-      }
-    }
-    
-    const userId = childProfile?.userId || childId;
+  async getChildLedger(@Param('childId') childId: string, @User() user: RequestUser) {
+    const userId = await this.resolveChildAndCheckAccess(childId, user);
     return this.ledgerService.getChildLedger(userId);
   }
 }
