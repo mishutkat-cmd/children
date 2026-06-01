@@ -150,6 +150,26 @@ export default function ParentHome() {
   const { data: childBadges } = useChildBadges(selectedChildId)
   const { data: childSummary } = useChildSummary(selectedChildId || '')
 
+  // Курс конвертации (баллы → деньги) из настроек семьи.
+  // Используется во всех расчётах прогресса целей.
+  const { data: motivationSettings } = useQuery({
+    queryKey: ['motivation-settings'],
+    queryFn: async () => {
+      try {
+        const response = await api.get('/motivation/settings')
+        return response.data
+      } catch {
+        return { conversionRate: 10 }
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const conversionRate = (() => {
+    const raw = motivationSettings?.conversionRate
+    const num = typeof raw === 'string' ? parseFloat(raw) : raw
+    return num && num > 0 ? num : 10
+  })()
+
   // Челленджи для главной страницы
   const { data: challengesData } = useQuery({
     queryKey: ['challenges', 'home'],
@@ -351,10 +371,10 @@ export default function ParentHome() {
         }
       }
       
-      const conversionRate = 10 // 10 баллов = 1 гривна
+      // Используем курс из настроек семьи, как и бэкенд для goalProgress.
       const costPoints = favoriteWish.rewardGoal.costPoints || 0
       const costMoneyCents = convertPointsToCents(costPoints, conversionRate)
-      
+
       // Используем текущий баланс ребенка (в баллах) как доступные средства
       const currentBalance = selectedChild?.currentBalance || 0
       const availableMoneyCents = convertPointsToCents(currentBalance, conversionRate)
@@ -390,7 +410,7 @@ export default function ParentHome() {
         progressPercent: 0,
       }
     }
-  }, [favoriteWish, selectedChild])
+  }, [favoriteWish, selectedChild, conversionRate])
 
   // Безопасный объект цели для избранного желания (всегда объект или null) — для рендера без доступа к вложенным полям
   const favoriteWishGoalSafe = useMemo(() => {
@@ -1027,6 +1047,7 @@ export default function ParentHome() {
             <PriorityGoalCard
               goal={childSummary.activeGoal}
               progress={childSummary.goalProgress || { current: 0, target: 0, percentage: 0 }}
+              conversionRate={conversionRate}
             />
           </motion.div>
         )}
@@ -1056,7 +1077,7 @@ export default function ParentHome() {
                 ⭐ Избранное желание
               </Typography>
             </Box>
-            <PriorityGoalCard goal={favoriteWishGoalSafe} progress={favoriteWishProgress} />
+            <PriorityGoalCard goal={favoriteWishGoalSafe} progress={favoriteWishProgress} conversionRate={conversionRate} />
           </motion.div>
         )}
 
