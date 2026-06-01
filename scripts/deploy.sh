@@ -46,13 +46,13 @@ git reset --hard "origin/$BRANCH"
 
 # ---- 2. Build ----
 echo "==> Installing and building web"
-# `--omit=optional`: skips optional native deps not pinned for Linux in
-# the macOS-generated lockfile (legacy from the vitest@4 attempt; less
-# of an issue with vitest@3 but cheap defensive armor).
 # `--legacy-peer-deps`: react-router-dom@6 peer range doesn't cleanly
 # satisfy strict react@18 in npm-11 resolution; matches how the lockfile
-# was generated locally.
-(cd web && npm ci --omit=optional --legacy-peer-deps && npm run build)
+# was generated locally. The broken-manifest workaround for
+# @rollup/rollup-linux-riscv64-gnu now lives as a package.json
+# `overrides` entry, so `npm ci` no longer needs --omit=optional and the
+# runtime rollup binding for the actual build target is installed.
+(cd web && npm ci --legacy-peer-deps && npm run build)
 
 echo "==> Installing and building backend (clean dist to avoid stale incremental cache)"
 (cd backend && npm ci && rm -rf dist tsconfig.tsbuildinfo && npm run build)

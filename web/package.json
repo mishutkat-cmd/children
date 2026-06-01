@@ -34,5 +34,8 @@
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
     "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "@rollup/rollup-linux-riscv64-gnu": "npm:@rollup/rollup-linux-x64-gnu@4.61.0"
   }
 }
