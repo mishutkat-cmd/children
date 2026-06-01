@@ -5,6 +5,7 @@ import { DecayService } from '../motivation/decay.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { StorageService } from '../firebase/storage.service';
 import { CreateChildDto, UpdateChildDto, CreateParentDto } from './dto/children.dto';
+import { getCached, setCached } from '../common/cache/family-settings-cache';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
@@ -16,6 +17,14 @@ export class ChildrenService {
     private ledgerService: LedgerService,
     private storageService: StorageService,
   ) {}
+
+  private async getFamilySettingsCached(familyId: string): Promise<any | null> {
+    const cached = getCached(familyId);
+    if (cached !== undefined) return cached;
+    const value = await this.firestore.findFirst('familySettings', { familyId });
+    setCached(familyId, value);
+    return value;
+  }
 
   async findAll(familyId: string) {
     const users = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
@@ -108,317 +117,166 @@ export class ChildrenService {
     const child = await this.findOne(childId, familyId);
     const profile = child.childProfile;
     const childProfileId = profile?.id;
-    const userId = child.id; // userId для ledger
+    const userId = child.id;
 
-    // Пересчитываем баланс из ledger entries, чтобы убедиться, что он актуален
-    try {
-      // Логирование только в development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[ChildrenService] Recalculating balance for child:', { userId, childProfileId });
-      }
-      await this.ledgerService.updateChildBalance(userId);
-      // Обновляем profile после пересчета
-      const updatedProfile = await this.firestore.findFirst('childProfiles', { id: childProfileId });
-      if (updatedProfile) {
-        Object.assign(profile, updatedProfile);
-      }
-    } catch (error: any) {
-      console.error('[ChildrenService] Error recalculating balance:', error.message);
-      // Не прерываем выполнение, используем текущий баланс
-    }
-
-    // Рассчитываем баллы за сегодня для сытости
-    // ВАЖНО: Используем дату выполнения задания (performedAt), а не дату создания ledger entry
-    let todayPointsBalance = 0;
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      // Получаем все ledger entries
-      const allEntries = await this.firestore.findMany('ledgerEntries', { childId: userId });
-      
-      // Фильтруем записи за сегодня по дате выполнения задания (performedAt из completion)
-      const todayEntries = [];
-      for (const entry of allEntries) {
-        // Пропускаем записи, которые не EARN или BONUS
-        if (entry.type !== 'EARN' && entry.type !== 'BONUS') {
-          continue;
-        }
-
-        // Если это запись для completion, получаем дату выполнения из completion
-        if (entry.refType === 'COMPLETION' && entry.refId) {
-          try {
-            const completion = await this.firestore.findFirst('completions', { id: entry.refId });
-            if (completion) {
-              // Проверяем, что completion имеет статус APPROVED (только подтвержденные задания считаются)
-              if (completion.status !== 'APPROVED') {
-                console.log('[ChildrenService] Skipping completion - not approved:', {
-                  completionId: entry.refId,
-                  status: completion.status,
-                });
-                continue;
-              }
-
-              if (completion.performedAt) {
-                const performedAt = completion.performedAt?.toDate 
-                  ? completion.performedAt.toDate() 
-                  : new Date(completion.performedAt);
-                performedAt.setHours(0, 0, 0, 0);
-                
-                // Проверяем, что выполнение было сегодня
-                if (performedAt.getTime() === today.getTime()) {
-                  todayEntries.push(entry);
-                  console.log('[ChildrenService] Added entry for today:', {
-                    entryId: entry.id,
-                    amount: entry.amount,
-                    performedAt: performedAt.toISOString(),
-                  });
-                } else {
-                  console.log('[ChildrenService] Entry not for today:', {
-                    entryId: entry.id,
-                    performedAt: performedAt.toISOString(),
-                    today: today.toISOString(),
-                  });
-                }
-              } else {
-                console.warn('[ChildrenService] Completion has no performedAt:', entry.refId);
-                // Если нет performedAt, используем createdAt как fallback
-                const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-                if (createdAt >= today && createdAt < tomorrow) {
-                  todayEntries.push(entry);
-                }
-              }
-            } else {
-              console.warn('[ChildrenService] Completion not found:', entry.refId);
-              // Если не удалось найти completion, используем createdAt как fallback
-              const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-              if (createdAt >= today && createdAt < tomorrow) {
-                todayEntries.push(entry);
-              }
-            }
-          } catch (err: any) {
-            console.error('[ChildrenService] Error getting completion:', err.message);
-            // Если не удалось найти completion, используем createdAt как fallback
-            const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-            if (createdAt >= today && createdAt < tomorrow) {
-              todayEntries.push(entry);
-            }
-          }
-        } else {
-          // Для других типов записей (BONUS и т.д.) используем createdAt
-          const createdAt = entry.createdAt?.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt);
-          if (createdAt >= today && createdAt < tomorrow) {
-            todayEntries.push(entry);
-          }
-        }
-      }
-
-      todayPointsBalance = todayEntries.reduce((sum, entry) => {
-        return sum + (entry.amount || 0);
-      }, 0);
-
-      console.log('[ChildrenService] Today points balance:', {
-        userId,
-        todayPointsBalance,
-        todayEntriesCount: todayEntries.length,
+    // updateChildBalance reads every ledger entry for this child and writes
+    // pointsBalance back to the profile. It's expensive but the previous
+    // implementation awaited it sequentially, then re-read the profile, then
+    // ran today-balance which read all ledger entries AGAIN. We now:
+    //   (a) fire every independent read in parallel,
+    //   (b) chain "balance recompute" with "profile re-read" inside Promise.all
+    //       so the rest of the dashboard data isn't blocked on it.
+    const balanceRefreshChain = this.ledgerService
+      .updateChildBalance(userId)
+      .then(() => this.firestore.findFirst('childProfiles', { id: childProfileId }))
+      .catch((err: any) => {
+        console.error('[ChildrenService] Error recalculating balance:', err?.message);
+        return null;
       });
-    } catch (error: any) {
-      console.error('[ChildrenService] Error calculating today points balance:', error.message);
-      // Используем 0, если не удалось рассчитать
-      todayPointsBalance = 0;
-    }
 
-    // Get recent completions
-    const allCompletions = await this.firestore.findMany('completions', { childId: childProfileId, status: 'APPROVED' }, { performedAt: 'desc' }, 10);
-    const recentCompletions = [];
-    for (const completion of allCompletions) {
-      const task = await this.firestore.findFirst('tasks', { id: completion.taskId });
-      recentCompletions.push({
+    const [
+      refreshedProfile,
+      allLedgerEntries,
+      recentApproved,
+      pendingCompletionsList,
+      pendingExchangesList,
+      streakStateData,
+      decayStatus,
+      allWishlistItems,
+      character,
+      familySettings,
+    ] = await Promise.all([
+      balanceRefreshChain,
+      this.firestore.findMany('ledgerEntries', { childId: userId }),
+      this.firestore.findMany(
+        'completions',
+        { childId: childProfileId, status: 'APPROVED' },
+        { performedAt: 'desc' },
+        10,
+      ),
+      this.firestore.findMany('completions', { childId: childProfileId, status: 'PENDING' }),
+      this.firestore.findMany('exchanges', { childId, status: 'PENDING' }),
+      this.streakService.getStreakState(childId),
+      this.decayService.getDecayStatus(childId, familyId),
+      childProfileId
+        ? this.firestore.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' })
+        : Promise.resolve([] as any[]),
+      profile?.selectedCharacterId
+        ? this.firestore.findFirst('characters', { id: profile.selectedCharacterId, familyId })
+        : Promise.resolve(null),
+      this.getFamilySettingsCached(familyId),
+    ]);
+
+    if (refreshedProfile) Object.assign(profile, refreshedProfile);
+
+    // Today balance: batch-fetch the completions referenced by EARN/BONUS
+    // entries in ONE `id: in` query instead of N findFirst calls.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const earnEntries = allLedgerEntries.filter(
+      (e: any) => e.type === 'EARN' || e.type === 'BONUS',
+    );
+    const refIdsForCompletion = Array.from(
+      new Set(
+        earnEntries
+          .filter((e: any) => e.refType === 'COMPLETION' && e.refId)
+          .map((e: any) => e.refId as string),
+      ),
+    );
+    const refIdCompletions = refIdsForCompletion.length
+      ? await this.firestore.findMany('completions', { id: { in: refIdsForCompletion } })
+      : [];
+    const completionsById = new Map<string, any>(refIdCompletions.map((c: any) => [c.id, c]));
+
+    const toDate = (v: any): Date =>
+      v?.toDate ? v.toDate() : new Date(v);
+    const isToday = (d: Date) => {
+      const m = new Date(d);
+      m.setHours(0, 0, 0, 0);
+      return m.getTime() === today.getTime();
+    };
+
+    const todayPointsBalance = earnEntries.reduce((sum: number, entry: any) => {
+      if (entry.refType === 'COMPLETION' && entry.refId) {
+        const completion = completionsById.get(entry.refId);
+        if (!completion) {
+          // missing completion → fall back to ledger createdAt window
+          const created = toDate(entry.createdAt);
+          return created >= today && created < tomorrow ? sum + (entry.amount || 0) : sum;
+        }
+        if (completion.status !== 'APPROVED') return sum;
+        if (!completion.performedAt) {
+          const created = toDate(entry.createdAt);
+          return created >= today && created < tomorrow ? sum + (entry.amount || 0) : sum;
+        }
+        return isToday(toDate(completion.performedAt)) ? sum + (entry.amount || 0) : sum;
+      }
+      const created = toDate(entry.createdAt);
+      return created >= today && created < tomorrow ? sum + (entry.amount || 0) : sum;
+    }, 0);
+
+    // Recent approved completions — enrich with task in parallel.
+    const recentCompletions = await Promise.all(
+      recentApproved.map(async (completion: any) => ({
         ...completion,
-        task,
-      });
-    }
+        task: await this.firestore.findFirst('tasks', { id: completion.taskId }),
+      })),
+    );
 
-    // Get pending completions count
-    const pendingCompletionsList = await this.firestore.findMany('completions', { childId: childProfileId, status: 'PENDING' });
     const pendingCompletions = pendingCompletionsList.length;
-
-    // Get pending exchanges count
-    const pendingExchangesList = await this.firestore.findMany('exchanges', { childId, status: 'PENDING' });
     const pendingExchanges = pendingExchangesList.length;
 
-    // Get streak state
-    const streakStateData = await this.streakService.getStreakState(childId);
-    // Преобразуем в формат, ожидаемый фронтендом
-    const streakState = streakStateData?.streaks && streakStateData.streaks.length > 0
-      ? streakStateData.streaks
-      : { currentStreak: streakStateData?.currentStreak || 0 };
+    // Streak state shape compatibility.
+    const streakState =
+      streakStateData?.streaks && streakStateData.streaks.length > 0
+        ? streakStateData.streaks
+        : { currentStreak: streakStateData?.currentStreak || 0 };
 
-    // Get decay status
-    const decayStatus = await this.decayService.getDecayStatus(childId, familyId);
+    // Pick active wishlist item: isFavorite > showOnDashboard > first available.
+    const isTruthy = (v: any) => v === true || v === 'true' || v === 1 || v === '1';
+    const available = (item: any) => !item.isPurchased && item.status !== 'COMPLETED';
+    const activeWishlistItem =
+      allWishlistItems.find((i: any) => isTruthy(i.isFavorite) && available(i)) ||
+      allWishlistItems.find((i: any) => isTruthy(i.showOnDashboard) && available(i)) ||
+      allWishlistItems.find(available) ||
+      null;
 
-    // Get active wishlist goal (priority: isFavorite=true > showOnDashboard=true > first priority, not purchased)
-    // ВАЖНО: в коллекции wishlist поле childId — это childProfileId, а не userId. Для ребёнка getSummary вызывается с user.userId, поэтому запрашиваем по childProfileId.
-    const allWishlistItems = childProfileId
-      ? await this.firestore.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' })
-      : [];
-    console.log('[ChildrenService] All wishlist items:', allWishlistItems.length, { childId, childProfileId });
-    
-    // Логируем все элементы для отладки
-    if (allWishlistItems.length > 0) {
-      console.log('[ChildrenService] All wishlist items details:', JSON.stringify(allWishlistItems.map(item => ({
-        id: item.id,
-        isFavorite: item.isFavorite,
-        isFavoriteType: typeof item.isFavorite,
-        isFavoriteRaw: item.isFavorite,
-        showOnDashboard: item.showOnDashboard,
-        isPurchased: item.isPurchased,
-        status: item.status,
-        priority: item.priority,
-        rewardId: item.rewardId,
-      })), null, 2));
-    } else {
-      console.log('[ChildrenService] No wishlist items found for childProfileId:', childProfileId);
-    }
-    
-    // Сначала ищем желание с isFavorite=true (приоритет выше)
-    let activeWishlistItem = null;
-    for (const item of allWishlistItems) {
-      // Проверяем все возможные варианты true
-      const hasIsFavorite = item.isFavorite === true || item.isFavorite === 'true' || item.isFavorite === 1 || item.isFavorite === '1';
-      const notPurchased = !item.isPurchased;
-      const notCompleted = item.status !== 'COMPLETED';
-      const matches = hasIsFavorite && notPurchased && notCompleted;
-      
-      console.log('[ChildrenService] Checking item for isFavorite:', {
-        id: item.id,
-        isFavorite: item.isFavorite,
-        isFavoriteType: typeof item.isFavorite,
-        hasIsFavorite,
-        notPurchased,
-        notCompleted,
-        matches,
-      });
-      
-      if (matches) {
-        activeWishlistItem = item;
-        console.log('[ChildrenService] Found activeWishlistItem with isFavorite=true:', {
-          id: item.id,
-          rewardId: item.rewardId,
-        });
-        break;
-      }
-    }
-    
-    // Если нет желания с isFavorite=true, ищем с showOnDashboard=true
-    if (!activeWishlistItem) {
-      console.log('[ChildrenService] No item with isFavorite=true, checking showOnDashboard');
-      activeWishlistItem = allWishlistItems.find(item => {
-        const hasShowOnDashboard = item.showOnDashboard === true || item.showOnDashboard === 'true' || item.showOnDashboard === 1;
-        const notPurchased = !item.isPurchased;
-        const notCompleted = item.status !== 'COMPLETED';
-        return hasShowOnDashboard && notPurchased && notCompleted;
-      });
-    }
-    
-    // Если нет желания с showOnDashboard=true, берем самое приоритетное
-    if (!activeWishlistItem) {
-      console.log('[ChildrenService] No item with showOnDashboard=true, using first priority');
-      activeWishlistItem = allWishlistItems.find(item => !item.isPurchased && item.status !== 'COMPLETED');
-    }
-    
-    if (activeWishlistItem) {
-      console.log('[ChildrenService] Active wishlist item found:', {
-        id: activeWishlistItem.id,
-        isFavorite: activeWishlistItem.isFavorite,
-        showOnDashboard: activeWishlistItem.showOnDashboard,
-        rewardId: activeWishlistItem.rewardId,
-        isPurchased: activeWishlistItem.isPurchased,
-        status: activeWishlistItem.status,
-      });
-    } else {
-      console.log('[ChildrenService] No active wishlist item found');
-    }
-    
-    // Формируем данные для активного желания
-    let wishlistGoal = null;
-    let availableMoneyCents = 0;
-    
+    let wishlistGoal: any = null;
     if (activeWishlistItem) {
       const reward = await this.firestore.findFirst('rewards', { id: activeWishlistItem.rewardId });
       if (reward) {
-        // Получаем курс конвертации
-        let conversionRate = 10;
-        try {
-          const familySettings = await this.firestore.findFirst('familySettings', { familyId });
-          if (familySettings?.conversionRate) {
-            conversionRate = typeof familySettings.conversionRate === 'string' 
-              ? parseFloat(familySettings.conversionRate) 
-              : familySettings.conversionRate;
-          }
-        } catch (error: any) {
-          console.warn('[ChildrenService] Failed to get familySettings:', error.message);
-        }
-        
-        // Вычисляем общую сумму денег ребенка
+        const conversionRate =
+          (typeof familySettings?.conversionRate === 'string'
+            ? parseFloat(familySettings.conversionRate)
+            : familySettings?.conversionRate) || 10;
+
         const totalMoneyEarnedCents = profile?.moneyBalanceCents || 0;
-        
-        // Вычисляем потраченные деньги на предыдущие товары (с меньшим приоритетом)
-        let totalSpentOnPrevious = 0;
-        for (const item of allWishlistItems) {
-          if (item.priority < activeWishlistItem.priority && item.moneySpent) {
-            totalSpentOnPrevious += item.moneySpent || 0;
-          }
-        }
-        
-        // Доступные деньги = общие деньги - потраченные на предыдущие товары
-        availableMoneyCents = Math.max(0, totalMoneyEarnedCents - totalSpentOnPrevious);
-        
-        // Стоимость товара в центах
+        const totalSpentOnPrevious = allWishlistItems
+          .filter((i: any) => i.priority < activeWishlistItem.priority && i.moneySpent)
+          .reduce((s: number, i: any) => s + (i.moneySpent || 0), 0);
+        const availableMoneyCents = Math.max(0, totalMoneyEarnedCents - totalSpentOnPrevious);
+
         const rewardCostCents = Math.round((reward.costPoints / conversionRate) * 100);
-        
-        // Уже потрачено на этот товар
         const moneySpentOnThis = activeWishlistItem.moneySpent || 0;
-        
-        // Осталось собрать
         const remainingCents = Math.max(0, rewardCostCents - moneySpentOnThis);
-        
-        wishlistGoal = { 
+
+        wishlistGoal = {
           rewardGoal: reward,
           availableMoneyCents,
           moneySpentOnThis,
           remainingCents,
           progressPercent: Math.min(100, Math.round((moneySpentOnThis / rewardCostCents) * 100)),
         };
-        console.log('[ChildrenService] WishlistGoal created:', {
-          rewardTitle: reward.title,
-          rewardId: reward.id,
-          costPoints: reward.costPoints,
-          costMoneyCents: rewardCostCents,
-          moneySpentOnThis,
-          remainingCents,
-          availableMoneyCents,
-          progressPercent: wishlistGoal.progressPercent,
-        });
-      } else {
-        console.log('[ChildrenService] Reward not found for activeWishlistItem:', activeWishlistItem.rewardId);
       }
-    } else {
-      console.log('[ChildrenService] No activeWishlistItem, wishlistGoal will be null');
     }
 
-    // Get selected character information
-    let character = null;
-    if (profile?.selectedCharacterId) {
-      character = await this.firestore.findFirst('characters', { id: profile.selectedCharacterId, familyId });
-    }
-
-    const result = {
+    return {
       profile,
       pointsBalance: profile?.pointsBalance || 0,
-      todayPointsBalance, // Баллы за сегодня для расчета сытости
+      todayPointsBalance,
       recentCompletions,
       pendingCompletions,
       pendingExchanges,
@@ -429,36 +287,18 @@ export class ChildrenService {
         ? {
             current: profile?.pointsBalance || 0,
             target: wishlistGoal.rewardGoal.costPoints,
-            percentage: Math.min(100, Math.round(((profile?.pointsBalance || 0) / wishlistGoal.rewardGoal.costPoints) * 100)),
+            percentage: Math.min(
+              100,
+              Math.round(((profile?.pointsBalance || 0) / wishlistGoal.rewardGoal.costPoints) * 100),
+            ),
             availableMoneyCents: wishlistGoal.availableMoneyCents || 0,
             moneySpentOnThis: wishlistGoal.moneySpentOnThis || 0,
             remainingCents: wishlistGoal.remainingCents || 0,
             progressPercent: wishlistGoal.progressPercent || 0,
           }
         : null,
-      character, // Информация о выбранном персонаже
+      character,
     };
-    
-    console.log('[ChildrenService] getChildSummary result:', {
-      hasWishlistGoal: !!wishlistGoal,
-      hasRewardGoal: !!wishlistGoal?.rewardGoal,
-      activeGoalTitle: wishlistGoal?.rewardGoal?.title || 'null',
-      activeGoalId: wishlistGoal?.rewardGoal?.id || 'null',
-      hasGoalProgress: !!result.goalProgress,
-      goalProgressData: result.goalProgress,
-      allWishlistItemsCount: allWishlistItems.length,
-      activeWishlistItemId: activeWishlistItem?.id || 'null',
-      activeWishlistItemIsFavorite: activeWishlistItem?.isFavorite,
-      activeWishlistItemShowOnDashboard: activeWishlistItem?.showOnDashboard,
-      resultActiveGoal: result.activeGoal ? { id: result.activeGoal.id, title: result.activeGoal.title } : 'null',
-      resultGoalProgress: result.goalProgress ? { current: result.goalProgress.current, target: result.goalProgress.target } : 'null',
-      fullResult: JSON.stringify({
-        activeGoal: result.activeGoal ? { id: result.activeGoal.id, title: result.activeGoal.title } : null,
-        goalProgress: result.goalProgress,
-      }),
-    });
-    
-    return result;
   }
 
   async findAllParents(familyId: string) {

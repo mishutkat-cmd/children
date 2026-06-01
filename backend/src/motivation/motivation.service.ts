@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { FirestoreService } from '../firestore/firestore.service';
 import { UpdateDecayRuleDto, CreateStreakRuleDto, UpdateStreakRuleDto, CreateCharacterDto, UpdateCharacterDto } from './dto/motivation.dto';
+import { invalidateFamilySettingsCache } from '../common/cache/family-settings-cache';
 
 @Injectable()
 export class MotivationService {
@@ -24,9 +25,10 @@ export class MotivationService {
     }
 
     const existing = await this.firestore.findFirst('familySettings', { familyId });
-    
+
     if (existing) {
       await this.firestore.update('familySettings', existing.id, { conversionRate });
+      invalidateFamilySettingsCache(familyId);
       return this.firestore.findFirst('familySettings', { id: existing.id });
     }
 
@@ -36,7 +38,8 @@ export class MotivationService {
       familyId,
       conversionRate,
     }, settingsId);
-    
+    invalidateFamilySettingsCache(familyId);
+
     return this.firestore.findFirst('familySettings', { id: settingsId });
   }
 
