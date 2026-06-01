@@ -1,9 +1,24 @@
 import { Injectable } from '@nestjs/common';
+import * as admin from 'firebase-admin';
 import { FirestoreService } from '../firestore/firestore.service';
 import { BadgesService } from '../badges/badges.service';
 // Enums заменены на строки для SQLite
 type LedgerType = 'EARN' | 'SPEND' | 'BONUS' | 'PENALTY' | 'ADJUST';
 type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
+
+/**
+ * Map a ledger entry (type + raw amount) to the signed delta applied
+ * to childProfiles.pointsBalance. Mirrors the legacy reducer in
+ * updateChildBalance(); both functions must stay in sync or backfill
+ * results will disagree with createEntry results.
+ */
+function computeBalanceDelta(type: LedgerType, amount: number): number {
+  const a = amount || 0;
+  if (type === 'EARN' || type === 'BONUS') return Math.abs(a);
+  if (type === 'SPEND' || type === 'PENALTY') return -Math.abs(a);
+  if (type === 'ADJUST') return a;
+  return 0;
+}
 
 @Injectable()
 export class LedgerService {
@@ -21,13 +36,9 @@ export class LedgerService {
     refId?: string,
     metaJson?: any,
   ) {
-    // Логирование только в development
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[LedgerService] createEntry called:', { type, refType, amount });
-    }
-    
     try {
       const entryId = crypto.randomUUID();
+      const delta = computeBalanceDelta(type, amount);
       const entryData = {
         id: entryId,
         familyId,
@@ -37,27 +48,53 @@ export class LedgerService {
         refId: refId ?? null, // Firestore не принимает undefined
         amount,
         metaJson: metaJson ? JSON.stringify(metaJson) : null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
-      await this.firestore.create('ledgerEntries', entryData, entryId);
+      // Atomic write: insert the ledger entry AND adjust pointsBalance on
+      // the child's profile in a single transaction. Replaces the old
+      // pattern of create-then-recompute-from-scratch, which was O(history).
+      // pointsBalance is now an authoritative denormalization; the integrity
+      // check job verifies sum(ledger) == pointsBalance periodically.
+      await this.firestore.runTransaction(async (tx) => {
+        const profilesQuery = this.firestore
+          .collection('childProfiles')
+          .where('userId', '==', childId)
+          .limit(1);
+        const profilesSnap = await tx.get(profilesQuery);
 
-      // Update child balance
-      const balance = await this.updateChildBalance(childId);
-      
-      // Логирование только в development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[LedgerService] Ledger entry created and balance updated:', entryId, 'balance:', balance);
-      }
+        const ledgerRef = this.firestore.collection('ledgerEntries').doc(entryId);
+        tx.set(ledgerRef, entryData);
 
-      const createdEntry = await this.firestore.findFirst('ledgerEntries', { id: entryId });
-      return createdEntry;
+        if (!profilesSnap.empty && delta !== 0) {
+          tx.update(profilesSnap.docs[0].ref, {
+            pointsBalance: admin.firestore.FieldValue.increment(delta),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      // Side-effects after commit, fire-and-forget so a slow badge check
+      // doesn't block the caller and a badge failure doesn't roll back
+      // the ledger entry.
+      void this.runPostCreateSideEffects(childId);
+
+      return this.firestore.findFirst('ledgerEntries', { id: entryId });
     } catch (error: any) {
-      // Всегда логируем ошибки
       console.error('[LedgerService] Error creating ledger entry:', error.message);
-      if (process.env.NODE_ENV === 'development') {
-        console.error('[LedgerService] Error stack:', error.stack);
-      }
       throw error;
+    }
+  }
+
+  private async runPostCreateSideEffects(childId: string) {
+    try {
+      const user = await this.firestore.findFirst('users', { id: childId });
+      if (user?.familyId) {
+        await this.badgesService.checkAndAwardBadges(childId, user.familyId, {});
+      }
+    } catch (err: any) {
+      console.warn('[LedgerService] checkAndAwardBadges:', err?.message);
     }
   }
 
@@ -177,7 +214,7 @@ export class LedgerService {
   }
 
   /**
-   * Удаляет штраф или бонус и пересчитывает баланс ребёнка.
+   * Удаляет штраф или бонус и атомарно корректирует pointsBalance.
    * Возвращает обновлённый баланс.
    */
   async deleteLedgerEntry(
@@ -185,19 +222,48 @@ export class LedgerService {
     familyId: string,
     allowedTypes: LedgerType[],
   ): Promise<{ success: true; newBalance: number }> {
-    const entry = await this.firestore.findFirst('ledgerEntries', { id: entryId });
-    if (!entry) {
-      throw new Error('Запись не найдена');
-    }
-    if (entry.familyId !== familyId) {
-      throw new Error('Запись из другой семьи');
-    }
-    if (!allowedTypes.includes(entry.type)) {
+    // Pre-fetch outside the transaction so we can surface authz errors
+    // before any writes are attempted. The transaction below re-reads the
+    // entry to make the delete + balance adjustment atomic.
+    const initial = await this.firestore.findFirst('ledgerEntries', { id: entryId });
+    if (!initial) throw new Error('Запись не найдена');
+    if (initial.familyId !== familyId) throw new Error('Запись из другой семьи');
+    if (!allowedTypes.includes(initial.type)) {
       throw new Error(`Удалять можно только: ${allowedTypes.join(', ')}`);
     }
 
-    await this.firestore.delete('ledgerEntries', entryId);
-    const newBalance = await this.updateChildBalance(entry.childId);
+    const childId: string = initial.childId;
+
+    const newBalance: number = await this.firestore.runTransaction(async (tx) => {
+      const ledgerRef = this.firestore.collection('ledgerEntries').doc(entryId);
+      const ledgerSnap = await tx.get(ledgerRef);
+      if (!ledgerSnap.exists) throw new Error('Запись не найдена');
+      const entry = ledgerSnap.data() as any;
+
+      const profilesSnap = await tx.get(
+        this.firestore
+          .collection('childProfiles')
+          .where('userId', '==', childId)
+          .limit(1),
+      );
+
+      const reverseDelta = -computeBalanceDelta(entry.type, entry.amount);
+      tx.delete(ledgerRef);
+
+      if (!profilesSnap.empty && reverseDelta !== 0) {
+        const profileDoc = profilesSnap.docs[0];
+        tx.update(profileDoc.ref, {
+          pointsBalance: admin.firestore.FieldValue.increment(reverseDelta),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        // Read-after-write isn't possible inside the same tx, but we know
+        // the new value because of the linear adjustment.
+        const oldBalance = (profileDoc.data() as any).pointsBalance || 0;
+        return oldBalance + reverseDelta;
+      }
+      return 0;
+    });
+
     return { success: true, newBalance };
   }
 

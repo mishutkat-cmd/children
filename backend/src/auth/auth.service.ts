@@ -117,39 +117,12 @@ export class AuthService {
 
       console.log('[AuthService] Password valid');
 
-      // Если это ребенок - проверяем и применяем decay, а также синхронизируем баланс
+      // Если это ребенок — применяем decay. Раньше тут же шла
+      // updateChildBalance "на всякий случай" — больше не нужна:
+      // pointsBalance теперь поддерживается транзакционно в createEntry,
+      // расхождения ловит отдельный integrity-check.
       if (user.role === 'CHILD') {
-        console.log('[AuthService] Processing decay for child');
         await this.decayService.processDecayForFamily(user.familyId);
-        
-        // Синхронизируем баланс с ledger записями
-        console.log('[AuthService] Synchronizing balance for child');
-        try {
-          const childProfiles = await this.firestore.findMany('childProfiles', { userId: user.id });
-          if (childProfiles.length > 0) {
-            const childProfile = childProfiles[0];
-            const currentBalance = childProfile.pointsBalance || 0;
-            
-            // Пересчитываем баланс из ledger
-            const correctBalance = await this.ledgerService.updateChildBalance(user.id);
-            
-            if (currentBalance !== correctBalance) {
-              console.log('[AuthService] Balance mismatch detected:', {
-                userId: user.id,
-                childProfileId: childProfile.id,
-                currentBalance,
-                correctBalance,
-                difference: correctBalance - currentBalance,
-              });
-              console.log('[AuthService] Balance has been synchronized');
-            } else {
-              console.log('[AuthService] Balance is correct:', { userId: user.id, balance: correctBalance });
-            }
-          }
-        } catch (balanceError: any) {
-          console.error('[AuthService] Error synchronizing balance:', balanceError.message);
-          // Не прерываем логин из-за ошибки синхронизации баланса
-        }
       }
 
       console.log('[AuthService] Generating tokens...');
@@ -201,35 +174,10 @@ export class AuthService {
 
     console.log('[AuthService] PIN verified successfully');
 
-    // Проверяем и применяем decay при логине ребенка
+    // Apply decay on child login. Balance-sync (updateChildBalance) used
+    // to live here too; it's gone — balance is now maintained by every
+    // createEntry transaction, and integrity is checked separately.
     await this.decayService.processDecayForFamily(user.familyId);
-    
-    // Синхронизируем баланс с ledger записями
-    console.log('[AuthService] Synchronizing balance for child (PIN login)');
-    try {
-      if (childProfile) {
-        const currentBalance = childProfile.pointsBalance || 0;
-        
-        // Пересчитываем баланс из ledger
-        const correctBalance = await this.ledgerService.updateChildBalance(user.id);
-        
-        if (currentBalance !== correctBalance) {
-          console.log('[AuthService] Balance mismatch detected (PIN login):', {
-            userId: user.id,
-            childProfileId: childProfile.id,
-            currentBalance,
-            correctBalance,
-            difference: correctBalance - currentBalance,
-          });
-          console.log('[AuthService] Balance has been synchronized');
-        } else {
-          console.log('[AuthService] Balance is correct (PIN login):', { userId: user.id, balance: correctBalance });
-        }
-      }
-    } catch (balanceError: any) {
-      console.error('[AuthService] Error synchronizing balance (PIN login):', balanceError.message);
-      // Не прерываем логин из-за ошибки синхронизации баланса
-    }
 
     return this.generateTokens(user);
   }

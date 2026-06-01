@@ -119,23 +119,11 @@ export class ChildrenService {
     const childProfileId = profile?.id;
     const userId = child.id;
 
-    // updateChildBalance reads every ledger entry for this child and writes
-    // pointsBalance back to the profile. It's expensive but the previous
-    // implementation awaited it sequentially, then re-read the profile, then
-    // ran today-balance which read all ledger entries AGAIN. We now:
-    //   (a) fire every independent read in parallel,
-    //   (b) chain "balance recompute" with "profile re-read" inside Promise.all
-    //       so the rest of the dashboard data isn't blocked on it.
-    const balanceRefreshChain = this.ledgerService
-      .updateChildBalance(userId)
-      .then(() => this.firestore.findFirst('childProfiles', { id: childProfileId }))
-      .catch((err: any) => {
-        console.error('[ChildrenService] Error recalculating balance:', err?.message);
-        return null;
-      });
-
+    // pointsBalance is now an authoritative denormalization maintained by
+    // every ledgerService.createEntry / deleteLedgerEntry transaction.
+    // No O(history) recompute on the read path — profile from findOne above
+    // already carries the current balance.
     const [
-      refreshedProfile,
       allLedgerEntries,
       recentApproved,
       pendingCompletionsList,
@@ -146,7 +134,6 @@ export class ChildrenService {
       character,
       familySettings,
     ] = await Promise.all([
-      balanceRefreshChain,
       this.firestore.findMany('ledgerEntries', { childId: userId }),
       this.firestore.findMany(
         'completions',
@@ -166,8 +153,6 @@ export class ChildrenService {
         : Promise.resolve(null),
       this.getFamilySettingsCached(familyId),
     ]);
-
-    if (refreshedProfile) Object.assign(profile, refreshedProfile);
 
     // Today balance: batch-fetch the completions referenced by EARN/BONUS
     // entries in ONE `id: in` query instead of N findFirst calls.
@@ -345,22 +330,13 @@ export class ChildrenService {
     if (!childProfileId) return null;
 
     try {
-      // Refresh balance, then re-read profile — chained so the rest of
-      // the reads can still go in parallel.
-      const balanceRefreshChain = this.ledgerService
-        .updateChildBalance(childId)
-        .then(() => this.firestore.findFirst('childProfiles', { id: childProfileId }))
-        .catch((err: any) => {
-          console.error('[ChildrenService] Error recalculating balance in stats:', err?.message);
-          return null;
-        });
-
-      const [refreshedProfile, allEntries, completedCompletions] = await Promise.all([
-        balanceRefreshChain,
+      // pointsBalance on child.childProfile is authoritative now — see
+      // LedgerService.createEntry transactional path. No O(history)
+      // recompute on the read side.
+      const [allEntries, completedCompletions] = await Promise.all([
         this.firestore.findMany('ledgerEntries', { childId }),
         this.firestore.findMany('completions', { childId: childProfileId, status: 'APPROVED' }),
       ]);
-      if (refreshedProfile) child.childProfile = refreshedProfile;
 
       // Aggregate earned/spent in one pass.
       let totalPointsEarned = 0;

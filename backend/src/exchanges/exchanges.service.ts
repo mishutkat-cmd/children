@@ -61,12 +61,15 @@ export class ExchangesService {
       throw new BadRequestException('Either rewardGoalId or cashCents must be provided');
     }
 
-    // Пересчитываем баланс из ledger перед проверкой, чтобы исключить
-    // конвертацию устаревших/уже потраченных баллов второй раз.
-    const freshBalance = await this.ledgerService.updateChildBalance(userId);
-    if ((freshBalance || 0) < pointsSpent) {
+    // pointsBalance on the profile is the authoritative source — kept in
+    // sync by every createEntry/deleteLedgerEntry transaction. Re-read it
+    // immediately before the spend check so a concurrent earn/spend that
+    // committed between request start and this point is honored.
+    const profilesForBalance = await this.firestore.findMany('childProfiles', { userId });
+    const freshBalance = profilesForBalance[0]?.pointsBalance ?? 0;
+    if (freshBalance < pointsSpent) {
       throw new BadRequestException(
-        `Недостаточно баллов: доступно ${freshBalance || 0}, нужно ${pointsSpent}`,
+        `Недостаточно баллов: доступно ${freshBalance}, нужно ${pointsSpent}`,
       );
     }
 

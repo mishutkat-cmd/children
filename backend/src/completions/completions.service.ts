@@ -652,20 +652,13 @@ export class CompletionsService {
       console.warn('[CompletionsService] markAsNotCompleted - Negative remaining points detected (more adjusted than earned), this should not happen!');
     }
 
-    // Удаляем или помечаем completion как отмененный
+    // Mark the completion as cancelled. The compensating ADJUST entry
+    // (created above when remainingPointsToDeduct > 0) already adjusted
+    // pointsBalance transactionally — no extra recompute needed.
     await this.firestore.update('completions', completion.id, {
       status: 'REJECTED',
       pointsAwarded: 0,
     });
-
-    // Убедимся, что баланс обновлен
-    try {
-      await this.ledgerService.updateChildBalance(userId);
-      console.log('[CompletionsService] markAsNotCompleted - Balance updated explicitly');
-    } catch (error: any) {
-      console.warn('[CompletionsService] markAsNotCompleted - Error updating balance:', error.message);
-      // Не прерываем выполнение, так как ledgerService.createEntry уже должен был обновить баланс
-    }
 
     return { success: true, completion };
   }
