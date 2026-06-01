@@ -238,22 +238,32 @@ export class ChildrenService {
             ? parseFloat(familySettings.conversionRate)
             : familySettings?.conversionRate) || 10;
 
-        const totalMoneyEarnedCents = profile?.moneyBalanceCents || 0;
-        const totalSpentOnPrevious = allWishlistItems
-          .filter((i: any) => i.priority < activeWishlistItem.priority && i.moneySpent)
-          .reduce((s: number, i: any) => s + (i.moneySpent || 0), 0);
-        const availableMoneyCents = Math.max(0, totalMoneyEarnedCents - totalSpentOnPrevious);
-
+        // The frontend dashboard wants "how much has the child saved up
+        // towards this goal" and "how close are they (%)". The legacy
+        // implementation answered both from wishlist.moneySpent — but
+        // that field only grows when the parent marks a wishlist item
+        // delivered. Until then it's literally 0, so the parent dashboard
+        // showed "Собрано 0 ₴ · 0%" no matter how many points the child
+        // had actually accumulated.
+        //
+        // Same calculation as the frontend's favoriteWishProgress (in
+        // pages/parent/Home.tsx and pages/child/Dashboard.tsx) — keeping
+        // it consistent so both blocks agree.
+        const pointsBalance = profile?.pointsBalance || 0;
+        const accumulatedCents = Math.round((pointsBalance / conversionRate) * 100);
         const rewardCostCents = Math.round((reward.costPoints / conversionRate) * 100);
-        const moneySpentOnThis = activeWishlistItem.moneySpent || 0;
+        const moneySpentOnThis = Math.min(accumulatedCents, rewardCostCents);
         const remainingCents = Math.max(0, rewardCostCents - moneySpentOnThis);
+        const progressPercent = rewardCostCents > 0
+          ? Math.min(100, Math.round((moneySpentOnThis / rewardCostCents) * 100))
+          : 0;
 
         wishlistGoal = {
           rewardGoal: reward,
-          availableMoneyCents,
+          availableMoneyCents: accumulatedCents,
           moneySpentOnThis,
           remainingCents,
-          progressPercent: Math.min(100, Math.round((moneySpentOnThis / rewardCostCents) * 100)),
+          progressPercent,
         };
       }
     }
