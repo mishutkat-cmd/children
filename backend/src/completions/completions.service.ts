@@ -227,6 +227,16 @@ export class CompletionsService {
         });
         
         try {
+          // metaJson keys must not be `undefined` — Firestore rejects
+          // the whole transaction otherwise (and we silently lose the
+          // ledger entry + balance bump). Build the object conditionally.
+          const meta: Record<string, any> = {
+            taskTitle: task.title,
+            basePoints: task.points,
+            requiresApproval,
+          };
+          if (multiplier > 1) meta.multiplier = multiplier;
+
           await this.ledgerService.createEntry(
             familyId,
             userId,
@@ -234,12 +244,7 @@ export class CompletionsService {
             'COMPLETION',
             finalPoints,
             completionId,
-            {
-              taskTitle: task.title,
-              basePoints: task.points,
-              multiplier: multiplier > 1 ? multiplier : undefined,
-              requiresApproval: requiresApproval,
-            },
+            meta,
           );
           console.log('[CompletionsService] Points awarded successfully');
         } catch (ledgerError: any) {

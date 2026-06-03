@@ -6,6 +6,26 @@ import { LedgerType, computeBalanceDelta } from './balance-delta';
 
 type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
 
+/**
+ * Recursively drop keys whose value is `undefined`. Firestore's admin
+ * client refuses documents that contain `undefined` (it throws inside
+ * Transaction.set / WriteBatch.set with "Cannot use \"undefined\" as a
+ * Firestore value"), so any caller that builds metaJson with optional
+ * fields like `{ multiplier: cond ? 5 : undefined }` would crash the
+ * whole createEntry transaction — silently swallowing the ledger entry
+ * AND the balance increment on the way out. Strip those before write.
+ */
+function stripUndefined(value: any): any {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(stripUndefined);
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (v === undefined) continue;
+    out[k] = stripUndefined(v);
+  }
+  return out;
+}
+
 @Injectable()
 export class LedgerService {
   constructor(
@@ -25,6 +45,11 @@ export class LedgerService {
     try {
       const entryId = crypto.randomUUID();
       const delta = computeBalanceDelta(type, amount);
+      // metaJson is a free-form object built by callers (badge logic,
+      // streak multipliers, etc) — any `undefined` field in there will
+      // make Firestore reject the whole write and bury the balance
+      // increment with it. Always strip before persisting.
+      const safeMetaJson = metaJson ? stripUndefined(metaJson) : null;
       const entryData = {
         id: entryId,
         familyId,
@@ -33,7 +58,7 @@ export class LedgerService {
         refType,
         refId: refId ?? null, // Firestore не принимает undefined
         amount,
-        metaJson: metaJson || null,
+        metaJson: safeMetaJson,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
