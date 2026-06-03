@@ -107,7 +107,12 @@ export default function ChildDashboard() {
     const rate = conversionRate || 10
     const costCents = convertPointsToCents(costPoints, rate)
     const availableCents = convertPointsToCents(pointsBalance ?? 0, rate)
-    const spentOnThis = Math.min(availableCents, costCents)
+    // Уже выплачено за это желание через прошлые exchange-доставки
+    // (wishlist.moneySpent). Прибавляем к накопленным баллам, иначе
+    // прогресс просядет после первой доставки и не совпадёт с тем,
+    // что отдаёт backend goalProgress.
+    const alreadyPaidCents = (fav as any).moneySpent || 0
+    const spentOnThis = Math.min(availableCents + alreadyPaidCents, costCents)
     const remainingCents = Math.max(0, costCents - spentOnThis)
     const progressPercent = calculateProgress(spentOnThis, costCents)
     return {

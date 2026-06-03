@@ -375,13 +375,16 @@ export default function ParentHome() {
       const costPoints = favoriteWish.rewardGoal.costPoints || 0
       const costMoneyCents = convertPointsToCents(costPoints, conversionRate)
 
-      // Используем текущий баланс ребенка (в баллах) как доступные средства
+      // Текущий баланс ребёнка (в баллах) → доступные деньги.
       const currentBalance = selectedChild?.currentBalance || 0
       const availableMoneyCents = convertPointsToCents(currentBalance, conversionRate)
-      
-      // Сколько уже накоплено (используем текущий баланс как накопленную сумму)
-      // Ограничиваем накопленную сумму стоимостью желания
-      const moneySpentOnThis = Math.min(availableMoneyCents, costMoneyCents)
+
+      // Уже физически выплаченные деньги именно за эту цель растут в
+      // wishlist.moneySpent (см. ExchangesService.deliverExchange).
+      // Их нужно прибавлять к накопленным баллам — иначе после первой
+      // доставки прогресс просядет, хотя цель ближе.
+      const alreadyPaidCents = (favoriteWish as any)?.moneySpent || 0
+      const moneySpentOnThis = Math.min(availableMoneyCents + alreadyPaidCents, costMoneyCents)
       const remainingCents = Math.max(0, costMoneyCents - moneySpentOnThis)
       
       const progressPercent = calculateProgress(moneySpentOnThis, costMoneyCents)
