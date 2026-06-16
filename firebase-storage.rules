@@ -1,50 +1,37 @@
 rules_version = '2';
 
+// Phase 5 hardening: deny-by-default for direct Firebase Storage clients.
+//
+// Architecture today:
+//   - The NestJS backend uploads via the Firebase Admin SDK, which
+//     bypasses these rules. All writes go through it (see
+//     backend/src/children/upload.controller.ts).
+//   - Avatars / rewards / badges / wishlist images are made public via
+//     bucket.file(...).makePublic() — a GCS object ACL — and served as
+//     https://storage.googleapis.com/<bucket>/<path>. Public ACL is
+//     independent of Storage Rules; those URLs keep working.
+//   - Proof images are served via getSignedUrl(). Signed URLs are also
+//     independent of Storage Rules.
+//   - Neither the web SPA nor the mobile RN app talks to Firebase
+//     Storage directly. The Firebase JS SDK that previously sat in
+//     mobile/src/lib/firebase.ts was removed in 4.6; only Admin SDK
+//     access remains.
+//
+// Therefore: deny every direct-Firebase-client read and write. This
+// closes the previous attack vector where any account that authed
+// against the project's public web API key could write to /proofs,
+// /avatars, etc. (or overwrite existing files), purely because the
+// rule was `request.auth != null`.
+//
+// If a future feature genuinely needs direct client access, add a
+// targeted match block with a `request.auth.token.familyId == …`
+// custom-claim check (the backend would mint that token via
+// admin.auth().createCustomToken with additional claims) — but until
+// that's a real requirement, the safest posture is deny-all.
 service firebase.storage {
   match /b/{bucket}/o {
-    // Аватары пользователей - доступны для чтения всем, запись только аутентифицированным
-    match /avatars/{fileName} {
-      allow read: if true; // Публичное чтение для аватаров
-      allow write: if request.auth != null
-                   && request.resource.size < 5 * 1024 * 1024  // Максимум 5MB
-                   && request.resource.contentType.matches('image/.*'); // Только изображения
-    }
-
-    // Фотографии для заданий (proofs) - доступны только аутентифицированным пользователям
-    match /proofs/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-
-    // Фотографии наград/желаний - доступны для чтения всем, запись только аутентифицированным
-    match /rewards/{fileName} {
-      allow read: if true; // Публичное чтение
-      allow write: if request.auth != null
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-
-    // Фотографии бейджей - доступны для чтения всем, запись только аутентифицированным
-    match /badges/{fileName} {
-      allow read: if true; // Публичное чтение
-      allow write: if request.auth != null
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-
-    // Фотографии желаний (wishlist) - доступны для чтения всем, запись только аутентифицированным
-    match /wishlist/{fileName} {
-      allow read: if true; // Публичное чтение
-      allow write: if request.auth != null
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-
-    // Общее правило для всех остальных файлов - только для аутентифицированных пользователей
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }
