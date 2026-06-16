@@ -39,7 +39,7 @@ import Layout from '../../components/Layout'
 import AnimatedCard from '../../components/AnimatedCard'
 import { colors } from '../../theme'
 import { api } from '../../lib/api'
-import { useChildren } from '../../hooks'
+import { useChildren, useChildrenStatistics } from '../../hooks'
 
 interface WishlistItem {
   id: string
@@ -94,6 +94,39 @@ export default function ParentWishlist() {
   const [viewingImageUrl, setViewingImageUrl] = useState<string>('')
 
   const { data: children } = useChildren()
+  const { data: childrenStats } = useChildrenStatistics()
+
+  // Курс конвертации (сколько баллов = 1 ₴). По умолчанию 10.
+  const { data: motivationSettings } = useQuery<any>({
+    queryKey: ['motivation-settings'],
+    queryFn: async () => {
+      try {
+        const response = await api.get('/motivation/settings')
+        return response.data
+      } catch {
+        return { conversionRate: 10 }
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const conversionRate = React.useMemo(() => {
+    const raw = motivationSettings?.conversionRate
+    const num = typeof raw === 'string' ? parseFloat(raw) : raw
+    return num && num > 0 ? num : 10
+  }, [motivationSettings])
+
+  // Текущий баланс ребёнка (в баллах) по childProfileId.
+  // childrenStats отдаёт по childId (= user.id), приводим к childProfileId.
+  const childBalancePointsById = React.useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const c of children || []) {
+      const profileId = (c as any).childProfile?.id
+      if (!profileId) continue
+      const stat = (childrenStats || []).find((s: any) => s.childId === c.id)
+      map[profileId] = stat?.currentBalance || 0
+    }
+    return map
+  }, [children, childrenStats])
 
   const { data: wishlistItems, isLoading } = useQuery<WishlistItem[]>({
     queryKey: ['wishlist', 'parent', 'all'],
@@ -102,23 +135,6 @@ export default function ParentWishlist() {
       return response.data || []
     },
   })
-
-  const { data: conversionHistory } = useQuery<any[]>({
-    queryKey: ['conversion-history'],
-    queryFn: () => api.get('/exchanges/parent/exchanges/history').then(r => r.data || []),
-    staleTime: 30 * 1000,
-  })
-
-  // Map: childProfileId → total converted UAH cents
-  const childConvertedCents = React.useMemo(() => {
-    const map: Record<string, number> = {}
-    for (const entry of conversionHistory || []) {
-      if (entry.cashCents && entry.childId) {
-        map[entry.childId] = (map[entry.childId] || 0) + entry.cashCents
-      }
-    }
-    return map
-  }, [conversionHistory])
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['wishlist'] })
@@ -299,7 +315,6 @@ export default function ParentWishlist() {
   const childGroups = (children || []).map((child: any) => {
     const childName = child.childProfile?.name || child.login || 'Дитина'
     const childProfileId = child.childProfile?.id || null
-    const accumulatedCents = childProfileId ? (childConvertedCents[childProfileId] || 0) : 0
     const items = (wishlistItems || []).filter(item => {
       if (item.child?.id !== child.id && (item as any).childUserId !== child.id) {
         const itemName = item.child?.name || item.child?.login
@@ -309,7 +324,7 @@ export default function ParentWishlist() {
       if (statusFilter !== 'all' && item.status !== statusFilter) return false
       return true
     })
-    return { child, childName, childProfileId, accumulatedCents, items }
+    return { child, childName, childProfileId, items }
   })
 
   const allFilteredItems = childGroups.flatMap(g => g.items)
@@ -382,7 +397,7 @@ export default function ParentWishlist() {
         </Box>
 
         {/* Child sections */}
-        {childGroups.map(({ child, childName, accumulatedCents, items }, groupIdx) => (
+        {childGroups.map(({ child, childName, childProfileId, items }, groupIdx) => (
           <Box key={child.id} sx={{ mb: 5 }}>
             {/* Section header */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
@@ -504,7 +519,7 @@ export default function ParentWishlist() {
                         {/* Price + status */}
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
                           <Typography variant="h6" fontWeight={700} color="primary.main">
-                            {item.rewardGoal?.costPoints || 0} ₴
+                            {((item.rewardGoal?.costPoints || 0) / Math.max(1, conversionRate)).toFixed(0)} ₴
                           </Typography>
                           <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
                             {item.year && (
@@ -522,10 +537,23 @@ export default function ParentWishlist() {
                           </Box>
                         </Box>
 
-                        {/* Conversion progress */}
+                        {/* Прогресс «Собрано / Цена».
+                            Источники:
+                              • currentBalance ребёнка (баллы → ₴ по курсу) —
+                                деньги, которые ещё «на руках» и могут пойти на цель;
+                              • item.moneySpent — уже физически выплачено за эту
+                                цель прошлыми exchange-доставками
+                                (backend ExchangesService.deliverExchange).
+                            Backend в /children/:id/summary считает то же самое
+                            (children.service.ts:256). */}
                         {item.status !== 'COMPLETED' && (() => {
-                          const priceCents = (item.rewardGoal?.costPoints || 0) * 100
-                          const accumulated = accumulatedCents
+                          const costPoints = item.rewardGoal?.costPoints || 0
+                          const priceCents = Math.round((costPoints / Math.max(1, conversionRate)) * 100)
+                          // Берём баланс ребёнка-владельца текущей группы.
+                          const balancePoints = childProfileId ? (childBalancePointsById[childProfileId] || 0) : 0
+                          const liveBalanceCents = Math.round((balancePoints / Math.max(1, conversionRate)) * 100)
+                          const alreadyPaidCents = (item as any).moneySpent || 0
+                          const accumulated = Math.min(liveBalanceCents + alreadyPaidCents, priceCents)
                           const pct = priceCents > 0 ? Math.min(100, Math.round(accumulated / priceCents * 100)) : 0
                           const accUah = (accumulated / 100).toFixed(0)
                           const priceUah = (priceCents / 100).toFixed(0)
@@ -533,9 +561,9 @@ export default function ParentWishlist() {
                             <Box sx={{ mt: 1.5 }}>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                                 <Typography variant="caption" color="text.secondary">
-                                  💰 Конвертовано
+                                  💰 Собрано
                                 </Typography>
-                                <Tooltip title={`${accUah} ₴ із ${priceUah} ₴`}>
+                                <Tooltip title={`${accUah} ₴ из ${priceUah} ₴`}>
                                   <Typography variant="caption" fontWeight={700} color={pct >= 100 ? 'success.main' : 'text.primary'}>
                                     {accUah} / {priceUah} ₴ ({pct}%)
                                   </Typography>
