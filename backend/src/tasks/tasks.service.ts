@@ -472,17 +472,33 @@ export class TasksService {
     });
   }
 
+  /**
+   * Per-parent dashboard "today" stats. Pre-Phase-2 this was a
+   * triple-nested sequential loop (children × tasks × completions
+   * sub-queries) plus tons of console.log per row — 3 kids × 20 tasks
+   * = 60+ sequential round-trips per dashboard load. Now it does
+   *
+   *   1 read for tasks
+   *   1 read for children users
+   *   1 read for the family's childProfiles ({userId in childIds})
+   *   1 read for taskAssignments scoped to the active tasks ({taskId in taskIds})
+   *   1 read for today's completions scoped to all of the family's children
+   *     ({childId in [...profileIds, ...userIds], performedAt: gte today})
+   *
+   * Everything else is in-memory grouping. Number of reads is constant
+   * regardless of family size.
+   */
   async getTodayStatistics(familyId: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Get all active tasks
-    const tasks = await this.firestore.findMany('tasks', { familyId, status: 'ACTIVE' });
-    
-    // Get all children
-    const children = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    const [allTasks, children] = await Promise.all([
+      this.firestore.findMany('tasks', { familyId, status: 'ACTIVE' }),
+      this.firestore.findMany('users', { familyId, role: 'CHILD' }),
+    ]);
+    const tasks = allTasks.filter((t: any) => t.status === 'ACTIVE');
 
     const statistics: Record<string, any> = {
       totalTasks: tasks.length,
@@ -491,148 +507,95 @@ export class TasksService {
       children: [],
     };
 
-    // Calculate statistics per child
+    if (children.length === 0 || tasks.length === 0) {
+      return statistics;
+    }
+
+    const childIds = children.map((c: any) => c.id);
+    const taskIds = tasks.map((t: any) => t.id);
+
+    const [profiles, assignments] = await Promise.all([
+      this.firestore.findMany('childProfiles', { userId: { in: childIds } }),
+      this.firestore.findMany('taskAssignments', { taskId: { in: taskIds } }),
+    ]);
+    const profileByUserId = new Map<string, any>();
+    for (const p of profiles) profileByUserId.set(p.userId, p);
+    const profileIds = profiles.map((p: any) => p.id);
+
+    // Today's completions across the whole family, in ONE query.
+    // completions.childId historically was either childProfile.id or
+    // userId depending on the writer — query both id sets.
+    const completionIdCandidates = [...new Set([...profileIds, ...childIds])];
+    const todayCompletions =
+      completionIdCandidates.length > 0
+        ? await this.firestore.findMany('completions', {
+            childId: { in: completionIdCandidates },
+            performedAt: { gte: today, lte: tomorrow },
+          })
+        : [];
+
+    // Build lookup maps:
+    //   assignmentsByTaskAndChild: taskId + childProfileId -> bool
+    //   completionsByTaskAndChild: taskId + (childProfileId|userId) -> completion[]
+    const assignedKey = (taskId: string, profileId: string) => `${taskId}::${profileId}`;
+    const assignedSet = new Set<string>();
+    for (const a of assignments) assignedSet.add(assignedKey(a.taskId, a.childId));
+
+    const completionsKey = (taskId: string, anyChildId: string) =>
+      `${taskId}::${anyChildId}`;
+    const completionsByKey = new Map<string, any[]>();
+    for (const c of todayCompletions) {
+      if (c.status !== 'APPROVED' && c.status !== 'PENDING') continue;
+      const k = completionsKey(c.taskId, c.childId);
+      const arr = completionsByKey.get(k) ?? [];
+      arr.push(c);
+      completionsByKey.set(k, arr);
+    }
+
     for (const child of children) {
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: child.id });
-      const childProfile = childProfiles.length > 0 ? childProfiles[0] : null;
+      const childProfile = profileByUserId.get(child.id) ?? null;
       const childProfileId = childProfile?.id || '';
-      
-      console.log('[TasksService] getTodayStatistics - Child:', {
-        userId: child.id,
-        childProfileId,
-        childProfileName: childProfile?.name,
-        childLogin: child.login,
-        childEmail: child.email,
-      });
 
       let pointsEarned = 0;
       let pointsAvailable = 0;
       let completedTasks = 0;
       let pendingTasks = 0;
       const completedTasksList: any[] = [];
-      let totalAssignedTasks = 0; // Общее количество задач, назначенных ребенку
+      let totalAssignedTasks = 0;
 
       for (const task of tasks) {
-        // Пропускаем архивированные задачи
-        if (task.status !== 'ACTIVE') continue;
-        
-        // Check if task is assigned to this child
-        const isAssigned = task.assignedTo === 'ALL';
-        let isTaskAssignedToChild = isAssigned;
-        
-        if (!isAssigned) {
-          const assignments = await this.firestore.findMany('taskAssignments', { taskId: task.id, childId: childProfileId });
-          isTaskAssignedToChild = assignments.length > 0;
-          if (!isTaskAssignedToChild) continue; // Пропускаем задачи, не назначенные ребенку
-        }
-        
-        // Увеличиваем счетчик назначенных задач
+        const isAssignedAll = task.assignedTo === 'ALL';
+        const isAssignedToChild =
+          isAssignedAll || assignedSet.has(assignedKey(task.id, childProfileId));
+        if (!isAssignedToChild) continue;
         totalAssignedTasks++;
 
-        // Get today's completions for this task and child (both APPROVED and PENDING)
-        // Проверяем оба варианта: childId может быть childProfileId или userId
-        let allCompletions = await this.firestore.findMany('completions', { 
-          taskId: task.id, 
-          childId: childProfileId,
-        });
-        
-        // Если не нашли по childProfileId, пробуем найти по userId
-        if (allCompletions.length === 0) {
-          allCompletions = await this.firestore.findMany('completions', { 
-            taskId: task.id, 
-            childId: child.id,
-          });
-        }
-        
-        // Filter by date (today) and status (APPROVED or PENDING)
-        const todayCompletions = allCompletions.filter(c => {
-          const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-          const isToday = performedAt >= today && performedAt < tomorrow;
-          const isActive = c.status === 'APPROVED' || c.status === 'PENDING';
-          return isToday && isActive;
-        });
+        // completions.childId might be either id form — check both.
+        const matchedCompletions = [
+          ...(completionsByKey.get(completionsKey(task.id, childProfileId)) ?? []),
+          ...(completionsByKey.get(completionsKey(task.id, child.id)) ?? []),
+        ];
 
         pointsAvailable += task.points || 0;
 
-        if (todayCompletions.length > 0) {
-          // Начисляем баллы за ВСЕ completions (APPROVED и PENDING), так как баллы начисляются сразу при создании
-          // Баллы уже начислены в ledger при создании completion, независимо от статуса
-          // Если pointsAwarded не установлен, используем базовые баллы задачи
-          const taskPoints = todayCompletions.reduce((sum: number, c: any) => {
-            const points = c.pointsAwarded || task.points || 0;
-            console.log('[TasksService] Completion points:', {
-              completionId: c.id,
-              pointsAwarded: c.pointsAwarded,
-              taskPoints: task.points,
-              usedPoints: points,
-            });
-            return sum + points;
-          }, 0);
-          pointsEarned += taskPoints;
-          
-          console.log('[TasksService] Task completion points:', {
-            taskId: task.id,
-            taskTitle: task.title,
-            completionsCount: todayCompletions.length,
-            pointsFromCompletions: taskPoints,
-            totalPointsEarned: pointsEarned,
-            childProfileId,
-            childId: child.id,
-          });
-          
-          // Задание считается выполненным, если есть хотя бы одно completion (APPROVED или PENDING)
-          // Важно: задача считается выполненной только один раз, независимо от количества completions
-          // Проверяем, не была ли задача уже добавлена в список
-          const alreadyAdded = completedTasksList.some(t => t.id === task.id);
-          if (!alreadyAdded) {
+        if (matchedCompletions.length > 0) {
+          pointsEarned += matchedCompletions.reduce(
+            (sum: number, c: any) => sum + (c.pointsAwarded || task.points || 0),
+            0,
+          );
+          if (!completedTasksList.some((t) => t.id === task.id)) {
             completedTasks++;
-            // Добавляем полный объект задачи для проверки в UI
             completedTasksList.push(task);
-            console.log('[TasksService] Task marked as completed:', {
-              taskId: task.id,
-              taskTitle: task.title,
-              completedTasks,
-              totalTasks: tasks.length,
-            });
-          } else {
-            console.log('[TasksService] Task already in completed list, skipping:', task.id);
           }
-          
-          // pendingTasks НЕ увеличиваем здесь, так как задача уже выполнена
-          // pendingTasks учитывает только задачи, которые НЕ выполнены
         } else {
-          // Задача не выполнена - увеличиваем pendingTasks только если задача назначена ребенку
-          if (isTaskAssignedToChild) {
-            pendingTasks++;
-            console.log('[TasksService] Task not completed:', {
-              taskId: task.id,
-              taskTitle: task.title,
-              pendingTasks,
-              totalAssignedTasks,
-            });
-          }
+          pendingTasks++;
         }
       }
 
-      // Получаем имя ребенка: сначала из childProfile.name, затем из child.login, затем fallback
-      let childName = 'Ребенок';
-      if (childProfile?.name) {
-        childName = childProfile.name;
-      } else if (child.login) {
-        childName = child.login;
-      } else if (child.email) {
-        childName = child.email.split('@')[0]; // Используем часть email до @
-      }
-
-      console.log('[TasksService] Final statistics for child:', {
-        childId: child.id,
-        childName,
-        pointsEarned,
-        pointsAvailable,
-        completedTasks,
-        pendingTasks,
-        totalAssignedTasks,
-      });
+      const childName =
+        childProfile?.name ||
+        child.login ||
+        (child.email ? child.email.split('@')[0] : 'Ребенок');
 
       statistics.children.push({
         childId: child.id,
@@ -643,8 +606,8 @@ export class TasksService {
         pointsRemaining: pointsAvailable - pointsEarned,
         completedCount: completedTasks,
         pendingCount: pendingTasks,
-        totalTasks: totalAssignedTasks, // Общее количество задач, назначенных ребенку
-        completedTasks: completedTasksList, // Полные объекты Task для проверки в UI
+        totalTasks: totalAssignedTasks,
+        completedTasks: completedTasksList,
       });
 
       statistics.totalPointsAvailable += pointsAvailable;

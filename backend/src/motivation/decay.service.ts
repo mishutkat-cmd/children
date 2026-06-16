@@ -11,40 +11,44 @@ export class DecayService {
 
   /**
    * Проверяет и применяет decay (паук) для всех детей в семье
-   * Вызывается при логине или по расписанию
+   * Вызывается при логине или по расписанию.
+   *
+   * Pre-Phase 2 this was a sequential per-child loop with multiple
+   * full-completions scans per child. The per-child block is now driven
+   * by the denormalized childProfiles.lastCompletionAt field (set in
+   * LedgerService.createEntry for every COMPLETION-refType entry), so
+   * hasActivityToday / getMissedDays are O(1) reads from the profile
+   * instead of full-history scans. The loop itself is parallelized.
    */
   async processDecayForFamily(familyId: string) {
     const decayRule = await this.firestore.findFirst('decayRules', { familyId });
+    if (!decayRule || !decayRule.enabled || decayRule.mode === 'OFF') return;
 
-    if (!decayRule || !decayRule.enabled || decayRule.mode === 'OFF') {
-      return;
-    }
-
-    // Получаем всех детей в семье
+    // Parallel: list of children + their profiles in two batched reads.
     const children = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    if (children.length === 0) return;
+    const profiles = await this.firestore.findMany('childProfiles', {
+      userId: { in: children.map((c: any) => c.id) },
+    });
+    const profileByUser = new Map<string, any>();
+    for (const p of profiles) profileByUser.set(p.userId, p);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    for (const child of children) {
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: child.id });
-      if (childProfiles.length === 0) {
-        continue;
-      }
-      const childProfile = childProfiles[0];
-
-      await this.processDecayForChild(
-        familyId,
-        child.id,
-        childProfile,
-        decayRule,
-        today,
-      );
-    }
+    await Promise.all(
+      children.map(async (child: any) => {
+        const childProfile = profileByUser.get(child.id);
+        if (!childProfile) return;
+        await this.processDecayForChild(familyId, child.id, childProfile, decayRule, today);
+      }),
+    );
   }
 
   /**
-   * Проверяет и применяет decay для конкретного ребенка
+   * Проверяет и применяет decay для конкретного ребенка.
+   * Both hasActivityToday and getMissedDays now read the denormalized
+   * childProfiles.lastCompletionAt; they're O(1) and run in parallel.
    */
   async processDecayForChild(
     familyId: string,
@@ -53,19 +57,15 @@ export class DecayService {
     decayRule: any,
     today: Date,
   ) {
-    // Проверяем, была ли активность сегодня
-    const hasActivityToday = await this.hasActivityToday(childId, familyId, today);
+    const lastCompletionAt = this.extractLastCompletionAt(childProfile);
 
-    if (hasActivityToday) {
-      // Если есть активность сегодня - паук не применяется, сбрасываем счетчик пропусков
+    if (this.isLastCompletionToday(lastCompletionAt, today)) {
+      // активность сегодня — паук не применяется
       return;
     }
 
-    // Вычисляем количество дней без активности
-    const missedDays = await this.getMissedDays(childId, familyId, today);
-
+    const missedDays = this.computeMissedDays(lastCompletionAt, childProfile, today);
     if (missedDays < decayRule.startAfterMissedDays) {
-      // Еще не достигли порога
       return;
     }
 
@@ -106,63 +106,50 @@ export class DecayService {
   }
 
   /**
-   * Проверяет, была ли активность сегодня
+   * Pull the denormalized lastCompletionAt off a childProfile, normalize
+   * Firestore Timestamp / Date / null. Returns null only if the field is
+   * truly absent (never completed anything; or the field hasn't been
+   * backfilled yet — backfill-totalearned-lastcompletion.js handles it
+   * after deploy).
    */
-  private async hasActivityToday(childId: string, familyId: string, today: Date): Promise<boolean> {
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+  private extractLastCompletionAt(profile: any): Date | null {
+    const raw = profile?.lastCompletionAt;
+    if (!raw) return null;
+    const d = raw?.toDate ? raw.toDate() : new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
 
-    // childId может быть userId или childProfileId
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
-    const childProfileId = childProfiles.length > 0 ? childProfiles[0].id : childId;
-
-    const allCompletions = await this.firestore.findMany('completions', {
-      childId: childProfileId,
-      familyId,
-      status: 'APPROVED',
-    });
-
-    const todayCompletions = allCompletions.filter(c => {
-      const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-      return performedAt >= today && performedAt < tomorrow;
-    });
-
-    return todayCompletions.length > 0;
+  /** True if the lastCompletionAt falls on the same calendar day as `today`. */
+  private isLastCompletionToday(lastCompletionAt: Date | null, today: Date): boolean {
+    if (!lastCompletionAt) return false;
+    const d = new Date(lastCompletionAt);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() === today.getTime();
   }
 
   /**
-   * Вычисляет количество дней без активности
+   * Days since the most recent COMPLETION ledger entry. If the child has
+   * never completed anything, falls back to "days since profile created
+   * minus one" (so a freshly-created child doesn't start in penalty).
    */
-  private async getMissedDays(childId: string, familyId: string, today: Date): Promise<number> {
-    // childId может быть userId или childProfileId
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
-    const childProfileId = childProfiles.length > 0 ? childProfiles[0].id : childId;
-
-    // Находим последнее выполненное задание
-    const allCompletions = await this.firestore.findMany('completions', {
-      childId: childProfileId,
-      familyId,
-      status: 'APPROVED',
-    }, { performedAt: 'desc' }, 1);
-
-    if (allCompletions.length === 0) {
-      // Если никогда не выполнял - считаем с даты создания профиля
-      const child = childProfiles.length > 0 ? childProfiles[0] : await this.firestore.findFirst('childProfiles', { id: childId });
-      if (!child) {
-        return 0;
-      }
-      const createdAt = child.createdAt?.toDate ? child.createdAt.toDate() : new Date(child.createdAt);
-      const daysSinceCreation = this.daysBetween(createdAt, today);
-      return Math.max(0, daysSinceCreation - 1);
+  private computeMissedDays(
+    lastCompletionAt: Date | null,
+    childProfile: any,
+    today: Date,
+  ): number {
+    if (lastCompletionAt) {
+      const last = new Date(lastCompletionAt);
+      last.setHours(0, 0, 0, 0);
+      return this.daysBetween(last, today);
     }
-
-    const lastCompletion = allCompletions[0];
-    const lastDate = lastCompletion.performedAt?.toDate 
-      ? lastCompletion.performedAt.toDate() 
-      : new Date(lastCompletion.performedAt);
-    lastDate.setHours(0, 0, 0, 0);
-
-    return this.daysBetween(lastDate, today);
+    const created = childProfile?.createdAt?.toDate
+      ? childProfile.createdAt.toDate()
+      : childProfile?.createdAt
+        ? new Date(childProfile.createdAt)
+        : null;
+    if (!created || isNaN(created.getTime())) return 0;
+    const daysSinceCreation = this.daysBetween(created, today);
+    return Math.max(0, daysSinceCreation - 1);
   }
 
   /**
@@ -209,37 +196,29 @@ export class DecayService {
   }
 
   /**
-   * Получает информацию о состоянии "паука" для ребенка
+   * Получает информацию о состоянии "паука" для ребенка.
+   * Decay rule + childProfile fetched in parallel; the rest is pure.
    */
   async getDecayStatus(childId: string, familyId: string) {
-    const decayRule = await this.firestore.findFirst('decayRules', { familyId });
-
-    if (!decayRule || !decayRule.enabled || decayRule.mode === 'OFF') {
-      return {
-        active: false,
-        warning: false,
-        missedDays: 0,
-        penalty: 0,
-      };
-    }
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const hasActivityToday = await this.hasActivityToday(childId, familyId, today);
-    const missedDays = await this.getMissedDays(childId, familyId, today);
+    const [decayRule, childProfiles] = await Promise.all([
+      this.firestore.findFirst('decayRules', { familyId }),
+      this.firestore.findMany('childProfiles', { userId: childId }),
+    ]);
 
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
-    const child = childProfiles.length > 0 ? childProfiles[0] : null;
-
-    if (!child) {
-      return {
-        active: false,
-        warning: false,
-        missedDays: 0,
-        penalty: 0,
-      };
+    if (!decayRule || !decayRule.enabled || decayRule.mode === 'OFF') {
+      return { active: false, warning: false, missedDays: 0, penalty: 0 };
     }
+    const child = childProfiles[0] ?? null;
+    if (!child) {
+      return { active: false, warning: false, missedDays: 0, penalty: 0 };
+    }
+
+    const lastCompletionAt = this.extractLastCompletionAt(child);
+    const hasActivityToday = this.isLastCompletionToday(lastCompletionAt, today);
+    const missedDays = this.computeMissedDays(lastCompletionAt, child, today);
 
     const penalty = this.calculatePenalty(
       missedDays,

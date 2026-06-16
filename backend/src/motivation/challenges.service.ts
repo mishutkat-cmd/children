@@ -56,155 +56,157 @@ export class ChallengesService {
 
   async findAll(familyId: string, childId?: string) {
     try {
-      console.log('[ChallengesService] findAll called:', { familyId, childId });
-      const challenges = await this.firestore.findMany('challenges', {
-        familyId,
-        status: 'ACTIVE',
-      }, { createdAt: 'desc' });
-      console.log('[ChallengesService] Found challenges:', challenges.length);
+      const challenges = await this.firestore.findMany(
+        'challenges',
+        { familyId, status: 'ACTIVE' },
+        { createdAt: 'desc' },
+      );
 
       if (!childId) {
-        // Для родителей - возвращаем статистику по всем детям
-        const result = [];
-        for (const challenge of challenges) {
-          try {
-            const stats = await this.getChallengeStatsForParents(challenge, familyId);
-            result.push({
-              ...challenge,
-              childrenStats: stats,
-            });
-          } catch (error: any) {
-            console.error('[ChallengesService] Error processing challenge:', error.message);
-            // Продолжаем обработку других challenges
-            result.push({
-              ...challenge,
-              childrenStats: [],
-            });
-          }
-        }
-        return result;
+        // Parent dashboard: per-challenge children stats. Prefetch the
+        // family's children + childProfiles + all CHALLENGE-refType ledger
+        // entries ONCE; pass into getChallengeStatsForParents so it
+        // doesn't re-query per child or per challenge.
+        const [children, ledgerEntries] = await Promise.all([
+          this.firestore.findMany('users', { familyId, role: 'CHILD' }),
+          this.firestore.findMany('ledgerEntries', { familyId, refType: 'CHALLENGE' }),
+        ]);
+        const childIds = children.map((c: any) => c.id);
+        const profiles =
+          childIds.length > 0
+            ? await this.firestore.findMany('childProfiles', { userId: { in: childIds } })
+            : [];
+        const profileByUserId = new Map<string, any>();
+        for (const p of profiles) profileByUserId.set(p.userId, p);
+        const ledgerByKey = new Map<string, any>();
+        for (const e of ledgerEntries) ledgerByKey.set(`${e.childId}::${e.refId}`, e);
+
+        return Promise.all(
+          challenges.map(async (challenge) => {
+            try {
+              const stats = await this.getChallengeStatsForParents(
+                challenge,
+                children,
+                profileByUserId,
+                ledgerByKey,
+              );
+              return { ...challenge, childrenStats: stats };
+            } catch (error: any) {
+              console.error('[ChallengesService] Error processing challenge:', error.message);
+              return { ...challenge, childrenStats: [] };
+            }
+          }),
+        );
       }
 
-      // childId может быть userId или childProfileId
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
-      const childProfileId = childProfiles.length > 0 ? childProfiles[0].id : (childProfileById?.id || childId);
+      // childId may be userId or childProfileId — resolve once.
+      const [byUserId, byId] = await Promise.all([
+        this.firestore.findFirst('childProfiles', { userId: childId }),
+        this.firestore.findFirst('childProfiles', { id: childId }),
+      ]);
+      const childProfileId = byUserId?.id ?? byId?.id ?? childId;
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // Фильтруем по участникам, по датам (активный период) и вычисляем прогресс
-      const result = [];
-      for (const challenge of challenges) {
-        try {
-          const start = challenge.startDate?.toDate ? challenge.startDate.toDate() : new Date(challenge.startDate);
-          const end = challenge.endDate?.toDate ? challenge.endDate.toDate() : new Date(challenge.endDate);
-          start.setHours(0, 0, 0, 0);
-          end.setHours(23, 59, 59, 999);
-          if (today < start || today > end) continue;
+      const enriched = await Promise.all(
+        challenges.map(async (challenge) => {
+          try {
+            const start = challenge.startDate?.toDate
+              ? challenge.startDate.toDate()
+              : new Date(challenge.startDate);
+            const end = challenge.endDate?.toDate
+              ? challenge.endDate.toDate()
+              : new Date(challenge.endDate);
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 59, 999);
+            if (today < start || today > end) return null;
 
-          const participants = typeof challenge.participantsJson === 'string'
-            ? JSON.parse(challenge.participantsJson)
-            : challenge.participantsJson || [];
-          if (participants.length > 0 && !participants.includes(childProfileId)) continue;
+            const participants =
+              typeof challenge.participantsJson === 'string'
+                ? JSON.parse(challenge.participantsJson)
+                : challenge.participantsJson || [];
+            if (participants.length > 0 && !participants.includes(childProfileId)) return null;
 
-          const progress = await this.getChallengeProgress(challenge, childProfileId);
-          const reward = typeof challenge.rewardJson === 'string'
-            ? JSON.parse(challenge.rewardJson)
-            : challenge.rewardJson || {};
-          const rewardPoints = reward.type === 'POINTS' ? (reward.value ?? 0) : 0;
-
-          result.push({
-            ...challenge,
-            progress,
-            rewardPoints,
-            target: progress.target,
-          });
-        } catch (error: any) {
-          console.error('[ChallengesService] Error processing challenge for child:', error.message);
-        }
-      }
-
-      return result;
+            const progress = await this.getChallengeProgress(challenge, childProfileId);
+            const reward =
+              typeof challenge.rewardJson === 'string'
+                ? JSON.parse(challenge.rewardJson)
+                : challenge.rewardJson || {};
+            const rewardPoints = reward.type === 'POINTS' ? (reward.value ?? 0) : 0;
+            return { ...challenge, progress, rewardPoints, target: progress.target };
+          } catch (error: any) {
+            console.error('[ChallengesService] Error processing challenge for child:', error.message);
+            return null;
+          }
+        }),
+      );
+      return enriched.filter((c): c is NonNullable<typeof c> => c !== null);
     } catch (error: any) {
       console.error('[ChallengesService] Error in findAll:', error.message);
-      console.error('[ChallengesService] Error stack:', error.stack);
-      // Возвращаем пустой массив вместо ошибки, чтобы не ломать UI
       return [];
     }
   }
 
   /**
-   * Получает статистику по челленджу для всех детей (для родителя)
+   * Per-challenge children stats for the parent dashboard. Receives the
+   * family's children + profiles + all CHALLENGE-refType ledger entries
+   * pre-fetched by the caller (findAll), so this method does N parallel
+   * getChallengeProgress reads instead of N×3 sequential ones.
    */
-  private async getChallengeStatsForParents(challenge: any, familyId: string) {
+  private async getChallengeStatsForParents(
+    challenge: any,
+    children: any[],
+    profileByUserId: Map<string, any>,
+    ledgerByKey: Map<string, any>,
+  ) {
     try {
-      // Получаем всех детей
-      const children = await this.firestore.findMany('users', {
-        familyId,
-        role: 'CHILD',
-      });
+      const participants =
+        typeof challenge.participantsJson === 'string'
+          ? JSON.parse(challenge.participantsJson)
+          : challenge.participantsJson || [];
+      const reward =
+        typeof challenge.rewardJson === 'string'
+          ? JSON.parse(challenge.rewardJson)
+          : challenge.rewardJson;
 
-      const participants = typeof challenge.participantsJson === 'string'
-        ? JSON.parse(challenge.participantsJson)
-        : challenge.participantsJson || [];
-      const stats = [];
+      const eligibleChildren = children
+        .map((child: any) => {
+          const childProfile = profileByUserId.get(child.id) ?? null;
+          const childProfileId = childProfile?.id ?? child.id;
+          if (participants.length > 0 && !participants.includes(childProfileId)) return null;
+          return { child, childProfile, childProfileId };
+        })
+        .filter((x): x is { child: any; childProfile: any; childProfileId: string } => x !== null);
 
-      for (const child of children) {
-        try {
-          const childProfiles = await this.firestore.findMany('childProfiles', { userId: child.id });
-          const childProfile = childProfiles.length > 0 ? childProfiles[0] : null;
-          const childProfileId = childProfile?.id || child.id;
-          
-          // Проверяем, является ли ребенок участником (если участники указаны)
-          if (participants.length > 0 && !participants.includes(childProfileId)) {
-            continue;
+      const stats = await Promise.all(
+        eligibleChildren.map(async ({ child, childProfile, childProfileId }) => {
+          try {
+            const progress = await this.getChallengeProgress(challenge, childProfileId);
+            const rewardEntry = ledgerByKey.get(`${child.id}::${challenge.id}`);
+            const pointsEarned =
+              rewardEntry && reward?.type === 'POINTS' ? rewardEntry.amount || 0 : 0;
+            return {
+              childId: child.id,
+              childProfileId,
+              childName: childProfile?.name || child.login,
+              progress,
+              pointsEarned,
+              isCompleted: progress.current >= progress.target,
+            };
+          } catch (error: any) {
+            console.error('[ChallengesService] Error processing child stats:', error.message);
+            return null;
           }
+        }),
+      );
 
-          const progress = await this.getChallengeProgress(challenge, childProfileId);
-          
-          // Подсчитываем баллы, заработанные в рамках этого челленджа
-          const reward = typeof challenge.rewardJson === 'string'
-            ? JSON.parse(challenge.rewardJson)
-            : challenge.rewardJson;
-          let pointsEarned = 0;
-          
-          // Проверяем, награжден ли уже ребенок
-          const allEntries = await this.firestore.findMany('ledgerEntries', {
-            familyId,
-            childId: child.id,
-            refType: 'CHALLENGE',
-            refId: challenge.id,
-          });
-
-          const rewardEntry = allEntries.length > 0 ? allEntries[0] : null;
-          if (rewardEntry && reward.type === 'POINTS') {
-            pointsEarned = rewardEntry.amount || 0;
-          }
-
-          stats.push({
-            childId: child.id,
-            childProfileId,
-            childName: childProfile?.name || child.login,
-            progress,
-            pointsEarned,
-            isCompleted: progress.current >= progress.target,
-          });
-        } catch (error: any) {
-          console.error('[ChallengesService] Error processing child stats:', error.message);
-          // Продолжаем обработку других детей
-        }
-      }
-
-      // Сортируем по баллам (по убыванию), затем по прогрессу
-      stats.sort((a, b) => {
-        if (b.pointsEarned !== a.pointsEarned) {
-          return b.pointsEarned - a.pointsEarned;
-        }
+      const valid = stats.filter((s): s is NonNullable<typeof s> => s !== null);
+      valid.sort((a, b) => {
+        if (b.pointsEarned !== a.pointsEarned) return b.pointsEarned - a.pointsEarned;
         return b.progress.current - a.progress.current;
       });
-
-      return stats;
+      return valid;
     } catch (error: any) {
       console.error('[ChallengesService] Error in getChallengeStatsForParents:', error.message);
       return [];
@@ -348,7 +350,11 @@ export class ChallengesService {
   }
 
   /**
-   * Получает прогресс выполнения челленджа
+   * Получает прогресс выполнения челленджа.
+   * Every branch now pushes the start/end window into the Firestore
+   * query via `performedAt: { gte, lte }` (composite index
+   * childId+status+performedAt is deployed), so we never pull the
+   * child's full APPROVED history just to filter it down in memory.
    */
   private async getChallengeProgress(challenge: any, childId: string) {
     const rule = typeof challenge.ruleJson === 'string'
@@ -359,27 +365,26 @@ export class ChallengesService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const inWindow = (task?: string, orderByPerformedAt = false) =>
+      this.firestore.findMany(
+        'completions',
+        {
+          childId,
+          status: 'APPROVED',
+          performedAt: { gte: startDate, lte: endDate },
+          ...(task && { taskId: task }),
+        },
+        orderByPerformedAt ? { performedAt: 'asc' } : undefined,
+      );
+
     if (rule.type === 'DAILY_TASK' && rule.taskId) {
-      // Подсчитываем количество дней, когда задание было выполнено
-      const allCompletions = await this.firestore.findMany('completions', {
-        childId,
-        taskId: rule.taskId,
-        status: 'APPROVED',
-      });
-
-      const completions = allCompletions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        return performedAt >= startDate && performedAt <= endDate;
-      });
-
-      // Группируем по дням
+      const completions = await inWindow(rule.taskId);
       const uniqueDays = new Set<string>();
       completions.forEach((c) => {
         const date = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
         date.setHours(0, 0, 0, 0);
         uniqueDays.add(date.toISOString().split('T')[0]);
       });
-
       return {
         current: uniqueDays.size,
         target: rule.minDays || 7,
@@ -388,17 +393,7 @@ export class ChallengesService {
     }
 
     if (rule.type === 'TOTAL_TASKS') {
-      const allCompletions = await this.firestore.findMany('completions', {
-        childId,
-        status: 'APPROVED',
-        ...(rule.taskId && { taskId: rule.taskId }),
-      });
-
-      const completions = allCompletions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        return performedAt >= startDate && performedAt <= endDate;
-      });
-
+      const completions = await inWindow(rule.taskId);
       return {
         current: completions.length,
         target: rule.minCompletions || 10,
@@ -407,18 +402,7 @@ export class ChallengesService {
     }
 
     if (rule.type === 'STREAK') {
-      // Получаем все завершенные задания в период челленджа
-      const allCompletions = await this.firestore.findMany('completions', {
-        childId,
-        status: 'APPROVED',
-        ...(rule.taskId && { taskId: rule.taskId }),
-      }, { performedAt: 'asc' });
-
-      const completions = allCompletions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        return performedAt >= startDate && performedAt <= endDate;
-      });
-
+      const completions = await inWindow(rule.taskId, true);
       if (completions.length === 0) {
         return {
           current: 0,
@@ -475,16 +459,7 @@ export class ChallengesService {
 
     // CONSECUTIVE: N дней подряд конкретное задание (текущая серия, без пропусков)
     if (rule.type === 'CONSECUTIVE' && rule.taskId) {
-      const allCompletions = await this.firestore.findMany('completions', {
-        childId,
-        taskId: rule.taskId,
-        status: 'APPROVED',
-      }, { performedAt: 'asc' });
-
-      const completions = allCompletions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        return performedAt >= startDate && performedAt <= endDate;
-      });
+      const completions = await inWindow(rule.taskId, true);
 
       const daysSet = new Set<string>();
       completions.forEach((c) => {
@@ -535,22 +510,14 @@ export class ChallengesService {
       };
     }
 
-    // TASK_POINTS: суммарные баллы за выполнения конкретного задания
+    // TASK_POINTS: суммарные баллы за выполнения конкретного задания.
+    // Parallelize the task lookup with the completion query.
     if (rule.type === 'TASK_POINTS' && rule.taskId) {
-      const task = await this.firestore.findFirst('tasks', { id: rule.taskId });
+      const [task, completions] = await Promise.all([
+        this.firestore.findFirst('tasks', { id: rule.taskId }),
+        inWindow(rule.taskId),
+      ]);
       const pointsPerCompletion = task?.points || 0;
-
-      const allCompletions = await this.firestore.findMany('completions', {
-        childId,
-        taskId: rule.taskId,
-        status: 'APPROVED',
-      });
-
-      const completions = allCompletions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        return performedAt >= startDate && performedAt <= endDate;
-      });
-
       return {
         current: completions.length * pointsPerCompletion,
         target: rule.minPoints || 100,
