@@ -6,6 +6,30 @@ import { DecayService } from '../motivation/decay.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LoginDto, RegisterDto, ChildPinLoginDto, UpdateProfileDto, ChangePasswordDto } from './dto/auth.dto';
 
+/**
+ * Bcrypt cost. Raised from the legacy value of 10 to 12 in Phase 4 —
+ * 12 ≈ 4× more expensive on a brute-force, still <300 ms on the
+ * server's CPU. Existing 10-round hashes are NOT migrated en masse;
+ * they're transparently re-hashed on the user's next successful
+ * login via maybeRehashPassword(). That way nobody is logged out, and
+ * the cost upgrade rolls out organically over the next few weeks.
+ */
+const BCRYPT_COST = 12;
+
+/**
+ * Detect whether a stored hash uses a cost lower than BCRYPT_COST.
+ * bcryptjs.getRounds() returns the cost factor encoded in the hash;
+ * if it can't parse we treat it as up-to-date to avoid double-rehash
+ * loops on malformed records.
+ */
+function needsRehash(hash: string): boolean {
+  try {
+    return bcrypt.getRounds(hash) < BCRYPT_COST;
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -14,6 +38,22 @@ export class AuthService {
     private decayService: DecayService,
     private ledgerService: LedgerService,
   ) {}
+
+  /**
+   * After a successful password verification, transparently re-hash at
+   * the current cost if the stored hash is older/weaker. Errors here are
+   * swallowed — the login still succeeds; we just try again next time.
+   */
+  private async maybeRehashPassword(userId: string, plainPassword: string, currentHash: string): Promise<void> {
+    if (!needsRehash(currentHash)) return;
+    try {
+      const newHash = await bcrypt.hash(plainPassword, BCRYPT_COST);
+      await this.firestore.update('users', userId, { passwordHash: newHash });
+    } catch (e: any) {
+      // Non-fatal: user is already authenticated; log and move on.
+      console.warn('[AuthService] password rehash failed for user', userId, e?.message);
+    }
+  }
 
   async register(dto: RegisterDto) {
     // Проверяем существование пользователя по email или login
@@ -24,7 +64,7 @@ export class AuthService {
       throw new ConflictException('User with this email or login already exists');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_COST);
     const familyId = dto.familyId || crypto.randomUUID();
     const userId = crypto.randomUUID();
 
@@ -117,6 +157,9 @@ export class AuthService {
 
       console.log('[AuthService] Password valid');
 
+      // Transparent cost upgrade for legacy 10-round hashes.
+      void this.maybeRehashPassword(user.id, dto.password, user.passwordHash);
+
       // Если это ребенок — применяем decay. Раньше тут же шла
       // updateChildBalance "на всякий случай" — больше не нужна:
       // pointsBalance теперь поддерживается транзакционно в createEntry,
@@ -173,6 +216,7 @@ export class AuthService {
     }
 
     console.log('[AuthService] PIN verified successfully');
+    void this.maybeRehashPassword(user.id, dto.pin, user.passwordHash);
 
     // Apply decay on child login. Balance-sync (updateChildBalance) used
     // to live here too; it's gone — balance is now maintained by every
@@ -212,7 +256,7 @@ export class AuthService {
 
     // Обновляем пароль
     if (dto.password) {
-      updateData.passwordHash = await bcrypt.hash(dto.password, 10);
+      updateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_COST);
     }
 
     // Обновляем avatarUrl (для родителя хранится в users, для ребенка в childProfiles)
@@ -257,7 +301,7 @@ export class AuthService {
     }
 
     // Обновляем пароль
-    const newPasswordHash = await bcrypt.hash(dto.newPassword, 10);
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, BCRYPT_COST);
     await this.firestore.update('users', userId, {
       passwordHash: newPasswordHash,
     });
