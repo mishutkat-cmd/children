@@ -115,7 +115,7 @@ export default function ChildAchievements() {
             >
               <Box
                 sx={{
-                  p: 3,
+                  p: { xs: 2, sm: 3 },
                   mb: 3,
                   borderRadius: 3,
                   background: colors.gradients.primary,
@@ -123,7 +123,17 @@ export default function ChildAchievements() {
                   textAlign: 'center',
                 }}
               >
-                <Typography variant="h4" fontWeight="bold">
+                {/*
+                  Russian "Полученные значки" + count + emoji can be 30+
+                  characters. variant="h4" after responsiveFontSizes is
+                  still 1.5rem on xs, so we'd risk wrapping awkwardly
+                  without a tighter explicit cap on phones.
+                */}
+                <Typography
+                  variant="h4"
+                  fontWeight="bold"
+                  sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem', md: '2.125rem' } }}
+                >
                   {t('child.badgesEarned')}: {earnedBadges.length} ⭐
                 </Typography>
               </Box>
@@ -223,8 +233,8 @@ export default function ChildAchievements() {
             animate={{ opacity: 1, scale: 1 }}
           >
             <AnimatedCard>
-              <Box sx={{ p: 5, textAlign: 'center' }}>
-                <Typography variant="h1" sx={{ mb: 2 }}>
+              <Box sx={{ p: { xs: 3, sm: 5 }, textAlign: 'center' }}>
+                <Typography variant="h1" sx={{ mb: 2, fontSize: { xs: '3rem', sm: '6rem' } }}>
                   🎯
                 </Typography>
                 <Typography 

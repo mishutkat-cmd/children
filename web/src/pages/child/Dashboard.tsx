@@ -310,7 +310,14 @@ export default function ChildDashboard() {
 
   return (
     <Layout>
-      <Box sx={{ pb: 2, minHeight: '100vh', background: 'linear-gradient(180deg, #F5F5F7 0%, #FFFFFF 100%)' }}>
+      <Box sx={{
+        pb: 2,
+        // Same dvh-with-fallback pattern as Layout/ErrorBoundary so the
+        // page background reaches the visible bottom on iOS Safari.
+        minHeight: '100dvh',
+        '@supports not (min-height: 100dvh)': { minHeight: '100vh' },
+        background: 'linear-gradient(180deg, #F5F5F7 0%, #FFFFFF 100%)',
+      }}>
         {/* Верхняя панель - Приветствие и дата */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -343,8 +350,11 @@ export default function ChildDashboard() {
                     src={characterImageUrl}
                     alt="Персонаж"
                     sx={{
-                      width: 140,
-                      height: 140,
+                      // 140 was eating ~40% of a 360px viewport and forcing
+                      // the greeting+date column to wrap awkwardly. Step
+                      // down on phones; full size returns from sm up.
+                      width: { xs: 80, sm: 120, md: 140 },
+                      height: { xs: 80, sm: 120, md: 140 },
                       objectFit: 'contain',
                       filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.15))',
                     }}
@@ -495,7 +505,9 @@ export default function ChildDashboard() {
                   boxShadow: `0 8px 32px ${satietyColor}20`,
                   position: 'relative',
                   overflow: 'hidden',
-                  minHeight: 300,
+                  // 300px fixed height left huge whitespace on phones where
+                  // the content (emoji + 5rem number + progress) needs ~220.
+                  minHeight: { xs: 240, md: 300 },
                 }}
               >
                 <Box
@@ -509,9 +521,9 @@ export default function ChildDashboard() {
                     borderRadius: '50%',
                   }}
                 />
-                <CardContent sx={{ position: 'relative', zIndex: 1, p: 4 }}>
+                <CardContent sx={{ position: 'relative', zIndex: 1, p: { xs: 2, md: 4 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                    <Typography sx={{ fontSize: 48 }}>🍽️</Typography>
+                    <Typography sx={{ fontSize: { xs: 36, md: 48 } }}>🍽️</Typography>
                     <Box>
                       <Typography variant="h5" sx={{ fontWeight: 800, color: colors.text.primary }}>
                         Сытость
@@ -581,14 +593,17 @@ export default function ChildDashboard() {
                   background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(102, 126, 234, 0.05) 100%)',
                   border: `2px solid ${colors.primary.main}40`,
                   textAlign: 'center',
-                  p: 2,
-                  minHeight: 300,
+                  p: { xs: 1.5, md: 2 },
+                  // Pair with the HeroCard's xs:240 minHeight — these are
+                  // half-width side cards on phones (xs={6}) so they stack
+                  // 2-up under the hero; 300 left dead vertical space.
+                  minHeight: { xs: 180, md: 300 },
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'center',
                 }}
               >
-                <Typography sx={{ fontSize: 40, mb: 1 }}>⭐</Typography>
+                <Typography sx={{ fontSize: { xs: 32, md: 40 }, mb: 1 }}>⭐</Typography>
                 <Typography variant="h3" sx={{ fontWeight: 800, color: colors.primary.main, mb: 0.5 }}>
                   {pointsBalance}
                 </Typography>
@@ -611,14 +626,14 @@ export default function ChildDashboard() {
                   background: 'linear-gradient(135deg, rgba(237, 137, 54, 0.1) 0%, rgba(237, 137, 54, 0.05) 100%)',
                   border: `2px solid ${colors.warning.main}40`,
                   textAlign: 'center',
-                  p: 2,
-                  minHeight: 300,
+                  p: { xs: 1.5, md: 2 },
+                  minHeight: { xs: 180, md: 300 },
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'center',
                 }}
               >
-                <Typography sx={{ fontSize: 40, mb: 1 }}>🔥</Typography>
+                <Typography sx={{ fontSize: { xs: 32, md: 40 }, mb: 1 }}>🔥</Typography>
                 <Typography variant="h3" sx={{ fontWeight: 800, color: colors.warning.main, mb: 0.5 }}>
                   {currentStreak}
                 </Typography>

@@ -380,11 +380,25 @@ export default function ChildWishlist() {
     <Layout>
       <Box>
         {/* Заголовок */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-          <Box>
+        {/*
+          Header wraps on phones: title "Мой список желаний" + the icons
+          + the "Добавить желание" button summed to ~420px on a 360px
+          viewport and clipped. flexWrap lets the button drop under the
+          title; the icons shrink on xs so the title gets more room
+          before wrapping.
+        */}
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: { xs: 'flex-start', sm: 'center' },
+          flexWrap: 'wrap',
+          gap: 2,
+          mb: { xs: 3, sm: 4 },
+        }}>
+          <Box sx={{ minWidth: 0 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              <FavoriteIcon sx={{ color: colors.error.main, fontSize: '2.5rem' }} />
-              <StarIcon sx={{ color: colors.warning.main, fontSize: '1.8rem', mt: -1 }} />
+              <FavoriteIcon sx={{ color: colors.error.main, fontSize: { xs: '1.75rem', sm: '2.5rem' } }} />
+              <StarIcon sx={{ color: colors.warning.main, fontSize: { xs: '1.25rem', sm: '1.8rem' }, mt: -1 }} />
               <Typography
                 variant="h3"
                 component="h1"
@@ -392,7 +406,7 @@ export default function ChildWishlist() {
                   fontWeight: 700,
                   color: colors.text.primary,
                   letterSpacing: '-0.02em',
-                  fontSize: { xs: '1.75rem', sm: '2rem', md: '2.5rem' },
+                  fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' },
                 }}
               >
                 Мой список желаний
@@ -408,11 +422,12 @@ export default function ChildWishlist() {
             onClick={handleAddWish}
             sx={{
               borderRadius: 2,
-              px: 3,
-              py: 1.5,
+              px: { xs: 2, sm: 3 },
+              py: { xs: 1, sm: 1.5 },
               fontWeight: 600,
               background: colors.primary.main,
               transition: 'all 0.2s',
+              whiteSpace: 'nowrap',
               '&:hover': {
                 background: colors.primary.dark,
                 transform: 'translateY(-2px)',

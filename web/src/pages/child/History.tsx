@@ -134,7 +134,22 @@ export default function ChildHistory() {
               </IconButton>
             </motion.div>
           </Box>
-          <Box sx={{ transform: 'scale(0.8)', transformOrigin: 'top left' }}>
+          {/*
+            Was `transform: scale(0.8)` — that visually shrank the
+            calendar but the un-scaled box still claimed full layout
+            width, leaving a 20% dead column on the right AND making
+            every cell un-tappable below the 44px Apple HIG minimum.
+            Now: hand horizontal overflow to a scroll container so the
+            calendar can keep its real size; finger-pan scrolls if it
+            doesn't fit. -webkit-overflow-scrolling:touch enables iOS
+            momentum.
+          */}
+          <Box sx={{
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            mx: { xs: -1, sm: 0 },
+            px: { xs: 1, sm: 0 },
+          }}>
             <ActivityCalendar
               completions={approvedCompletions || []}
               year={calendarDate.getFullYear()}

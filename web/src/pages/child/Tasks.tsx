@@ -414,6 +414,12 @@ export default function ChildTasks() {
                               backgroundColor: isSelected ? 'rgba(255,255,255,0.3)' : colors.primary.main,
                               color: 'white',
                               fontWeight: 700,
+                              // 7-cell strip on 360px viewport gives ~43px per cell;
+                              // the Russian "Сегодня" label is wider than that and
+                              // forces horizontal overflow of the whole strip. The
+                              // selected/today cell already has its own background
+                              // tint, so on phones the chip is redundant.
+                              display: { xs: 'none', sm: 'inline-flex' },
                             }}
                           />
                         )}
