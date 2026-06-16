@@ -5,7 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import App from './App'
-import { kidsTheme } from './theme'
+import kidsTheme from './theme'
 import ErrorBoundary from './components/ErrorBoundary'
 
 const queryClient = new QueryClient({

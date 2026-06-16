@@ -1,4 +1,4 @@
-import { createTheme } from '@mui/material/styles'
+import { createTheme, responsiveFontSizes } from '@mui/material/styles'
 
 // Цветовая схема в стиле Apple 2022 - минимализм, чистые цвета
 export const colors = {
@@ -303,5 +303,30 @@ export const kidsTheme = createTheme({
         },
       },
     },
+    // Kid-accessibility: 44×44 minimum tap area on every IconButton so
+    // small children's fingers can reliably hit them. MUI default is
+    // padding-driven and frequently lands at ~28-32px in our cards.
+    MuiIconButton: {
+      styleOverrides: {
+        root: {
+          minWidth: 44,
+          minHeight: 44,
+        },
+      },
+    },
   },
 })
+
+// Wrap in responsiveFontSizes so every fixed typography variant
+// (h1=3rem, h2=2.5rem, h3=2rem, …) scales down smoothly at xs/sm
+// breakpoints. Single-line change that eliminates dozens of
+// per-page typography overflow bugs on 360px phones.
+export const kidsThemeResponsive = responsiveFontSizes(kidsTheme, {
+  // Defaults: 2 steps, factor 2. Bump slightly for stronger downscale
+  // on phones — children skew toward big system fonts.
+  factor: 2.5,
+})
+
+// kidsTheme keeps its name for backwards compatibility but main.tsx
+// imports the responsive variant.
+export default kidsThemeResponsive

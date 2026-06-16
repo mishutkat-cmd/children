@@ -72,12 +72,16 @@ class ErrorBoundary extends Component<Props, State> {
       return (
         <Box
           sx={{
-            minHeight: '100vh',
+            // 100dvh keeps the boundary screen filling the visible viewport
+            // on iOS Safari while the URL bar collapses. 100vh fallback
+            // (via @supports negation) covers older WebViews.
+            minHeight: '100dvh',
+            '@supports not (min-height: 100dvh)': { minHeight: '100vh' },
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            p: 4,
+            p: { xs: 2, sm: 4 },
             background: colors.background.default,
           }}
         >

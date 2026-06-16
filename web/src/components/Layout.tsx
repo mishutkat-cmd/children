@@ -215,15 +215,18 @@ export default function Layout({ children }: LayoutProps) {
 
 
   return (
-    <Box 
-      sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        minHeight: '100vh',
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        // 100dvh keeps the page exactly viewport-tall while iOS Safari
+        // collapses its URL bar; 100vh fallback covers older WebViews.
+        minHeight: '100dvh',
+        '@supports not (min-height: 100dvh)': { minHeight: '100vh' },
         background: colors.background.default,
       }}
     >
-      <AppBar 
+      <AppBar
         position="sticky"
         elevation={0}
         sx={{
@@ -232,10 +235,14 @@ export default function Layout({ children }: LayoutProps) {
           borderBottom: '0.5px solid #D2D2D7',
         }}
       >
-        <Toolbar 
-          sx={{ 
-            py: 2, 
-            px: { xs: 3, sm: 4 },
+        <Toolbar
+          sx={{
+            py: 2,
+            // 16px horizontal on phone (iOS HIG) instead of 24px — gives
+            // 16px back to the content column on a 360px viewport.
+            px: { xs: 2, sm: 4 },
+            // Respect notched iPhone safe area on the top edge.
+            pt: 'calc(env(safe-area-inset-top, 0px) + 16px)',
             maxWidth: 1440,
             mx: 'auto',
             width: '100%',
@@ -381,7 +388,7 @@ export default function Layout({ children }: LayoutProps) {
             variant="scrollable"
             scrollButtons="auto"
             sx={{
-              px: { xs: 3, sm: 4 },
+              px: { xs: 2, sm: 4 },
               '& .MuiTabs-indicator': {
                 height: 2,
                 borderRadius: '1px 1px 0 0',
@@ -464,15 +471,20 @@ export default function Layout({ children }: LayoutProps) {
 
       <Box 
         component="main" 
-        sx={{ 
+        sx={{
           flexGrow: 1,
           position: 'relative',
           zIndex: 1,
           maxWidth: 1440,
           mx: 'auto',
           width: '100%',
-          px: { xs: 3, sm: 4 },
-          py: 4,
+          // 16px horizontal on phone — same change as the Toolbar so
+          // the main column is exactly 32px wider on a 360px viewport.
+          px: { xs: 2, sm: 4 },
+          py: { xs: 2, sm: 4 },
+          // Respect notched-iPhone bottom inset for future bottom-nav
+          // and home-indicator clearance.
+          pb: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
         }}
       >
         {children}

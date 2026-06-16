@@ -52,7 +52,13 @@ export default function AnimatedCard({
         }}
         {...cardProps}
       >
-        <CardContent sx={{ flex: 1, p: 3 }}>
+        {/*
+          Default CardContent padding scales down on phones: p: 3 (24px
+          on every side) used to eat 48px out of a 360px viewport. Now
+          16px on xs, 24px from sm up. Consumers can still override sx
+          on the AnimatedCard wrapper.
+        */}
+        <CardContent sx={{ flex: 1, p: { xs: 2, sm: 3 } }}>
           {children}
         </CardContent>
       </Card>
