@@ -1416,7 +1416,7 @@ export default function ParentHome() {
                               📷 Доказательство:
                             </Typography>
                             <Box
-                              component="img"
+                              component="img" loading="lazy" decoding="async"
                               src={completion.proofUrl}
                               alt="Доказательство"
                               sx={{
@@ -1889,7 +1889,7 @@ export default function ParentHome() {
                       <CardContent sx={{ py: 2 }}>
                         {childBadge.badge?.imageUrl ? (
                           <Box
-                            component="img"
+                            component="img" loading="lazy" decoding="async"
                             src={childBadge.badge.imageUrl}
                             alt={childBadge.badge.title}
                             sx={{
@@ -2074,7 +2074,7 @@ export default function ParentHome() {
             return (
               <Card sx={{ borderRadius: 2.5, border: `1.5px solid ${borderColor}20`, background: bgColor, overflow: 'hidden', height: '100%' }}>
                 {ch.imageUrl && (
-                  <Box component="img" src={ch.imageUrl} alt={ch.title}
+                  <Box component="img" loading="lazy" decoding="async" src={ch.imageUrl} alt={ch.title}
                     sx={{ width: '100%', height: 90, objectFit: 'cover', display: 'block' }} />
                 )}
                 <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -55,15 +55,13 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     refetchInterval: 30000, // Обновляем каждые 30 секунд
   })
 
-  const { data: unreadCount } = useQuery({
-    queryKey: ['notifications', 'unread-count'],
-    queryFn: async () => {
-      const response = await api.get('/notifications/unread/count')
-      return response.data?.count || 0
-    },
-    enabled: !!user?.id,
-    refetchInterval: 30000,
-  })
+  // Derive the unread badge from the list we already loaded. The previous
+  // second `/notifications/unread/count` query just polled the same data
+  // on the same 30s interval — pure duplicate.
+  const unreadCount = useMemo(
+    () => (notifications ?? []).filter((n) => !n.read).length,
+    [notifications],
+  )
 
   const markAsReadMutation = useMutation({
     mutationFn: async (notificationId: string) => {
@@ -71,7 +69,6 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
-      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
     },
   })
 
@@ -81,7 +78,6 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
-      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
     },
   })
 

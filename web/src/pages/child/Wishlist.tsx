@@ -453,7 +453,7 @@ export default function ChildWishlist() {
                   <Box sx={{ position: 'relative' }}>
                     {item.rewardGoal?.imageUrl && (
                       <Box
-                        component="img"
+                        component="img" loading="lazy" decoding="async"
                         src={item.rewardGoal.imageUrl}
                         alt={item.rewardGoal.title || 'Фото желания'}
                         onClick={() => {
@@ -664,7 +664,7 @@ export default function ChildWishlist() {
                 {imagePreview ? (
                   <Box sx={{ position: 'relative', display: 'inline-block' }}>
                     <Box
-                      component="img"
+                      component="img" loading="lazy" decoding="async"
                       src={imagePreview}
                       alt="Preview"
                       sx={{
@@ -766,7 +766,7 @@ export default function ChildWishlist() {
               <CloseIcon />
             </IconButton>
             <Box
-              component="img"
+              component="img" loading="lazy" decoding="async"
               src={viewingImageUrl}
               alt="Просмотр изображения"
               sx={{

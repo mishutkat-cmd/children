@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Box, Typography } from '@mui/material'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion-real'
 
 interface PointsAnimationProps {
   points: number

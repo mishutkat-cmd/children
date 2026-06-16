@@ -83,7 +83,7 @@ export const RewardCard: React.FC<RewardCardProps> = ({
         {/* Изображение */}
         {imageUrl && (
           <Box
-            component="img"
+            component="img" loading="lazy" decoding="async"
             src={imageUrl}
             alt={title}
             sx={{

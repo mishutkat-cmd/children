@@ -79,7 +79,7 @@ export default function ChildBadges() {
                     <CardContent sx={{ py: 3 }}>
                       {childBadge.badge?.imageUrl ? (
                         <Box
-                          component="img"
+                          component="img" loading="lazy" decoding="async"
                           src={childBadge.badge.imageUrl}
                           alt={childBadge.badge.title}
                           sx={{

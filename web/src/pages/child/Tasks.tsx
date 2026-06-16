@@ -607,7 +607,7 @@ export default function ChildTasks() {
                 </Button>
                 {proofUrl && (
                   <Box
-                    component="img"
+                    component="img" loading="lazy" decoding="async"
                     src={proofUrl}
                     alt="Proof"
                     sx={{

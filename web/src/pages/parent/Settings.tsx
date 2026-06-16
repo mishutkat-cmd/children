@@ -912,7 +912,7 @@ function CharacterSettings() {
                                 {imageUrl ? (
                                   <Box sx={{ position: 'relative', border: '1px solid #e0e0e0', borderRadius: 1, p: 0.5 }}>
                                     <Box
-                                      component="img"
+                                      component="img" loading="lazy" decoding="async"
                                       src={imageUrl}
                                       alt={`${character.name} - ${stateLabels[state]}`}
                                       sx={{

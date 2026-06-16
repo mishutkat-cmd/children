@@ -77,7 +77,7 @@ export const HeroCard: React.FC<HeroCardProps> = ({
         >
           {characterImage ? (
             <Box
-              component="img"
+              component="img" loading="lazy" decoding="async"
               src={characterImage}
               alt="Персонаж"
               sx={{

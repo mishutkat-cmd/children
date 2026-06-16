@@ -84,7 +84,7 @@ export const PriorityGoalCard = React.memo(function PriorityGoalCard({ goal, pro
                   }}
                 >
                   <Box
-                    component="img"
+                    component="img" loading="lazy" decoding="async"
                     src={goal.imageUrl}
                     alt={goal.title}
                     sx={{

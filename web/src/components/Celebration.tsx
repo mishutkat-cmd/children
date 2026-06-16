@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { Box, Typography, Dialog } from '@mui/material'
-import { motion } from 'framer-motion'
+import { motion } from 'framer-motion-real'
 
 interface CelebrationProps {
   message: string

@@ -145,7 +145,7 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
               Доказательство:
             </Typography>
             <Box
-              component="img"
+              component="img" loading="lazy" decoding="async"
               src={completion.proofUrl}
               alt="Доказательство"
               sx={{

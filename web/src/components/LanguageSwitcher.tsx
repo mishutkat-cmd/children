@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { IconButton, Menu, MenuItem, ListItemText, Tooltip } from '@mui/material'
 import LanguageIcon from '@mui/icons-material/Language'
 import { useState } from 'react'
-import { SUPPORTED_LANGUAGES, type SupportedLanguage, setStoredLanguage } from '../i18n'
+import { SUPPORTED_LANGUAGES, type SupportedLanguage, changeLanguageWithLoad } from '../i18n'
 
 const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
   uk: 'Українська',
@@ -25,8 +25,9 @@ export default function LanguageSwitcher() {
   }
 
   const handleSelect = (lang: SupportedLanguage) => {
-    i18n.changeLanguage(lang)
-    setStoredLanguage(lang)
+    // Lazy-loads the locale's resources if this is the first time the
+    // user picks it; persists to localStorage on success.
+    void changeLanguageWithLoad(lang)
     handleClose()
   }
 

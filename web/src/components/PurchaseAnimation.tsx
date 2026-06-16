@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion-real'
 import { Box, Typography } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard'

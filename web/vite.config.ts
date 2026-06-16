@@ -1,8 +1,29 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      // All `from 'framer-motion'` imports across the SPA resolve to the
+      // local shim by default. Shared components (AnimatedCard, ParentTaskCard,
+      // ChildStatsCard, MetricCard, …) used to drag ~30 KB gz of
+      // framer-motion into every lazy page chunk; the shim renders plain
+      // DOM and silently drops motion props, eliminating that cost.
+      {
+        find: /^framer-motion$/,
+        replacement: path.resolve(__dirname, 'src/lib/motion-shim.tsx'),
+      },
+      // Escape hatch for files that genuinely need real animation
+      // (Celebration, PointsAnimation, PurchaseAnimation, AchievementUnlocked):
+      // they import from 'framer-motion-real' and get the real package.
+      { find: 'framer-motion-real', replacement: 'framer-motion' },
+    ],
+  },
   build: {
     outDir: 'build',
     target: 'ES2020',

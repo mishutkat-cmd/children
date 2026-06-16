@@ -34,7 +34,17 @@ interface ParentTaskCardProps {
   index?: number
 }
 
-export const ParentTaskCard: React.FC<ParentTaskCardProps> = ({
+/**
+ * Wrapped in React.memo with a custom equality check: every cell in the
+ * Tasks page grid was re-rendering on every parent-state tick (markingTaskId
+ * switching, formData typing in the dialog, refetch arriving). Now we only
+ * re-render when something the card actually displays changes.
+ *
+ * Hand-written equality because the prop bag has function props that
+ * change identity per render; we treat them as stable (callers should
+ * use useCallback) and compare the visible-state primitives instead.
+ */
+const ParentTaskCardInner: React.FC<ParentTaskCardProps> = ({
   task,
   isCompleted = false,
   isPending = false,
@@ -424,7 +434,7 @@ export const ParentTaskCard: React.FC<ParentTaskCardProps> = ({
                     Доказательство:
                   </Typography>
                   <Box
-                    component="img"
+                    component="img" loading="lazy" decoding="async"
                     src={pendingCompletion.proofUrl}
                     alt="Доказательство"
                     sx={{
@@ -546,3 +556,22 @@ export const ParentTaskCard: React.FC<ParentTaskCardProps> = ({
     </motion.div>
   )
 }
+
+export const ParentTaskCard = React.memo(ParentTaskCardInner, (prev, next) => {
+  // The list-level callbacks (onEdit/onArchive/...) are stable when the
+  // caller wraps them in useCallback, but we don't enforce that here —
+  // identity-comparing them would defeat the memo for the typical caller.
+  // So we just compare the bits the card actually paints.
+  return (
+    prev.task === next.task &&
+    prev.isCompleted === next.isCompleted &&
+    prev.isPending === next.isPending &&
+    prev.isApproving === next.isApproving &&
+    prev.isRejecting === next.isRejecting &&
+    prev.isMarking === next.isMarking &&
+    prev.showChildStatus === next.showChildStatus &&
+    prev.index === next.index &&
+    prev.pendingCompletion === next.pendingCompletion &&
+    prev.childrenStatuses === next.childrenStatuses
+  )
+})

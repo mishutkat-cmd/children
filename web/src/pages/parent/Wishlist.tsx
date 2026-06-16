@@ -446,7 +446,7 @@ export default function ParentWishlist() {
                       <Box sx={{ position: 'relative' }}>
                         {item.rewardGoal?.imageUrl && (
                           <Box
-                            component="img"
+                            component="img" loading="lazy" decoding="async"
                             src={item.rewardGoal.imageUrl}
                             alt={item.rewardGoal.title}
                             onClick={() => { setViewingImageUrl(item.rewardGoal!.imageUrl!); setImageViewerOpen(true) }}
@@ -667,7 +667,7 @@ export default function ParentWishlist() {
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                     />
                     {imagePreview && (
-                      <Box component="img" src={imagePreview} alt="Preview" sx={{ maxHeight: 160, borderRadius: 2, objectFit: 'cover', border: `1px solid ${colors.background.light}` }} />
+                      <Box component="img" loading="lazy" decoding="async" src={imagePreview} alt="Preview" sx={{ maxHeight: 160, borderRadius: 2, objectFit: 'cover', border: `1px solid ${colors.background.light}` }} />
                     )}
                   </Box>
                 </Box>
@@ -696,7 +696,7 @@ export default function ParentWishlist() {
             >
               <CloseIcon />
             </IconButton>
-            <Box component="img" src={viewingImageUrl} alt="Фото" sx={{ maxWidth: '90vw', maxHeight: '80vh', display: 'block', objectFit: 'contain' }} />
+            <Box component="img" loading="lazy" decoding="async" src={viewingImageUrl} alt="Фото" sx={{ maxWidth: '90vw', maxHeight: '80vh', display: 'block', objectFit: 'contain' }} />
           </Box>
         </Dialog>
       </Box>

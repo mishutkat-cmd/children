@@ -339,7 +339,7 @@ export default function ChildDashboard() {
                   transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
                 >
                   <Box
-                    component="img"
+                    component="img" loading="lazy" decoding="async"
                     src={characterImageUrl}
                     alt="Персонаж"
                     sx={{
@@ -1014,7 +1014,7 @@ export default function ChildDashboard() {
                             <CardContent sx={{ textAlign: 'center', p: 2 }}>
                               {previewImage ? (
                                 <Box
-                                  component="img"
+                                  component="img" loading="lazy" decoding="async"
                                   src={previewImage}
                                   alt={char.name}
                                   sx={{

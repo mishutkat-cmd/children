@@ -115,7 +115,7 @@ export default function CharacterSelection() {
                         <CardContent sx={{ textAlign: 'center', p: 2 }}>
                           {previewImage ? (
                             <Box
-                              component="img"
+                              component="img" loading="lazy" decoding="async"
                               src={previewImage}
                               alt={character.name}
                               sx={{

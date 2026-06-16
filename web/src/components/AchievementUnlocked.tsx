@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion-real'
 import { Box, Typography } from '@mui/material'
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
 import { colors } from '../theme'
@@ -210,7 +210,7 @@ export function AchievementUnlocked({
                   >
                     {imageUrl ? (
                       <Box
-                        component="img"
+                        component="img" loading="lazy" decoding="async"
                         src={imageUrl}
                         alt=""
                         sx={{

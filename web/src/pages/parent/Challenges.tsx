@@ -373,7 +373,7 @@ export default function ParentChallenges() {
                         }}
                       >
                         <Box
-                          component="img"
+                          component="img" loading="lazy" decoding="async"
                           src={challenge.imageUrl}
                           alt={challenge.title}
                           sx={{

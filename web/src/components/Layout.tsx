@@ -28,7 +28,10 @@ import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet'
 import { colors } from '../theme'
 import NotificationBell from './NotificationBell'
-import LanguageSwitcher from './LanguageSwitcher'
+import { lazy, Suspense } from 'react'
+// Lazy: switcher carries i18next + react-i18next + Menu MUI subtree —
+// none of which is needed on the initial render of any dashboard.
+const LanguageSwitcher = lazy(() => import('./LanguageSwitcher'))
 
 interface LayoutProps {
   children: ReactNode
@@ -253,7 +256,9 @@ export default function Layout({ children }: LayoutProps) {
           </Typography>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <LanguageSwitcher />
+            <Suspense fallback={null}>
+              <LanguageSwitcher />
+            </Suspense>
             {effectiveIsParent && (
             <>
               <Tooltip title={t('nav.bonusOrPenalty')}>
