@@ -276,8 +276,14 @@ export default function ParentApprovals() {
                   completion={completion}
                   onApprove={() => approveCompletion.mutate(completion.id)}
                   onReject={() => rejectCompletion.mutate(completion.id)}
-                  isApproving={approveCompletion.isPending}
-                  isRejecting={rejectCompletion.isPending}
+                  isApproving={
+                    approveCompletion.isPending &&
+                    approveCompletion.variables === completion.id
+                  }
+                  isRejecting={
+                    rejectCompletion.isPending &&
+                    rejectCompletion.variables === completion.id
+                  }
                   index={index}
                 />
               ))
@@ -334,9 +340,18 @@ export default function ParentApprovals() {
                   onApprove={() => approveExchange.mutate(exchange.id)}
                   onReject={() => rejectExchange.mutate(exchange.id)}
                   onMarkDelivered={() => markDelivered.mutate(exchange.id)}
-                  isApproving={approveExchange.isPending}
-                  isRejecting={rejectExchange.isPending}
-                  isMarkingDelivered={markDelivered.isPending}
+                  isApproving={
+                    approveExchange.isPending &&
+                    approveExchange.variables === exchange.id
+                  }
+                  isRejecting={
+                    rejectExchange.isPending &&
+                    rejectExchange.variables === exchange.id
+                  }
+                  isMarkingDelivered={
+                    markDelivered.isPending &&
+                    markDelivered.variables === exchange.id
+                  }
                   index={index}
                 />
               ))
