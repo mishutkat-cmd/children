@@ -53,8 +53,14 @@ export default function PointsAnimation({ points, onComplete }: PointsAnimationP
               color: '#007AFF',
               fontWeight: 700,
               textAlign: 'center',
-              fontSize: '3.5rem',
+              // 3.5rem (56px) on a 320px iPhone SE viewport pushed
+              // "+1000 баллов! 🎉" past the screen edge. Scale down
+              // on phones; whiteSpace:nowrap keeps the celebratory
+              // line on one line either way.
+              fontSize: { xs: '2rem', sm: '3.5rem' },
               letterSpacing: '-0.02em',
+              whiteSpace: 'nowrap',
+              px: 2,
             }}
           >
             +{points} баллов! 🎉

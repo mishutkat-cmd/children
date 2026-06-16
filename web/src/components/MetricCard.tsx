@@ -58,29 +58,37 @@ export const MetricCard: React.FC<MetricCardProps> = React.memo(({
         }}
       >
         {/* Иконка + заголовок */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Box
             sx={{
-              width: 40,
-              height: 40,
+              width: { xs: 36, sm: 40 },
+              height: { xs: 36, sm: 40 },
               borderRadius: '12px',
               background: `linear-gradient(135deg, ${g[0]} 0%, ${g[1]} 100%)`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.25rem',
+              fontSize: { xs: '1.1rem', sm: '1.25rem' },
               flexShrink: 0,
               boxShadow: `0 4px 12px ${color}30`,
             }}
           >
             {icon}
           </Box>
+          {/*
+            minWidth:0 on the parent + this flex:1 + ellipsis ensures a
+            long Russian title ("Активные задания месяца") can't push
+            the icon out of the card on a Grid xs={6} layout (~150px
+            card width on a 360px viewport).
+          */}
           <Typography
             sx={{
               fontWeight: 700,
-              fontSize: '0.875rem',
+              fontSize: { xs: '0.8rem', sm: '0.875rem' },
               color: '#1D1D1F',
               lineHeight: 1.2,
+              flex: 1,
+              minWidth: 0,
             }}
           >
             {title}

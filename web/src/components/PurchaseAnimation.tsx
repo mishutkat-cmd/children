@@ -42,6 +42,12 @@ export function PurchaseAnimation({ open, rewardTitle, onClose }: PurchaseAnimat
               transform: 'translate(-50%, -50%)',
               zIndex: 9999,
               pointerEvents: 'none',
+              // Without a width cap the card below could overflow on
+              // phones (it was minWidth:320 + padding:48*2 = 416px on a
+              // 360px viewport). Constrain the container to viewport
+              // minus a small gutter; the card respects width:100%.
+              width: 'calc(100vw - 32px)',
+              maxWidth: 420,
             }}
           >
             <motion.div
@@ -98,12 +104,15 @@ export function PurchaseAnimation({ open, rewardTitle, onClose }: PurchaseAnimat
                   background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
                   backdropFilter: 'blur(30px) saturate(180%)',
                   WebkitBackdropFilter: 'blur(30px) saturate(180%)',
-                  borderRadius: '32px',
-                  padding: '48px',
+                  borderRadius: { xs: '24px', sm: '32px' },
+                  padding: { xs: '24px', sm: '48px' },
                   boxShadow: `0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.2) inset`,
                   border: `2px solid ${colors.success.main}50`,
                   textAlign: 'center',
-                  minWidth: 320,
+                  // minWidth was 320 — fights the container's viewport
+                  // cap on small phones. Drop the floor and let width
+                  // fill the constrained container.
+                  width: '100%',
                 }}
               >
                 {/* Success Icon */}
@@ -119,8 +128,8 @@ export function PurchaseAnimation({ open, rewardTitle, onClose }: PurchaseAnimat
                 >
                   <Box
                     sx={{
-                      width: 120,
-                      height: 120,
+                      width: { xs: 80, sm: 120 },
+                      height: { xs: 80, sm: 120 },
                       borderRadius: '50%',
                       background: `linear-gradient(135deg, ${colors.success.main} 0%, ${colors.success.dark} 100%)`,
                       display: 'flex',
@@ -132,7 +141,7 @@ export function PurchaseAnimation({ open, rewardTitle, onClose }: PurchaseAnimat
                   >
                     <CheckCircleIcon
                       sx={{
-                        fontSize: 64,
+                        fontSize: { xs: 48, sm: 64 },
                         color: 'white',
                       }}
                     />
@@ -172,7 +181,7 @@ export function PurchaseAnimation({ open, rewardTitle, onClose }: PurchaseAnimat
                 >
                   <CardGiftcardIcon
                     sx={{
-                      fontSize: 64,
+                      fontSize: { xs: 48, sm: 64 },
                       color: colors.warning.main,
                       mb: 2,
                     }}

@@ -103,6 +103,11 @@ export function AchievementUnlocked({
               transform: 'translate(-50%, -50%)',
               zIndex: 9999,
               pointerEvents: 'none',
+              // Cap the overlay to the viewport with a small gutter so
+              // long badge titles or a localized headline cannot push
+              // the card past the screen edge on an iPhone SE.
+              width: 'calc(100vw - 32px)',
+              maxWidth: 360,
             }}
           >
             <motion.div
@@ -164,8 +169,10 @@ export function AchievementUnlocked({
                   padding: { xs: 3, sm: 4 },
                   boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
                   textAlign: 'center',
-                  minWidth: 280,
-                  maxWidth: 360,
+                  // Width controlled by the outer container above;
+                  // dropping minWidth so we don't fight the cap on a
+                  // 320px viewport (iPhone SE).
+                  width: '100%',
                   border: '3px solid rgba(255,255,255,0.25)',
                   position: 'relative',
                   overflow: 'hidden',
@@ -196,8 +203,8 @@ export function AchievementUnlocked({
                 >
                   <Box
                     sx={{
-                      width: 100,
-                      height: 100,
+                      width: { xs: 80, sm: 100 },
+                      height: { xs: 80, sm: 100 },
                       borderRadius: '50%',
                       bgcolor: 'rgba(255,255,255,0.25)',
                       display: 'flex',
@@ -222,7 +229,7 @@ export function AchievementUnlocked({
                     ) : (
                       <Typography
                         sx={{
-                          fontSize: '3.5rem',
+                          fontSize: { xs: '2.5rem', sm: '3.5rem' },
                           lineHeight: 1,
                           filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
                         }}

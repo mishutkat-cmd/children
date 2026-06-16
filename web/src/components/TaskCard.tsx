@@ -154,8 +154,22 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           </Typography>
         )}
 
-        {/* Статус и кнопка */}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+        {/*
+          Status + (optional approval) + action button row.
+          For "submitted" status the three pieces together
+          ("Отправлено на проверку" + "⏳ Ожидает одобрения" + button)
+          were ~480px wide while a 360px viewport gave 320px of content
+          width. flexWrap lets the chips share a row and the button
+          drop under them when needed; alignment shifts to flex-start
+          so wrapped chips don't visually float in the middle.
+        */}
+        <Box sx={{
+          display: 'flex',
+          alignItems: { xs: 'stretch', sm: 'center' },
+          flexDirection: { xs: 'column', sm: 'row' },
+          justifyContent: 'space-between',
+          gap: { xs: 1.5, sm: 2 },
+        }}>
           <Chip
             label={config.label}
             size="small"
@@ -185,12 +199,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             startIcon={status === 'completed' ? <CheckCircleIcon /> : null}
             sx={{
               minHeight: { xs: '48px', sm: '56px' },
-              padding: { xs: '12px 24px', sm: '16px 32px' },
+              padding: { xs: '12px 16px', sm: '16px 32px' },
               fontSize: { xs: '1rem', sm: '1.125rem' },
               fontWeight: 700,
               borderRadius: '12px',
               textTransform: 'none',
+              // Full-width on phones (column layout makes flex:1 mean
+              // 'fill the row'); flex:1 on tablet+ keeps it filling the
+              // remaining space next to the chip.
               flex: status === 'completed' ? 'none' : 1,
+              width: { xs: '100%', sm: 'auto' },
               ...(status === 'completed' && {
                 borderColor: config.color,
                 color: config.color,
