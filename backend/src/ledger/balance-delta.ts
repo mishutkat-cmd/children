@@ -22,3 +22,19 @@ export function computeBalanceDelta(type: LedgerType, amount: number): number {
   if (type === 'ADJUST') return a;
   return 0;
 }
+
+/**
+ * Lifetime-earned counter delta. Unlike `computeBalanceDelta`, this only
+ * counts inflow (EARN + BONUS). Used to keep a denormalized
+ * `childProfiles.totalEarned` field that mirrors sum(EARN+BONUS over all
+ * time) — Badge progress for POINTS-type badges asks this question every
+ * time it runs, and reading a denormalized counter is O(1) vs. the legacy
+ * O(history) full-ledger scan it replaces.
+ *
+ * ADJUST is intentionally excluded — it's used as a correcting bookkeeping
+ * entry (cancellations etc.) and isn't a "real" earn for badge purposes.
+ */
+export function computeTotalEarnedDelta(type: LedgerType, amount: number): number {
+  if (type !== 'EARN' && type !== 'BONUS') return 0;
+  return Math.abs(amount || 0);
+}

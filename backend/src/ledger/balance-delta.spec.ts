@@ -1,4 +1,8 @@
-import { computeBalanceDelta, LedgerType } from './balance-delta';
+import {
+  computeBalanceDelta,
+  computeTotalEarnedDelta,
+  LedgerType,
+} from './balance-delta';
 
 /**
  * These tests are the single guardrail against the denormalized
@@ -93,5 +97,50 @@ describe('computeBalanceDelta', () => {
     it.each(matrix)('%s(%i) -> %i', (type, amount, expected) => {
       expect(computeBalanceDelta(type, amount)).toBe(expected);
     });
+  });
+});
+
+/**
+ * totalEarned is a denormalized lifetime EARN+BONUS counter on
+ * childProfiles. It exists so BadgesService can answer "how many points
+ * has this child ever earned" in O(1) instead of scanning the full
+ * ledger. Crucially, ONLY EARN and BONUS count — SPEND/PENALTY/ADJUST
+ * are bookkeeping or outflows and must not move the counter.
+ *
+ * If a regression here ever lets SPEND or PENALTY contribute, badge
+ * progress for POINTS-type badges starts disagreeing with the legacy
+ * reducer over time, and the integrity-check cron will flag drift
+ * forever. These tests pin the sign matrix.
+ */
+describe('computeTotalEarnedDelta', () => {
+  it.each([
+    ['EARN', 10, 10],
+    ['EARN', 0, 0],
+    ['EARN', -7, 7], // caller bug — still counts as positive earn
+    ['BONUS', 5, 5],
+    ['BONUS', -5, 5],
+  ])('counts %s(%i) as +%i', (type, input, expected) => {
+    expect(computeTotalEarnedDelta(type as LedgerType, input)).toBe(expected);
+  });
+
+  it.each([
+    ['SPEND', 10],
+    ['SPEND', -10],
+    ['PENALTY', 3],
+    ['PENALTY', -3],
+    ['ADJUST', 7],
+    ['ADJUST', -7],
+    ['ADJUST', 0],
+  ])('does NOT count %s(%i)', (type, input) => {
+    expect(computeTotalEarnedDelta(type as LedgerType, input)).toBe(0);
+  });
+
+  it('NaN / undefined amount collapse to 0', () => {
+    expect(computeTotalEarnedDelta('EARN', NaN as any)).toBe(0);
+    expect(computeTotalEarnedDelta('BONUS', undefined as any)).toBe(0);
+  });
+
+  it('unknown type returns 0', () => {
+    expect(computeTotalEarnedDelta('GIBBERISH' as LedgerType, 999)).toBe(0);
   });
 });

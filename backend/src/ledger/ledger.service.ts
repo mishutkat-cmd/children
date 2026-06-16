@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { FirestoreService } from '../firestore/firestore.service';
 import { BadgesService } from '../badges/badges.service';
-import { LedgerType, computeBalanceDelta } from './balance-delta';
+import { LedgerType, computeBalanceDelta, computeTotalEarnedDelta } from './balance-delta';
 
 type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
 
@@ -45,6 +45,7 @@ export class LedgerService {
     try {
       const entryId = crypto.randomUUID();
       const delta = computeBalanceDelta(type, amount);
+      const earnDelta = computeTotalEarnedDelta(type, amount);
       // metaJson is a free-form object built by callers (badge logic,
       // streak multipliers, etc) — any `undefined` field in there will
       // make Firestore reject the whole write and bury the balance
@@ -63,11 +64,19 @@ export class LedgerService {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
-      // Atomic write: insert the ledger entry AND adjust pointsBalance on
-      // the child's profile in a single transaction. Replaces the old
-      // pattern of create-then-recompute-from-scratch, which was O(history).
-      // pointsBalance is now an authoritative denormalization; the integrity
-      // check job verifies sum(ledger) == pointsBalance periodically.
+      // Atomic write: insert the ledger entry AND adjust the denormalized
+      // counters on the child's profile in a single transaction.
+      //
+      //   pointsBalance     — running balance (Phase 1 denormalization;
+      //                       integrity-check cron verifies sum(ledger)).
+      //   totalEarned       — lifetime EARN+BONUS only; lets BadgesService
+      //                       answer POINTS-type progress in O(1).
+      //   lastCompletionAt  — timestamp of the most recent COMPLETION
+      //                       ledger entry; lets DecayService answer
+      //                       hasActivityToday in O(1).
+      //
+      // All three are authoritative denormalizations; IntegrityCheckService
+      // audits them periodically.
       await this.firestore.runTransaction(async (tx) => {
         const profilesQuery = this.firestore
           .collection('childProfiles')
@@ -78,11 +87,27 @@ export class LedgerService {
         const ledgerRef = this.firestore.collection('ledgerEntries').doc(entryId);
         tx.set(ledgerRef, entryData);
 
-        if (!profilesSnap.empty && delta !== 0) {
-          tx.update(profilesSnap.docs[0].ref, {
-            pointsBalance: admin.firestore.FieldValue.increment(delta),
+        if (!profilesSnap.empty) {
+          const updates: Record<string, any> = {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
+          };
+          if (delta !== 0) {
+            updates.pointsBalance = admin.firestore.FieldValue.increment(delta);
+          }
+          if (earnDelta !== 0) {
+            updates.totalEarned = admin.firestore.FieldValue.increment(earnDelta);
+          }
+          // refType === 'COMPLETION' is the "real activity" signal that
+          // decay watches. EXCHANGE/MANUAL/DECAY etc. don't reset the
+          // decay clock — only completing a task does.
+          if (refType === 'COMPLETION') {
+            updates.lastCompletionAt = admin.firestore.FieldValue.serverTimestamp();
+          }
+          // Skip the write if nothing actually changed (e.g. ADJUST with
+          // amount=0 and not a completion). Keeps the write count honest.
+          if (Object.keys(updates).length > 1) {
+            tx.update(profilesSnap.docs[0].ref, updates);
+          }
         }
       });
 
@@ -259,16 +284,33 @@ export class LedgerService {
       );
 
       const reverseDelta = -computeBalanceDelta(entry.type, entry.amount);
+      // Same reversal logic for the lifetime-earned counter: if a BONUS
+      // entry is being removed, the totalEarned bump it created must come
+      // back out too. PENALTY/SPEND/ADJUST never contributed to
+      // totalEarned, so the reverse there is 0.
+      const reverseEarnDelta = -computeTotalEarnedDelta(entry.type, entry.amount);
       tx.delete(ledgerRef);
 
-      if (!profilesSnap.empty && reverseDelta !== 0) {
+      if (!profilesSnap.empty) {
         const profileDoc = profilesSnap.docs[0];
-        tx.update(profileDoc.ref, {
-          pointsBalance: admin.firestore.FieldValue.increment(reverseDelta),
+        const updates: Record<string, any> = {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        // Read-after-write isn't possible inside the same tx, but we know
-        // the new value because of the linear adjustment.
+        };
+        if (reverseDelta !== 0) {
+          updates.pointsBalance = admin.firestore.FieldValue.increment(reverseDelta);
+        }
+        if (reverseEarnDelta !== 0) {
+          updates.totalEarned = admin.firestore.FieldValue.increment(reverseEarnDelta);
+        }
+        // lastCompletionAt: we intentionally don't try to "rewind" it
+        // here. To find the previous completion we'd have to read the
+        // full ledger inside the transaction — and deleteLedgerEntry is
+        // only used for manual BONUS/PENALTY removal (never COMPLETION
+        // entries), so the field stays correct in practice. Integrity
+        // check would catch any drift.
+        if (Object.keys(updates).length > 1) {
+          tx.update(profileDoc.ref, updates);
+        }
         const oldBalance = (profileDoc.data() as any).pointsBalance || 0;
         return oldBalance + reverseDelta;
       }
