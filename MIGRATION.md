@@ -1,0 +1,218 @@
+# Миграция Firebase → VPS
+
+Перевод хранения данных с Firestore (`eur3`, мультирегион ЕС) и Firebase Storage
+на локальный SQLite и локальный диск того же VPS.
+
+## Зачем
+
+Замеры сделаны **с самого прод-сервера** `91.227.181.162` против боевого Firestore:
+
+| Операция | Firestore (с VPS) | SQLite (на VPS) |
+|---|---:|---:|
+| самый простой запрос (1 документ, прогретый) | **106 мс** | **0.015 мс** |
+| `ledgerEntries where childId` (329 док.) | 176 мс | ~1 мс |
+| `completions APPROVED orderBy limit 10` | 87 мс | 0.06 мс |
+| `notifications` целиком (1135 док.) | 466 мс | ~5 мс |
+| полный скан `completions` (3961 док.) | 859 мс | ~16 мс |
+| запись | ~150–250 мс (консенсус мультирегиона) | 0.026 мс |
+
+Ключевая цифра — первая. **Минимальная стоимость одного обращения к данным
+падает со 106 мс до 0.015 мс, примерно в 7000 раз.** Дашборд делает такие
+обращения десятками, в 3–4 последовательные волны, поэтому объём данных
+(6305 документов, 4 МБ) роли не играет — платили за сеть, а не за данные.
+
+## Что переносится
+
+| | Было | Стало |
+|---|---|---|
+| Документы | Firestore, 19 коллекций, 6305 док. | SQLite, файл `backend/data/children.db` |
+| Файлы | Firebase Storage, 45 объектов, 33 МБ | диск VPS, `uploads/` + `uploads-private/` |
+| Аутентификация | свой JWT (Firebase Auth **не использовался**) | без изменений |
+| Фронтенд | ходит только в свой REST API | **без изменений** |
+
+Мобильных клиентов и прямых обращений браузера к Firebase нет — миграция
+целиком внутри бэкенда.
+
+## Архитектура хранения
+
+Таблица на коллекцию: `id TEXT PRIMARY KEY, doc TEXT`, где `doc` — JSON
+документа. Схема документная намеренно: боевые данные нерегулярны (у части
+записей нет полей `read`/`status`, `completions.childId` — то `childProfile.id`,
+то `userId`), и нормализация потребовала бы закодировать всю эту
+неоднозначность заранее. Индексы строятся по `json_extract(doc, '$.field')` —
+это настоящие индексные поиски, а не сканы.
+
+Композитные индексы описаны в [schema.ts](backend/src/db/schema.ts) и создаются
+при каждом старте. Это замена композитным индексам Firestore, но без падений
+`INDEX_ERR` в рантайме: раньше отсутствующий индекс на `wishlist orderBy
+priority` приводил к повторному запросу и сортировке в памяти на каждой
+загрузке дашборда.
+
+Даты хранятся строками ISO-8601 UTC. Это не косметика: такой формат
+сортируется лексикографически в том же порядке, что и хронологически, поэтому
+`ORDER BY` и диапазонные `WHERE` работают без разбора дат в SQL.
+
+## Переменные окружения
+
+Добавить в `~/.secrets/children/children.env`:
+
+```bash
+DATABASE_PATH=/home/odoo/crmproject/children/backend/data/children.db
+UPLOADS_PATH=/home/odoo/crmproject/children/uploads
+UPLOADS_PRIVATE_PATH=/home/odoo/crmproject/children/uploads-private
+UPLOADS_PUBLIC_BASE=/uploads
+```
+
+`FIREBASE_SA_PATH` **оставить** — он нужен скрипту миграции и на месяц
+read-only страховки.
+
+Пути должны лежать **вне** `git reset --hard`-зоны или быть в `.gitignore`,
+иначе деплой снесёт базу. `backend/data/` и `uploads*/` добавлены в
+`.gitignore`.
+
+## Публичные и приватные файлы
+
+Разделение обязательное, не косметическое:
+
+- **Публичные** (`avatars`, `badges`, `rewards`, `wishlist`, `characters`) —
+  в Firebase им явно вызывали `makePublic()`, они и так были доступны всем.
+  Лежат в `UPLOADS_PATH`, отдаются Caddy по `/uploads/*`.
+- **Приватные** (`proofs` — фотоподтверждения заданий от ребёнка) — в Firebase
+  отдавались через подписанные ссылки с ограниченным сроком, то есть публичными
+  **не были**. Лежат в `UPLOADS_PRIVATE_PATH` вне веб-корня, отдаются только
+  через авторизованный маршрут `/api/v1/files/*`.
+
+Если положить `proofs` под публичный корень, все фотографии детей станут
+доступны по прямой ссылке без авторизации.
+
+Сейчас файлов пруфов физически нет (у 1113 записей `completions.proofUrl`
+равен `null`), но эндпоинт загрузки работает, поэтому разделение введено сразу.
+
+## Caddy
+
+В `/etc/caddy/Caddyfile`, в блок `children.evolvenext.net`:
+
+```caddy
+children.evolvenext.net {
+    encode gzip
+
+    # Статика загруженных файлов — мимо Node, с годовым кешем.
+    handle_path /uploads/* {
+        root * /home/odoo/crmproject/children/uploads
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
+    reverse_proxy localhost:3010
+    request_body {
+        max_size 50MB
+    }
+}
+```
+
+Имена файлов содержат таймстемп и случайный суффикс и никогда не
+перезаписываются, поэтому `immutable` безопасен.
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+## Порядок переключения
+
+Выполнять при остановленном приложении — иначе записи, сделанные после снятия
+снимка, останутся в Firestore и потеряются.
+
+```bash
+ssh -p 22022 odoo@91.227.181.162
+cd /home/odoo/crmproject/children/backend
+```
+
+**1. Прогон вхолостую (приложение продолжает работать).**
+
+```bash
+node dist/cli/migrate-firestore-to-sqlite.js --dry-run
+```
+
+Проверить в выводе: количество документов по коллекциям, отсутствие
+предупреждения о неизвестных коллекциях, отсутствие строк
+`URL(s) point at objects that do not exist`.
+
+**2. Остановить приложение.**
+
+```bash
+pm2 stop children
+```
+
+**3. Перенести данные и файлы.**
+
+```bash
+node dist/cli/migrate-firestore-to-sqlite.js
+```
+
+Скрипт идемпотентен — пишет по первичному ключу, повторный запуск
+пересинхронизирует, а не задваивает. В конце сам сверяет количество
+документов по каждой коллекции и падает с ненулевым кодом при расхождении.
+
+**4. Проверить базу.**
+
+```bash
+ls -lh data/children.db
+node -e "const D=require('better-sqlite3');const d=new D('data/children.db');
+for (const t of ['users','childProfiles','tasks','completions','ledgerEntries','notifications'])
+  console.log(t, d.prepare('SELECT COUNT(*) n FROM \"'+t+'\"').get().n);"
+```
+
+Ожидается: users 5, childProfiles 2, tasks 25, completions 3961,
+ledgerEntries 1129, notifications 1135.
+
+**5. Запустить и проверить.**
+
+```bash
+pm2 start children
+curl -s https://children.evolvenext.net/health | head -c 400
+curl -s https://children.evolvenext.net/diagnostics | head -c 400
+```
+
+Затем вручную: вход родителя, дашборд, дашборд ребёнка, отметка задания,
+одобрение родителем, начисление баллов, аватар и картинка желания
+отображаются.
+
+## Откат
+
+Firestore остаётся нетронутым снимком на момент переключения (решение: держать
+read-only месяц). Откат — вернуть предыдущий коммит и перезапустить:
+
+```bash
+cd /home/odoo/crmproject/children
+git log --oneline -5
+git reset --hard <коммит-до-миграции>
+cd backend && npm ci && npm run build
+pm2 restart children
+```
+
+Данные, записанные в SQLite после переключения, при откате в Firestore **не
+попадут** — их придётся переносить обратно вручную. Поэтому решение об откате
+имеет смысл принимать в первые часы, а не через неделю.
+
+## Резервные копии
+
+Firestore делал их сам; теперь это наша ответственность. Скрипт
+[scripts/backup-db.sh](scripts/backup-db.sh) снимает консистентную копию через
+`VACUUM INTO` (безопасно на работающей базе, в отличие от `cp`) и чистит старые.
+
+```bash
+crontab -e
+# ежедневно в 4:15
+15 4 * * * /home/odoo/crmproject/children/scripts/backup-db.sh >> /home/odoo/logs/children-backup.log 2>&1
+```
+
+Файлы из `uploads/` в бэкап базы не входят — их копировать отдельно
+(`rsync`/`tar`), они меняются редко.
+
+## Что остаётся после переключения
+
+- `firebase-admin` остаётся в зависимостях на месяц как страховка.
+- `firestore.rules`, `firestore.indexes.json`, `firebase.json` больше ни на что
+  не влияют, но оставлены до окончательного отказа от Firebase.
+- Чтение из Firestore в коде не остаётся нигде — только в скрипте миграции.
