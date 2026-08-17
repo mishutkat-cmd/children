@@ -1,23 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { ChildLocationHistory, ChildLocationRow } from '../types/api'
+import type { ChildLocationHistory, FamilyLocationRow } from '../types/api'
 
 /** Как часто карта подтягивает свежие точки, пока вкладка активна. */
 const MAP_REFRESH_MS = 20_000
 
 /**
- * Последние точки всех детей.
+ * Последние точки всех участников семьи — детей и родителей, включивших шеринг.
  *
  * Опрос идёт только когда вкладка на переднем плане: react-query по умолчанию
  * не тикает в скрытой вкладке, а `refetchIntervalInBackground` мы намеренно
  * не включаем — иначе открытая на весь день вкладка будет дёргать бэкенд ради
  * данных, которых никто не видит.
  */
-export const useChildrenLocations = (enabled = true, poll = true) => {
-  return useQuery<ChildLocationRow[]>({
-    queryKey: ['children-locations'],
+export const useFamilyLocations = (enabled = true, poll = true) => {
+  return useQuery<FamilyLocationRow[]>({
+    queryKey: ['family-locations'],
     queryFn: async () => {
-      const response = await api.get('/locations/children')
+      const response = await api.get('/locations/family')
       // Пока бэкенд с /locations не задеплоен, SPA-fallback отдаёт index.html
       // со статусом 200 — в data приезжает строка. Без этой проверки страница
       // падает на rows.filter(). Ответ не нашего формата = данных нет.
@@ -70,7 +70,7 @@ export const useRequestLocationRefresh = () => {
       return response.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['children-locations'] })
+      queryClient.invalidateQueries({ queryKey: ['family-locations'] })
     },
   })
 }
@@ -94,7 +94,7 @@ export const useUpdateChildLocationSettings = () => {
       return response.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['children-locations'] })
+      queryClient.invalidateQueries({ queryKey: ['family-locations'] })
     },
   })
 }

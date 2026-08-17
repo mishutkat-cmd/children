@@ -109,7 +109,10 @@
       "daysAgo_one": "{{count}} day ago",
       "daysAgo_other": "{{count}} days ago",
       "accuracyMeters": "±{{value}} m",
-      "accuracyKm": "±{{value}} km"
+      "accuracyKm": "±{{value}} km",
+      "you": "You",
+      "parent": "Parent",
+      "selfSharingOff": "You are not sharing your location — turn it on in the mobile app"
     }
   },
   "achievement": {

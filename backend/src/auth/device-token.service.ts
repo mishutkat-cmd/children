@@ -21,10 +21,19 @@ export const DEVICE_TOKEN_TTL = '180d';
 /** Как часто обновляем lastUsedAt. Каждый батч писать не нужно — это лишние записи. */
 const LAST_USED_THROTTLE_MS = 15 * 60 * 1000;
 
+export type LocationSubjectType = 'CHILD' | 'PARENT';
+
 export interface DeviceTokenPayload {
   sub: string; // userId
   familyId: string;
-  childId: string; // childProfileId — кладём в токен, чтобы не резолвить на каждом батче
+  /**
+   * Идентификатор «субъекта» геолокации: для ребёнка это childProfileId,
+   * для родителя — его собственный userId. Имя поля осталось прежним, чтобы
+   * уже выданные 180-дневные токены продолжали работать без перевыпуска.
+   */
+  childId: string;
+  /** Отсутствует в токенах, выданных до появления родительского шеринга. */
+  subjectType?: LocationSubjectType;
   deviceId: string;
   scope: typeof DEVICE_TOKEN_SCOPE;
   jti: string; // id документа в deviceTokens
@@ -33,7 +42,9 @@ export interface DeviceTokenPayload {
 export interface DeviceContext {
   userId: string;
   familyId: string;
+  /** См. DeviceTokenPayload.childId — это id субъекта, не обязательно ребёнка. */
   childId: string;
+  subjectType: LocationSubjectType;
   deviceId: string;
   tokenId: string;
 }
@@ -57,11 +68,17 @@ export class DeviceTokenService {
     familyId: string,
     deviceId: string,
     platform?: string,
-  ): Promise<{ token: string; expiresInDays: number; childId: string }> {
-    const profiles = await this.db.findMany('childProfiles', { userId });
-    const childProfile = profiles[0];
-    if (!childProfile) {
-      throw new UnauthorizedException('Child profile not found');
+    role: LocationSubjectType = 'CHILD',
+  ): Promise<{ token: string; expiresInDays: number; childId: string; subjectType: LocationSubjectType }> {
+    // У родителя нет childProfile, субъектом выступает он сам.
+    let subjectId = userId;
+    if (role === 'CHILD') {
+      const profiles = await this.db.findMany('childProfiles', { userId });
+      const childProfile = profiles[0];
+      if (!childProfile) {
+        throw new UnauthorizedException('Child profile not found');
+      }
+      subjectId = childProfile.id;
     }
 
     const existing = await this.db.findMany('deviceTokens', { userId, deviceId });
@@ -78,7 +95,8 @@ export class DeviceTokenService {
         id: tokenId,
         userId,
         familyId,
-        childId: childProfile.id,
+        childId: subjectId,
+        subjectType: role,
         deviceId,
         platform: platform || 'unknown',
         purpose: DEVICE_TOKEN_SCOPE,
@@ -91,16 +109,17 @@ export class DeviceTokenService {
     const payload: DeviceTokenPayload = {
       sub: userId,
       familyId,
-      childId: childProfile.id,
+      childId: subjectId,
+      subjectType: role,
       deviceId,
       scope: DEVICE_TOKEN_SCOPE,
       jti: tokenId,
     };
 
     const token = await this.jwtService.signAsync(payload, { expiresIn: DEVICE_TOKEN_TTL });
-    this.logger.log(`[DeviceToken] issued for child=${childProfile.id} device=${deviceId}`);
+    this.logger.log(`[DeviceToken] issued for ${role} ${subjectId} device=${deviceId}`);
 
-    return { token, expiresInDays: 180, childId: childProfile.id };
+    return { token, expiresInDays: 180, childId: subjectId, subjectType: role };
   }
 
   /**
@@ -133,6 +152,8 @@ export class DeviceTokenService {
       userId: payload.sub,
       familyId: payload.familyId,
       childId: payload.childId,
+      // Токены, выданные до появления родительского шеринга, — детские.
+      subjectType: payload.subjectType || 'CHILD',
       deviceId: payload.deviceId,
       tokenId: payload.jti,
     };

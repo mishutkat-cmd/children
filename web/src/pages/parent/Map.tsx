@@ -27,11 +27,11 @@ import Layout from '../../components/Layout'
 import { colors } from '../../theme'
 import {
   useChildLocationHistory,
-  useChildrenLocations,
+  useFamilyLocations,
   useRequestLocationRefresh,
 } from '../../hooks/useChildrenLocations'
 import { formatAccuracy, formatAgo, hasCoordinates } from '../../utils/locationFormat'
-import type { ChildLocationRow } from '../../types/api'
+import type { FamilyLocationRow } from '../../types/api'
 
 /**
  * Тайлы OpenStreetMap: без ключа и без биллинга, в отличие от Google Maps.
@@ -63,10 +63,13 @@ const escapeHtml = (value: string): string =>
  * не надо чинить пути к картинкам Leaflet под сборщиком, во-вторых, внутрь
  * можно положить аватар ребёнка.
  */
-const buildChildIcon = (row: ChildLocationRow, selected: boolean): L.DivIcon => {
+const buildChildIcon = (row: FamilyLocationRow, selected: boolean): L.DivIcon => {
   const stale = row.location?.isStale !== false
   const border = selected ? colors.primary.dark : '#FFFFFF'
-  const background = stale ? '#86868B' : colors.primary.main
+  // Родитель — фиолетовый, ребёнок — синий: на карте с несколькими метками
+  // важно различать их не только по аватару.
+  const liveColor = row.role === 'PARENT' ? colors.secondary.main : colors.primary.main
+  const background = stale ? '#86868B' : liveColor
   const initial = escapeHtml((row.name || row.login || '?').trim().charAt(0).toUpperCase())
 
   const inner = row.avatarUrl
@@ -96,7 +99,7 @@ function MapController({
   rows,
   focus,
 }: {
-  rows: ChildLocationRow[]
+  rows: FamilyLocationRow[]
   focus: { childId: string; lat: number; lng: number } | null
 }) {
   const map = useMap()
@@ -129,7 +132,7 @@ function MapController({
 
 export default function ParentMap() {
   const { t } = useTranslation()
-  const { data: rows = [], isLoading, isFetching, refetch, error } = useChildrenLocations()
+  const { data: rows = [], isLoading, isFetching, refetch, error } = useFamilyLocations()
   const requestRefresh = useRequestLocationRefresh()
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -152,7 +155,7 @@ export default function ParentMap() {
       .map((p) => [p.lat, p.lng] as [number, number])
   }, [showTrack, history])
 
-  const focusChild = (row: ChildLocationRow) => {
+  const focusChild = (row: FamilyLocationRow) => {
     setSelectedId(row.childId)
     setShowTrack(false)
     if (hasCoordinates(row.location)) {
@@ -211,7 +214,11 @@ export default function ParentMap() {
                     center={[point.lat, point.lng]}
                     radius={Math.max(point.accuracy, 25)}
                     pathOptions={{
-                      color: point.isStale ? '#86868B' : colors.primary.main,
+                      color: point.isStale
+                        ? '#86868B'
+                        : row.role === 'PARENT'
+                          ? colors.secondary.main
+                          : colors.primary.main,
                       fillOpacity: 0.12,
                       weight: 1,
                     }}
@@ -264,7 +271,7 @@ export default function ParentMap() {
 }
 
 interface CardProps {
-  row: ChildLocationRow
+  row: FamilyLocationRow
   selected: boolean
   trackVisible: boolean
   refreshing: boolean
@@ -296,9 +303,16 @@ function ChildLocationCard({
       <CardActionArea onClick={onSelect} disabled={!point}>
         <CardContent sx={{ pb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
-              {row.name}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
+                {row.name}
+              </Typography>
+              {row.isSelf ? (
+                <Chip size="small" color="secondary" label={t('parent.map.you')} />
+              ) : row.role === 'PARENT' ? (
+                <Chip size="small" variant="outlined" label={t('parent.map.parent')} />
+              ) : null}
+            </Box>
             {point?.battery !== null && point?.battery !== undefined ? (
               <Chip
                 size="small"
@@ -312,7 +326,7 @@ function ChildLocationCard({
 
           {!row.trackingEnabled ? (
             <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
-              {t('parent.map.trackingDisabled')}
+              {row.isSelf ? t('parent.map.selfSharingOff') : t('parent.map.trackingDisabled')}
             </Typography>
           ) : !point ? (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -347,7 +361,7 @@ function ChildLocationCard({
           size="small"
           startIcon={refreshing ? <CircularProgress size={14} /> : <MyLocationIcon />}
           onClick={onRequestRefresh}
-          disabled={!row.trackingEnabled || refreshing}
+          disabled={!row.trackingEnabled || refreshing || row.isSelf}
         >
           {t('parent.map.updateNow')}
         </Button>

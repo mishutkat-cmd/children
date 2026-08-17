@@ -267,9 +267,13 @@ export interface ChildLocation {
   isStale: boolean
 }
 
-export interface ChildLocationRow {
+export interface FamilyLocationRow {
+  /** Id субъекта: профиль ребёнка или userId родителя. */
   childId: string
   userId: string
+  role: 'CHILD' | 'PARENT'
+  /** Это вы сами — карточка помечается и не предлагает «обновить». */
+  isSelf: boolean
   name: string
   login: string
   avatarUrl?: string | null

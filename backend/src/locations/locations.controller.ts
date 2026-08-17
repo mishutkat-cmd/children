@@ -18,6 +18,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
 import {
   HistoryQueryDto,
+  UpdateMySharingDto,
   UpdateChildLocationSettingsDto,
   UpdateFamilyLocationSettingsDto,
 } from './dto/locations.dto';
@@ -29,11 +30,29 @@ import {
 export class LocationsController {
   constructor(private locationsService: LocationsService) {}
 
-  /** Что ребёнок знает о собственном шеринге. Объявлен ДО ':childId'-роутов. */
+  /** Что участник знает о собственном шеринге. Объявлен ДО ':childId'-роутов. */
   @Get('me/status')
-  @Roles('CHILD')
+  @Roles('CHILD', 'PARENT')
   getMyStatus(@User() user: RequestUser) {
-    return this.locationsService.getMyStatus(user.userId, user.familyId);
+    return this.locationsService.getMyStatus(
+      user.userId,
+      user.familyId,
+      user.role === 'PARENT' ? 'PARENT' : 'CHILD',
+    );
+  }
+
+  /** Родитель сам решает, делиться ли своим местоположением с семьёй. */
+  @Patch('me/sharing')
+  @Roles('PARENT')
+  setMySharing(@User() user: RequestUser, @Body() dto: UpdateMySharingDto) {
+    return this.locationsService.setMySharing(user.userId, user.familyId, dto.enabled);
+  }
+
+  /** Вся семья на карте: дети и родители, включившие шеринг. */
+  @Get('family')
+  @Roles('PARENT')
+  getFamilyMembers(@User() user: RequestUser) {
+    return this.locationsService.getFamilyMembers(user.familyId, user.userId);
   }
 
   @Get('children')

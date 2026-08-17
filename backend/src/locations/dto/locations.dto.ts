@@ -150,3 +150,8 @@ export class HistoryQueryDto {
   @Max(1000)
   limit?: number;
 }
+
+export class UpdateMySharingDto {
+  @IsBoolean()
+  enabled: boolean;
+}

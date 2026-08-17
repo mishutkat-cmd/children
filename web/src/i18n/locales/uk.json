@@ -112,7 +112,10 @@
       "daysAgo_few": "{{count}} дні тому",
       "daysAgo_many": "{{count}} днів тому",
       "accuracyMeters": "±{{value}} м",
-      "accuracyKm": "±{{value}} км"
+      "accuracyKm": "±{{value}} км",
+      "you": "Ви",
+      "parent": "Батьки",
+      "selfSharingOff": "Ви не ділитеся своїм місцезнаходженням — увімкніть у мобільному застосунку"
     }
   },
   "achievement": {

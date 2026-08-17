@@ -94,10 +94,18 @@ export class AuthController {
    */
   @Post('device-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('CHILD')
+  // Родитель тоже может делиться своим местоположением с семьёй — но только
+  // по явному согласию, которое включается в /locations/me/sharing.
+  @Roles('CHILD', 'PARENT')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async issueDeviceToken(@User() user: RequestUser, @Body() dto: IssueDeviceTokenDto) {
-    return this.deviceTokenService.issue(user.userId, user.familyId, dto.deviceId, dto.platform);
+    return this.deviceTokenService.issue(
+      user.userId,
+      user.familyId,
+      dto.deviceId,
+      dto.platform,
+      user.role === 'PARENT' ? 'PARENT' : 'CHILD',
+    );
   }
 }

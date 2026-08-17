@@ -1,7 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DocStore } from '../db/doc-store.service';
-import { DeviceTokenService, DeviceContext } from '../auth/device-token.service';
+import {
+  DeviceTokenService,
+  DeviceContext,
+  type LocationSubjectType,
+} from '../auth/device-token.service';
 import { getChildProfileId } from '../db/doc-helpers';
 import { hasCoordinates, sanitizePoints, type PreparedPoint } from './location-rules';
 import {
@@ -37,6 +41,23 @@ export class LocationsService {
     private deviceTokenService: DeviceTokenService,
   ) {}
 
+  /**
+   * Включён ли шеринг у конкретного участника семьи.
+   *
+   * Асимметрия намеренная: для ребёнка это родительский контроль и он включён
+   * по умолчанию, а родитель делится своим местоположением только по явному
+   * согласию — молча начать отслеживать взрослого недопустимо.
+   */
+  private isSharingEnabled(
+    settings: any,
+    subjectId: string,
+    subjectType: LocationSubjectType,
+  ): boolean {
+    if (settings.enabled === false) return false;
+    const cfg = settings.perChild?.[subjectId] || {};
+    return subjectType === 'PARENT' ? cfg.enabled === true : cfg.enabled !== false;
+  }
+
   // ─────────────────────────────────────────────────────────────
   // Приём точек с устройства ребёнка
   // ─────────────────────────────────────────────────────────────
@@ -48,7 +69,7 @@ export class LocationsService {
   async ingest(ctx: DeviceContext, dto: IngestBatchDto) {
     const settings = await this.getSettings(ctx.familyId);
     const childCfg = settings.perChild?.[ctx.childId] || {};
-    const trackingEnabled = settings.enabled !== false && childCfg.enabled !== false;
+    const trackingEnabled = this.isSharingEnabled(settings, ctx.childId, ctx.subjectType);
 
     if (!trackingEnabled) {
       // Родитель выключил шеринг. Отвечаем 200 и говорим устройству остановиться —
@@ -141,6 +162,7 @@ export class LocationsService {
     return {
       familyId: ctx.familyId,
       childId: ctx.childId,
+      subjectType: ctx.subjectType,
       userId: ctx.userId,
       deviceId: ctx.deviceId,
       lat: p.lat,
@@ -199,6 +221,83 @@ export class LocationsService {
     return rows.filter(Boolean);
   }
 
+  /**
+   * Все участники семьи на карте: дети и те родители, кто включил шеринг.
+   *
+   * Отдельный метод, а не расширение getFamilyLocations: старый эндпоинт
+   * /locations/children вызывает уже выпущенная мобильная сборка, и менять
+   * его форму ответа под ней нельзя.
+   */
+  async getFamilyMembers(familyId: string, currentUserId: string) {
+    const [users, settings] = await Promise.all([
+      this.db.findMany('users', { familyId }),
+      this.getSettings(familyId),
+    ]);
+
+    const rows = await Promise.all(
+      users.map(async (user: any) => {
+        const isParent = user.role === 'PARENT';
+
+        // Субъект геолокации: у ребёнка — профиль, у родителя — он сам.
+        let subjectId = user.id;
+        let name = user.login;
+        let avatarUrl: string | null = user.avatarUrl || null;
+
+        if (!isParent) {
+          const profiles = await this.db.findMany('childProfiles', { userId: user.id });
+          const profile = profiles[0];
+          if (!profile) return null;
+          subjectId = profile.id;
+          name = profile.name || user.login;
+          avatarUrl = profile.avatarUrl || null;
+        }
+
+        const sharing = this.isSharingEnabled(settings, subjectId, isParent ? 'PARENT' : 'CHILD');
+
+        // Родителя, который не делится, в списке не показываем вовсе — иначе
+        // карта превращается в перечень тех, кто «отказался».
+        if (isParent && !sharing && user.id !== currentUserId) return null;
+
+        const doc = this.db.getSync(LAST_COLLECTION, subjectId);
+
+        return {
+          childId: subjectId,
+          userId: user.id,
+          role: isParent ? 'PARENT' : 'CHILD',
+          isSelf: user.id === currentUserId,
+          name,
+          login: user.login,
+          avatarUrl,
+          trackingEnabled: sharing,
+          location: hasCoordinates(doc) ? this.toLocationResponse(doc) : null,
+        };
+      }),
+    );
+
+    // Дети первыми: ради них карта и открывается.
+    return rows
+      .filter(Boolean)
+      .sort((a: any, b: any) => (a.role === b.role ? 0 : a.role === 'CHILD' ? -1 : 1));
+  }
+
+  /** Родитель включает или выключает передачу собственного местоположения. */
+  async setMySharing(userId: string, familyId: string, enabled: boolean) {
+    await this.db.set(
+      SETTINGS_COLLECTION,
+      familyId,
+      { familyId, perChild: { [userId]: { enabled } }, updatedAt: new Date() },
+      { merge: true },
+    );
+
+    // Выключил — отзываем токены его устройств, чтобы телефон перестал слать
+    // координаты сразу, а не после следующего запуска приложения.
+    if (!enabled) {
+      await this.deviceTokenService.revokeAllForUser(userId);
+    }
+
+    return { enabled };
+  }
+
   /** История за период — для трека на карте. */
   async getHistory(familyId: string, childIdOrUserId: string, from?: string, to?: string, limit = 500) {
     const childId = await this.resolveChildId(familyId, childIdOrUserId);
@@ -239,18 +338,23 @@ export class LocationsService {
   }
 
   /** Ребёнок видит, что именно о нём известно — требование прозрачности. */
-  async getMyStatus(userId: string, familyId: string) {
-    const profiles = await this.db.findMany('childProfiles', { userId });
-    const profile = profiles[0];
-    if (!profile) throw new NotFoundException('Child profile not found');
+  async getMyStatus(userId: string, familyId: string, role: LocationSubjectType = 'CHILD') {
+    let subjectId = userId;
+    if (role === 'CHILD') {
+      const profiles = await this.db.findMany('childProfiles', { userId });
+      const profile = profiles[0];
+      if (!profile) throw new NotFoundException('Child profile not found');
+      subjectId = profile.id;
+    }
 
     const settings = await this.getSettings(familyId);
-    const childCfg = settings.perChild?.[profile.id] || {};
-    const doc = this.db.getSync(LAST_COLLECTION, profile.id);
+    const childCfg = settings.perChild?.[subjectId] || {};
+    const doc = this.db.getSync(LAST_COLLECTION, subjectId);
 
     return {
-      childId: profile.id,
-      trackingEnabled: settings.enabled !== false && childCfg.enabled !== false,
+      childId: subjectId,
+      subjectType: role,
+      trackingEnabled: this.isSharingEnabled(settings, subjectId, role),
       historyDays: childCfg.historyDays ?? settings.historyDays,
       movingIntervalSec: settings.movingIntervalSec,
       idleIntervalSec: settings.idleIntervalSec,
