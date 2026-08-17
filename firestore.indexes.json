@@ -69,6 +69,14 @@
         { "fieldPath": "read",     "order": "ASCENDING" },
         { "fieldPath": "createdAt","order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "locationPoints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "childId",   "order": "ASCENDING" },
+        { "fieldPath": "capturedAt","order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -1,13 +1,26 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Patch, Get, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { LoginDto, RegisterDto, ChildPinLoginDto, UpdateProfileDto, ChangePasswordDto } from './dto/auth.dto';
+import { DeviceTokenService } from './device-token.service';
+import {
+  LoginDto,
+  RegisterDto,
+  ChildPinLoginDto,
+  UpdateProfileDto,
+  ChangePasswordDto,
+  IssueDeviceTokenDto,
+} from './dto/auth.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private deviceTokenService: DeviceTokenService,
+  ) {}
 
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -73,5 +86,18 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getProfile(@User() user: RequestUser) {
     return this.authService.getProfile(user.userId);
+  }
+
+  /**
+   * Обмен обычного (суточного) токена ребёнка на долгоживущий токен устройства
+   * для фоновой отправки геолокации. Скоуп токена — только POST /locations/batch.
+   */
+  @Post('device-token')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CHILD')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async issueDeviceToken(@User() user: RequestUser, @Body() dto: IssueDeviceTokenDto) {
+    return this.deviceTokenService.issue(user.userId, user.familyId, dto.deviceId, dto.platform);
   }
 }

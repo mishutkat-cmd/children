@@ -17,6 +17,7 @@ import { LedgerModule } from './ledger/ledger.module';
 import { MotivationModule } from './motivation/motivation.module';
 import { BadgesModule } from './badges/badges.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { LocationsModule } from './locations/locations.module';
 import { StorageKvModule } from './storage-kv/storage-kv.module';
 
 @Module({
@@ -40,6 +41,7 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
     MotivationModule,
     BadgesModule,
     NotificationsModule,
+    LocationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

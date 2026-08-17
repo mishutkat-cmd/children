@@ -102,6 +102,7 @@ async function bootstrap() {
         '/motivation',
         '/wishlist',
         '/notifications',
+        '/locations',
         '/upload',
         '/health',
         '/diagnostics',

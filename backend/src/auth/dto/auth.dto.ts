@@ -61,6 +61,16 @@ export class UpdateProfileDto {
   avatarUrl?: string;
 }
 
+export class IssueDeviceTokenDto {
+  @IsString()
+  @MinLength(8)
+  deviceId: string;
+
+  @IsString()
+  @IsOptional()
+  platform?: string;
+}
+
 export class ChangePasswordDto {
   @IsString()
   currentPassword: string;

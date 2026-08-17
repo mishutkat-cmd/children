@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { DeviceTokenService } from './device-token.service';
 import { FirestoreModule } from '../firestore/firestore.module';
 import { MotivationModule } from '../motivation/motivation.module';
 import { LedgerModule } from '../ledger/ledger.module';
@@ -30,7 +31,7 @@ import { LedgerModule } from '../ledger/ledger.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  providers: [AuthService, JwtStrategy, DeviceTokenService],
+  exports: [AuthService, DeviceTokenService],
 })
 export class AuthModule {}
