@@ -327,7 +327,12 @@ export class TasksService {
     return this.findOne(id, familyId);
   }
 
-  async getChildTasks(childId: string, familyId: string, todayOnly: boolean = false) {
+  async getChildTasks(
+    childId: string,
+    familyId: string,
+    todayOnly: boolean = false,
+    pagination?: { limit: number; offset: number },
+  ) {
     const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
@@ -350,29 +355,61 @@ export class TasksService {
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
 
-    // One query for every task's completions, not one per task. With 25 active
-    // tasks this was 25 sequential round-trips; the date filter that used to
-    // run in memory (Firestore could not combine it with the equality filters)
-    // is now part of the query.
     const taskIds = tasks.map((t: any) => t.id);
-    const where: any = { childId: childProfileId, taskId: { in: taskIds } };
+    let tasksWithCompletions: any[];
+
     if (todayOnly) {
-      where.status = 'APPROVED';
-      where.performedAt = { gte: today, lt: tomorrow };
-    }
-    const allCompletions = taskIds.length ? await this.db.findMany('completions', where) : [];
+      // Today's view is naturally bounded — one query, one day.
+      const where: any = {
+        childId: childProfileId,
+        taskId: { in: taskIds },
+        status: 'APPROVED',
+        performedAt: { gte: today, lt: tomorrow },
+      };
+      const todays = taskIds.length ? await this.db.findMany('completions', where) : [];
+      const byTask = new Map<string, any[]>();
+      for (const c of todays) {
+        const list = byTask.get(c.taskId) ?? [];
+        list.push(c);
+        byTask.set(c.taskId, list);
+      }
+      tasksWithCompletions = tasks.map((task: any) => ({
+        ...task,
+        completions: byTask.get(task.id) ?? [],
+      }));
+    } else {
+      // Full history: paginated per task. Fetching it whole meant returning
+      // every completion the child had ever recorded — ~4000 rows — and the
+      // response grew with every task they finished.
+      //
+      // One query per task here, rather than one for all of them, because
+      // SQL has no per-group LIMIT. With ~25 active tasks that is 25 indexed
+      // reads of at most `limit` rows each, which is far less work than
+      // loading the entire history was.
+      const limit = pagination?.limit ?? 20;
+      const offset = pagination?.offset ?? 0;
 
-    const completionsByTask = new Map<string, any[]>();
-    for (const c of allCompletions) {
-      const list = completionsByTask.get(c.taskId) ?? [];
-      list.push(c);
-      completionsByTask.set(c.taskId, list);
+      tasksWithCompletions = await Promise.all(
+        tasks.map(async (task: any) => {
+          const [page, total] = await Promise.all([
+            this.db.findMany(
+              'completions',
+              { childId: childProfileId, taskId: task.id },
+              { performedAt: 'desc' },
+              offset + limit,
+            ),
+            this.db.count('completions', { childId: childProfileId, taskId: task.id }),
+          ]);
+          return {
+            ...task,
+            completions: page.slice(offset, offset + limit),
+            completionsTotal: total,
+            completionsLimit: limit,
+            completionsOffset: offset,
+          };
+        }),
+      );
     }
-
-    const tasksWithCompletions = tasks.map((task: any) => ({
-      ...task,
-      completions: completionsByTask.get(task.id) ?? [],
-    }));
 
     // Filter by frequency for today
     if (todayOnly) {

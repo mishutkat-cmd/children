@@ -16,6 +16,23 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
 import { CreateTaskDto, UpdateTaskDto, AssignTaskDto } from './dto/tasks.dto';
 
+/**
+ * Completion history is paginated per task. The default keeps a request light
+ * while still covering a normal review window; the ceiling stops a client
+ * asking for the whole history in one go, which is what this endpoint used to
+ * return unconditionally.
+ */
+const DEFAULT_HISTORY_LIMIT = 20;
+const MAX_HISTORY_LIMIT = 200;
+const MAX_HISTORY_OFFSET = 100000;
+
+function parsePositiveInt(raw: string | undefined, fallback: number, max: number): number {
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return fallback;
+  return Math.min(Math.floor(value), max);
+}
+
 @Controller('tasks')
 @UseGuards(JwtAuthGuard)
 export class TasksController {
@@ -128,10 +145,24 @@ export class TasksController {
     return this.tasksService.getChildTasksForDate(user.userId, user.familyId, date);
   }
 
+  /**
+   * The child's tasks with their completion history.
+   *
+   * The history is paginated per task. Unbounded, this returned every
+   * completion the child has ever recorded — nearly 4000 rows in production —
+   * on a single request, and it grew with every task done.
+   */
   @Get('child/tasks/all')
   @UseGuards(RolesGuard)
   @Roles('CHILD')
-  getAllTasks(@User() user: RequestUser) {
-    return this.tasksService.getChildTasks(user.userId, user.familyId, false);
+  getAllTasks(
+    @User() user: RequestUser,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.tasksService.getChildTasks(user.userId, user.familyId, false, {
+      limit: parsePositiveInt(limit, DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT),
+      offset: parsePositiveInt(offset, 0, MAX_HISTORY_OFFSET),
+    });
   }
 }

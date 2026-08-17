@@ -56,7 +56,11 @@ export const COLLECTIONS: Record<string, string[][]> = {
   taskAssignments: [['taskId'], ['childId']],
   completions: [
     ['childId', 'status', 'performedAt'],
-    ['childId', 'taskId'],
+    // Ordering column included so the per-task history page is a straight
+    // index walk. Filtering on (childId, taskId) alone left SQLite sorting
+    // every one of that task's completions into a temp B-tree just to take
+    // the newest twenty.
+    ['childId', 'taskId', 'performedAt'],
     ['childId', 'performedAt'],
     ['familyId', 'status', 'createdAt'],
     ['taskId'],
