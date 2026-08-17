@@ -16,17 +16,17 @@
 import '../config/env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { computeTotalEarnedDelta } from '../ledger/balance-delta';
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
-  const firestore = app.get(FirestoreService);
+  const db = app.get(DocStore);
 
   console.log('[backfill-totals] loading childProfiles...');
-  const profiles = await firestore.findMany('childProfiles', {});
+  const profiles = await db.findMany('childProfiles', {});
   console.log(`[backfill-totals] profiles=${profiles.length}`);
 
   let updated = 0;
@@ -41,7 +41,7 @@ async function main() {
       continue;
     }
     try {
-      const entries = await firestore.findMany('ledgerEntries', { childId: userId });
+      const entries = await db.findMany('ledgerEntries', { childId: userId });
 
       let totalEarned = 0;
       let lastCompletionAt: Date | null = null;
@@ -60,7 +60,7 @@ async function main() {
 
       const patch: Record<string, any> = { totalEarned };
       if (lastCompletionAt) patch.lastCompletionAt = lastCompletionAt;
-      await firestore.update('childProfiles', profile.id, patch);
+      await db.update('childProfiles', profile.id, patch);
       updated++;
       console.log(
         `[backfill-totals] profile=${profile.id} userId=${userId} ` +

@@ -22,7 +22,7 @@
 import '../config/env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 
 const TARGETS: Array<{ collection: string; fields: string[]; defaultFor: (f: string) => any }> = [
   { collection: 'childProfiles', fields: ['streakState'], defaultFor: () => ({}) },
@@ -48,7 +48,7 @@ async function main() {
     logger: ['error', 'warn', 'log'],
   });
 
-  const firestore = app.get(FirestoreService);
+  const db = app.get(DocStore);
 
   let totalScanned = 0;
   let totalMigrated = 0;
@@ -62,7 +62,7 @@ async function main() {
 
     let docs: any[] = [];
     try {
-      docs = await firestore.findMany(target.collection, {});
+      docs = await db.findMany(target.collection, {});
     } catch (err: any) {
       console.error(`[migrate-json] ${target.collection}: list failed: ${err?.message}`);
       totalErrors++;
@@ -81,7 +81,7 @@ async function main() {
       if (Object.keys(updates).length === 0) continue;
 
       try {
-        await firestore.update(target.collection, doc.id, updates);
+        await db.update(target.collection, doc.id, updates);
         migrated++;
         console.log(
           `[migrate-json] ${target.collection}/${doc.id} migrated fields: ${Object.keys(updates).join(', ')}`,

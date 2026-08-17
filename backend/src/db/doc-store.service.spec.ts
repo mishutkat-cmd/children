@@ -265,6 +265,86 @@ describe('DocStore', () => {
     });
   });
 
+  describe('setSync', () => {
+    it('creates the document when it does not exist', () => {
+      store.setSync('locationSettings', 'fam-1', { enabled: true }, { merge: true });
+      expect(store.getSync('locationSettings', 'fam-1').enabled).toBe(true);
+    });
+
+    it('merges into an existing document and preserves createdAt', () => {
+      store.setSync('locationSettings', 'fam-1', { enabled: true, historyDays: 7 });
+      const created = store.getSync('locationSettings', 'fam-1').createdAt;
+
+      store.setSync('locationSettings', 'fam-1', { historyDays: 30 }, { merge: true });
+
+      const settings = store.getSync('locationSettings', 'fam-1');
+      expect(settings.enabled).toBe(true);
+      expect(settings.historyDays).toBe(30);
+      expect(settings.createdAt.toISOString()).toBe(created.toISOString());
+    });
+
+    it('replaces wholesale without merge', () => {
+      store.setSync('locationSettings', 'fam-1', { enabled: true, historyDays: 7 });
+      store.setSync('locationSettings', 'fam-1', { historyDays: 30 });
+
+      const settings = store.getSync('locationSettings', 'fam-1');
+      expect(settings.historyDays).toBe(30);
+      expect(settings.enabled).toBeUndefined();
+    });
+
+    it('merges one level down without clobbering sibling keys', () => {
+      store.setSync('locationSettings', 'fam-1', {
+        perChild: { 'child-a': { enabled: true }, 'child-b': { enabled: true } },
+      });
+
+      store.setSync(
+        'locationSettings',
+        'fam-1',
+        { perChild: { 'child-b': { enabled: false } } },
+        { merge: true, mergeNested: true },
+      );
+
+      // Turning tracking off for one child must not silently re-enable or drop
+      // the other child's settings.
+      const perChild = store.getSync('locationSettings', 'fam-1').perChild;
+      expect(perChild['child-a']).toEqual({ enabled: true });
+      expect(perChild['child-b']).toEqual({ enabled: false });
+    });
+
+    it('replaces a nested key when nested merging is off', () => {
+      store.setSync('locationSettings', 'fam-1', { perChild: { a: { enabled: true } } });
+      store.setSync('locationSettings', 'fam-1', { perChild: { b: { enabled: true } } }, { merge: true });
+      expect(store.getSync('locationSettings', 'fam-1').perChild).toEqual({ b: { enabled: true } });
+    });
+  });
+
+  describe('deleteManySync', () => {
+    it('deletes matching documents and reports the count', () => {
+      store.createSync('locationPoints', { childId: 'c1' }, 'p1');
+      store.createSync('locationPoints', { childId: 'c1' }, 'p2');
+      store.createSync('locationPoints', { childId: 'c2' }, 'p3');
+
+      expect(store.deleteManySync('locationPoints', { childId: 'c1' })).toBe(2);
+      expect(store.countSync('locationPoints')).toBe(1);
+    });
+
+    it('deletes by an expiry cutoff — the TTL Firestore used to do for us', () => {
+      store.createSync('locationPoints', { childId: 'c1', expiresAt: new Date('2026-01-01') }, 'old');
+      store.createSync('locationPoints', { childId: 'c1', expiresAt: new Date('2099-01-01') }, 'fresh');
+
+      const removed = store.deleteManySync('locationPoints', { expiresAt: { lt: new Date('2026-06-01') } });
+
+      expect(removed).toBe(1);
+      expect(store.getSync('locationPoints', 'fresh')).not.toBeNull();
+    });
+
+    it('refuses to wipe a collection when the filter matched nothing meaningful', () => {
+      store.createSync('locationPoints', { childId: 'c1' }, 'p1');
+      expect(store.deleteManySync('locationPoints', { childId: { in: [] } })).toBe(0);
+      expect(store.countSync('locationPoints')).toBe(1);
+    });
+  });
+
   describe('count and delete', () => {
     it('counts with and without a filter', () => {
       store.createSync('completions', { childId: 'c1', status: 'APPROVED' });

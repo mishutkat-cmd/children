@@ -1,16 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { CompletionsService } from '../completions/completions.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { timestampToDate } from '../firestore/firestore.helpers';
+import { timestampToDate } from '../db/doc-helpers';
 
 @Injectable()
 export class TasksSchedulerService {
   private readonly logger = new Logger(TasksSchedulerService.name);
 
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private completionsService: CompletionsService,
     private ledgerService: LedgerService,
   ) {}
@@ -34,7 +34,7 @@ export class TasksSchedulerService {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const parents = await this.firestore.findMany('users', { role: 'PARENT' });
+      const parents = await this.db.findMany('users', { role: 'PARENT' });
       const uniqueFamilyIds = [...new Set(parents.map((p: any) => p.familyId))];
       this.logger.log(`Processing ${uniqueFamilyIds.length} families`);
 
@@ -61,14 +61,14 @@ export class TasksSchedulerService {
     today: Date,
   ): Promise<number> {
     const [childUsers, allTasks] = await Promise.all([
-      this.firestore.findMany('users', { familyId, role: 'CHILD' }),
-      this.firestore.findMany('tasks', { familyId, status: 'ACTIVE' }),
+      this.db.findMany('users', { familyId, role: 'CHILD' }),
+      this.db.findMany('tasks', { familyId, status: 'ACTIVE' }),
     ]);
     const dailyTasks = allTasks.filter((t: any) => t.frequency === 'DAILY');
     if (childUsers.length === 0 || dailyTasks.length === 0) return 0;
 
     const userIds = childUsers.map((u: any) => u.id);
-    const profiles = await this.firestore.findMany('childProfiles', {
+    const profiles = await this.db.findMany('childProfiles', {
       userId: { in: userIds },
     });
     const profileByUserId = new Map<string, any>();
@@ -82,8 +82,8 @@ export class TasksSchedulerService {
     //   ({childId in profileIds, performedAt: yesterday})
     const dailyTaskIds = dailyTasks.map((t: any) => t.id);
     const [assignments, yesterdayCompletions] = await Promise.all([
-      this.firestore.findMany('taskAssignments', { taskId: { in: dailyTaskIds } }),
-      this.firestore.findMany('completions', {
+      this.db.findMany('taskAssignments', { taskId: { in: dailyTaskIds } }),
+      this.db.findMany('completions', {
         familyId,
         childId: { in: profileIds },
         status: 'APPROVED',
@@ -130,7 +130,7 @@ export class TasksSchedulerService {
         this.logger.log(
           `Marking task ${task.id} (${task.title}) incomplete for ${child.login}`,
         );
-        return this.firestore.create(
+        return this.db.create(
           'completions',
           {
             id: completionId,

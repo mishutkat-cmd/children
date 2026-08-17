@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { DecayService } from '../motivation/decay.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LoginDto, RegisterDto, ChildPinLoginDto, UpdateProfileDto, ChangePasswordDto } from './dto/auth.dto';
@@ -33,7 +33,7 @@ function needsRehash(hash: string): boolean {
 @Injectable()
 export class AuthService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private jwtService: JwtService,
     private decayService: DecayService,
     private ledgerService: LedgerService,
@@ -48,7 +48,7 @@ export class AuthService {
     if (!needsRehash(currentHash)) return;
     try {
       const newHash = await bcrypt.hash(plainPassword, BCRYPT_COST);
-      await this.firestore.update('users', userId, { passwordHash: newHash });
+      await this.db.update('users', userId, { passwordHash: newHash });
     } catch (e: any) {
       // Non-fatal: user is already authenticated; log and move on.
       console.warn('[AuthService] password rehash failed for user', userId, e?.message);
@@ -57,8 +57,8 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     // Проверяем существование пользователя по email или login
-    const existingByEmail = dto.email ? await this.firestore.findFirst('users', { email: dto.email }) : null;
-    const existingByLogin = await this.firestore.findFirst('users', { login: dto.login });
+    const existingByEmail = dto.email ? await this.db.findFirst('users', { email: dto.email }) : null;
+    const existingByLogin = await this.db.findFirst('users', { login: dto.login });
 
     if (existingByEmail || existingByLogin) {
       throw new ConflictException('User with this email or login already exists');
@@ -69,7 +69,7 @@ export class AuthService {
     const userId = crypto.randomUUID();
 
     // Создаем пользователя в Firestore
-    await this.firestore.create('users', {
+    await this.db.create('users', {
       id: userId,
       email: dto.email,
       login: dto.login,
@@ -90,7 +90,7 @@ export class AuthService {
     // Если это ребенок - создаем профиль
     if (dto.role === 'CHILD') {
       const childProfileId = crypto.randomUUID();
-      await this.firestore.create('childProfiles', {
+      await this.db.create('childProfiles', {
         id: childProfileId,
         userId: userId,
         name: dto.name || dto.login,
@@ -113,11 +113,11 @@ export class AuthService {
       try {
         if (dto.loginOrEmail.includes('@')) {
           console.log('[AuthService] Searching user by email:', dto.loginOrEmail);
-          user = await this.firestore.findFirst('users', { email: dto.loginOrEmail });
+          user = await this.db.findFirst('users', { email: dto.loginOrEmail });
           console.log('[AuthService] Search result by email:', user ? 'found' : 'not found');
         } else {
           console.log('[AuthService] Searching user by login:', dto.loginOrEmail);
-          user = await this.firestore.findFirst('users', { login: dto.loginOrEmail });
+          user = await this.db.findFirst('users', { login: dto.loginOrEmail });
           console.log('[AuthService] Search result by login:', user ? 'found' : 'not found');
         }
       } catch (error: any) {
@@ -130,7 +130,7 @@ export class AuthService {
         console.error('[AuthService] User not found');
         // Проверяем, есть ли вообще пользователи в базе
         try {
-          const allUsers = await this.firestore.findMany('users', {}, {}, 5);
+          const allUsers = await this.db.findMany('users', {}, {}, 5);
           console.log('[AuthService] Total users in database:', allUsers.length);
           if (allUsers.length > 0) {
             console.log('[AuthService] Sample users:', allUsers.map(u => ({ id: u.id, login: u.login, email: u.email })));
@@ -185,7 +185,7 @@ export class AuthService {
   async childPinLogin(dto: ChildPinLoginDto) {
     console.log('[AuthService] Child PIN login attempt:', { login: dto.login });
     
-    const user = await this.firestore.findFirst('users', { login: dto.login });
+    const user = await this.db.findFirst('users', { login: dto.login });
 
     if (!user) {
       console.error('[AuthService] User not found:', dto.login);
@@ -198,7 +198,7 @@ export class AuthService {
     }
 
     // Получаем профиль ребенка
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: user.id });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: user.id });
     const childProfile = childProfiles.length > 0 ? childProfiles[0] : null;
 
     console.log('[AuthService] User found:', { userId: user.id, hasPasswordHash: !!user.passwordHash });
@@ -227,7 +227,7 @@ export class AuthService {
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
-    const user = await this.firestore.findFirst('users', { id: userId });
+    const user = await this.db.findFirst('users', { id: userId });
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
@@ -237,7 +237,7 @@ export class AuthService {
     // Обновляем login
     if (dto.login) {
       // Проверяем, что login не занят другим пользователем
-      const existingByLogin = await this.firestore.findFirst('users', { login: dto.login });
+      const existingByLogin = await this.db.findFirst('users', { login: dto.login });
       if (existingByLogin && existingByLogin.id !== userId) {
         throw new ConflictException('User with this login already exists');
       }
@@ -247,7 +247,7 @@ export class AuthService {
     // Обновляем email
     if (dto.email) {
       // Проверяем, что email не занят другим пользователем
-      const existingByEmail = await this.firestore.findFirst('users', { email: dto.email });
+      const existingByEmail = await this.db.findFirst('users', { email: dto.email });
       if (existingByEmail && existingByEmail.id !== userId) {
         throw new ConflictException('User with this email already exists');
       }
@@ -265,9 +265,9 @@ export class AuthService {
         updateData.avatarUrl = dto.avatarUrl || null;
       } else {
         // Для ребенка обновляем в childProfiles
-        const childProfiles = await this.firestore.findMany('childProfiles', { userId });
+        const childProfiles = await this.db.findMany('childProfiles', { userId });
         if (childProfiles.length > 0) {
-          await this.firestore.update('childProfiles', childProfiles[0].id, {
+          await this.db.update('childProfiles', childProfiles[0].id, {
             avatarUrl: dto.avatarUrl || null,
           });
         }
@@ -276,16 +276,16 @@ export class AuthService {
 
     // Обновляем пользователя
     if (Object.keys(updateData).length > 0) {
-      await this.firestore.update('users', userId, updateData);
+      await this.db.update('users', userId, updateData);
     }
 
     // Возвращаем обновленного пользователя
-    const updatedUser = await this.firestore.findFirst('users', { id: userId });
+    const updatedUser = await this.db.findFirst('users', { id: userId });
     return updatedUser;
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
-    const user = await this.firestore.findFirst('users', { id: userId });
+    const user = await this.db.findFirst('users', { id: userId });
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
@@ -302,7 +302,7 @@ export class AuthService {
 
     // Обновляем пароль
     const newPasswordHash = await bcrypt.hash(dto.newPassword, BCRYPT_COST);
-    await this.firestore.update('users', userId, {
+    await this.db.update('users', userId, {
       passwordHash: newPasswordHash,
     });
 
@@ -310,7 +310,7 @@ export class AuthService {
   }
 
   async getProfile(userId: string) {
-    const user = await this.firestore.findFirst('users', { id: userId });
+    const user = await this.db.findFirst('users', { id: userId });
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
@@ -319,7 +319,7 @@ export class AuthService {
 
     // Для ребенка получаем avatarUrl из childProfiles
     if (user.role === 'CHILD') {
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId });
+      const childProfiles = await this.db.findMany('childProfiles', { userId });
       if (childProfiles.length > 0) {
         avatarUrl = childProfiles[0].avatarUrl || null;
       }

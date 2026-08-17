@@ -28,6 +28,8 @@ export const DATE_FIELDS = new Set([
   'endDate',
   'lastCompletionAt',
   'capturedAt',
+  'receivedAt',
+  'refreshRequestedAt',
   'revokedAt',
   'lastUsedAt',
   'expiresAt',
@@ -83,9 +85,13 @@ export const COLLECTIONS: Record<string, string[][]> = {
   familySettings: [['familyId']],
   decayRules: [['familyId']],
   deviceTokens: [['userId', 'deviceId'], ['userId']],
-  // Geolocation feature landing in parallel; indexes mirror the composite
-  // indexes it declared in firestore.indexes.json so it keeps working here.
-  locationPoints: [['childId', 'capturedAt'], ['familyId', 'capturedAt']],
+  // Geolocation. `locationPoints` is the only collection that grows without
+  // bound, so it carries an index on expiresAt for the retention sweep —
+  // Firestore expired these through a TTL policy, which SQLite has no
+  // equivalent for (see LocationsService.purgeExpiredPoints).
+  locationPoints: [['childId', 'capturedAt'], ['familyId', 'capturedAt'], ['expiresAt']],
+  childLocations: [['familyId'], ['childId']],
+  locationSettings: [['familyId']],
   _kv: [],
 };
 

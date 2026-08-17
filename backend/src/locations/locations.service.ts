@@ -1,8 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import * as admin from 'firebase-admin';
-import { FirestoreService } from '../firestore/firestore.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { DocStore } from '../db/doc-store.service';
 import { DeviceTokenService, DeviceContext } from '../auth/device-token.service';
-import { getChildProfileId } from '../firestore/firestore.helpers';
+import { getChildProfileId } from '../db/doc-helpers';
 import { sanitizePoints, type PreparedPoint } from './location-rules';
 import {
   IngestBatchDto,
@@ -33,7 +33,7 @@ export class LocationsService {
   private readonly logger = new Logger(LocationsService.name);
 
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private deviceTokenService: DeviceTokenService,
   ) {}
 
@@ -63,9 +63,7 @@ export class LocationsService {
       };
     }
 
-    const lastRef = this.firestore.collection(LAST_COLLECTION).doc(ctx.childId);
-    const lastSnap = await lastRef.get();
-    const last = lastSnap.exists ? (lastSnap.data() as any) : null;
+    const last = this.db.getSync(LAST_COLLECTION, ctx.childId);
 
     const { points, rejected } = sanitizePoints(dto.points, {
       lat: last?.lat,
@@ -92,39 +90,42 @@ export class LocationsService {
     }
 
     const historyDays = childCfg.historyDays ?? settings.historyDays;
-    const batch = this.firestore.batch();
-    const historyCol = this.firestore.collection(HISTORY_COLLECTION);
-
-    for (const p of points) {
-      const docId = `${ctx.childId}_${p.ts}`;
-      batch.set(historyCol.doc(docId), {
-        ...this.toDocument(p, ctx),
-        expiresAt: admin.firestore.Timestamp.fromMillis(p.ts + historyDays * 24 * 60 * 60 * 1000),
-      });
-    }
-
     const newest = points[points.length - 1];
     const lastTs = this.toMillis(last?.capturedAt);
 
-    // Батчи могут прийти не по порядку (очередь после офлайна). Последнюю точку
-    // перезаписываем только если она реально свежее сохранённой.
-    if (newest.ts > lastTs) {
-      batch.set(
-        lastRef,
-        {
-          ...this.toDocument(newest, ctx),
-          receivedAt: admin.firestore.FieldValue.serverTimestamp(),
-          permissionState: dto.permissionState || last?.permissionState || 'always',
-          servicesEnabled: dto.servicesEnabled !== false,
-          appVersion: dto.appVersion || last?.appVersion || null,
-          // Запрос «обновить сейчас» отработан — снимаем флаг.
-          refreshRequestedAt: null,
-        },
-        { merge: true },
-      );
-    }
+    // One transaction for the whole batch: the history rows and the
+    // last-known point either all land or none do, so a failure mid-batch
+    // cannot leave the map showing a position with no track behind it.
+    this.db.transaction(() => {
+      for (const p of points) {
+        // Deterministic id — a retry after a timeout re-writes the same row
+        // instead of duplicating the track.
+        const docId = `${ctx.childId}_${p.ts}`;
+        this.db.setSync(HISTORY_COLLECTION, docId, {
+          ...this.toDocument(p, ctx),
+          expiresAt: new Date(p.ts + historyDays * 24 * 60 * 60 * 1000),
+        });
+      }
 
-    await batch.commit();
+      // Batches can arrive out of order (a queue flushed after being offline).
+      // Only overwrite the last-known point when it is genuinely newer.
+      if (newest.ts > lastTs) {
+        this.db.setSync(
+          LAST_COLLECTION,
+          ctx.childId,
+          {
+            ...this.toDocument(newest, ctx),
+            receivedAt: new Date(),
+            permissionState: dto.permissionState || last?.permissionState || 'always',
+            servicesEnabled: dto.servicesEnabled !== false,
+            appVersion: dto.appVersion || last?.appVersion || null,
+            // The "refresh now" request has been served — clear the flag.
+            refreshRequestedAt: null,
+          },
+          { merge: true },
+        );
+      }
+    });
 
     const isMoving = newest.isMoving === true;
     return {
@@ -154,7 +155,7 @@ export class LocationsService {
       battery: typeof p.battery === 'number' ? p.battery : null,
       isCharging: p.isCharging === true,
       source: p.source || 'background',
-      capturedAt: admin.firestore.Timestamp.fromMillis(p.ts),
+      capturedAt: new Date(p.ts),
     };
   }
 
@@ -170,18 +171,17 @@ export class LocationsService {
   /** Последние точки всех детей семьи — то, из чего рисуется карта. */
   async getFamilyLocations(familyId: string) {
     const [users, settings] = await Promise.all([
-      this.firestore.findMany('users', { familyId, role: 'CHILD' }),
+      this.db.findMany('users', { familyId, role: 'CHILD' }),
       this.getSettings(familyId),
     ]);
 
     const rows = await Promise.all(
       users.map(async (user: any) => {
-        const profiles = await this.firestore.findMany('childProfiles', { userId: user.id });
+        const profiles = await this.db.findMany('childProfiles', { userId: user.id });
         const profile = profiles[0];
         if (!profile) return null;
 
-        const snap = await this.firestore.collection(LAST_COLLECTION).doc(profile.id).get();
-        const doc = snap.exists ? (snap.data() as any) : null;
+        const doc = this.db.getSync(LAST_COLLECTION, profile.id);
         const childCfg = settings.perChild?.[profile.id] || {};
 
         return {
@@ -206,17 +206,17 @@ export class LocationsService {
     const toDate = to ? new Date(to) : new Date();
     const fromDate = from ? new Date(from) : new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
 
-    const snapshot = await this.firestore
-      .collection(HISTORY_COLLECTION)
-      .where('childId', '==', childId)
-      .where('capturedAt', '>=', admin.firestore.Timestamp.fromDate(fromDate))
-      .where('capturedAt', '<=', admin.firestore.Timestamp.fromDate(toDate))
-      .orderBy('capturedAt', 'desc')
-      .limit(limit)
-      .get();
+    const rows = await this.db.findMany(
+      HISTORY_COLLECTION,
+      { childId, capturedAt: { gte: fromDate, lte: toDate } },
+      { capturedAt: 'desc' },
+      limit,
+    );
 
-    const points = snapshot.docs
-      .map((d) => this.toLocationResponse(d.data()))
+    // Newest-first with the limit applied gives the most recent `limit`
+    // points; the track itself is then drawn oldest-first.
+    const points = rows
+      .map((row: any) => this.toLocationResponse(row))
       .sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
 
     return { childId, from: fromDate.toISOString(), to: toDate.toISOString(), count: points.length, points };
@@ -229,26 +229,24 @@ export class LocationsService {
    */
   async requestRefresh(familyId: string, childIdOrUserId: string) {
     const childId = await this.resolveChildId(familyId, childIdOrUserId);
-    await this.firestore
-      .collection(LAST_COLLECTION)
-      .doc(childId)
-      .set(
-        { childId, familyId, refreshRequestedAt: admin.firestore.FieldValue.serverTimestamp() },
-        { merge: true },
-      );
+    await this.db.set(
+      LAST_COLLECTION,
+      childId,
+      { childId, familyId, refreshRequestedAt: new Date() },
+      { merge: true },
+    );
     return { ok: true, childId };
   }
 
   /** Ребёнок видит, что именно о нём известно — требование прозрачности. */
   async getMyStatus(userId: string, familyId: string) {
-    const profiles = await this.firestore.findMany('childProfiles', { userId });
+    const profiles = await this.db.findMany('childProfiles', { userId });
     const profile = profiles[0];
     if (!profile) throw new NotFoundException('Child profile not found');
 
     const settings = await this.getSettings(familyId);
     const childCfg = settings.perChild?.[profile.id] || {};
-    const snap = await this.firestore.collection(LAST_COLLECTION).doc(profile.id).get();
-    const doc = snap.exists ? (snap.data() as any) : null;
+    const doc = this.db.getSync(LAST_COLLECTION, profile.id);
 
     return {
       childId: profile.id,
@@ -262,25 +260,36 @@ export class LocationsService {
 
   async deleteHistory(familyId: string, childIdOrUserId: string) {
     const childId = await this.resolveChildId(familyId, childIdOrUserId);
-    let deleted = 0;
-
-    // Пакетами по 300, чтобы не упереться в лимит батча (500 операций).
-    for (;;) {
-      const snapshot = await this.firestore
-        .collection(HISTORY_COLLECTION)
-        .where('childId', '==', childId)
-        .limit(300)
-        .get();
-      if (snapshot.empty) break;
-
-      const batch = this.firestore.batch();
-      snapshot.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-      deleted += snapshot.size;
-      if (snapshot.size < 300) break;
-    }
-
+    // Was a paged read/delete loop capped at 300 per batch to stay under
+    // Firestore's 500-operation batch limit. One statement now, and it is
+    // atomic: a parent erasing their child's location history no longer risks
+    // stopping half-way.
+    const deleted = await this.db.deleteMany(HISTORY_COLLECTION, { childId });
     return { childId, deleted };
+  }
+
+  /**
+   * Retention sweep for location history.
+   *
+   * Firestore expired these rows through a TTL policy on `expiresAt`; SQLite
+   * has no equivalent, so without this the table is the one thing in the
+   * database that grows without bound — a child reporting every 60 s adds
+   * ~1440 rows a day, forever. Each row still carries the `expiresAt` its
+   * family's `historyDays` setting implied when it was written, so the sweep
+   * honours per-family retention without re-reading settings.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async purgeExpiredPoints(): Promise<number> {
+    try {
+      const removed = await this.db.deleteMany(HISTORY_COLLECTION, { expiresAt: { lt: new Date() } });
+      if (removed > 0) {
+        this.logger.log(`[retention] removed ${removed} expired location point(s)`);
+      }
+      return removed;
+    } catch (error: any) {
+      this.logger.error(`[retention] sweep failed: ${error?.message}`);
+      return 0;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -288,16 +297,12 @@ export class LocationsService {
   // ─────────────────────────────────────────────────────────────
 
   async getSettings(familyId: string) {
-    const snap = await this.firestore.collection(SETTINGS_COLLECTION).doc(familyId).get();
-    const stored = snap.exists ? (snap.data() as any) : {};
+    const stored = this.db.getSync(SETTINGS_COLLECTION, familyId) || {};
     return { ...DEFAULT_LOCATION_SETTINGS, ...stored, perChild: stored?.perChild || {} };
   }
 
   async updateSettings(familyId: string, dto: UpdateFamilyLocationSettingsDto) {
-    await this.firestore
-      .collection(SETTINGS_COLLECTION)
-      .doc(familyId)
-      .set({ ...dto, familyId, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await this.db.set(SETTINGS_COLLECTION, familyId, { ...dto, familyId }, { merge: true });
 
     if (dto.enabled === false) {
       await this.revokeFamilyDevices(familyId);
@@ -309,28 +314,22 @@ export class LocationsService {
   async updateChildSettings(familyId: string, childIdOrUserId: string, dto: UpdateChildLocationSettingsDto) {
     const childId = await this.resolveChildId(familyId, childIdOrUserId);
 
-    // Именно вложенный объект, а не точечный путь: `set({'perChild.x.enabled': …})`
-    // создал бы поле с точками в имени — dot-notation понимает только update(),
-    // а он падает, если документа настроек ещё нет. merge:true доливает
-    // вложенные map'ы, не затирая настройки других детей.
     const childPatch: Record<string, any> = {};
     if (dto.enabled !== undefined) childPatch.enabled = dto.enabled;
     if (dto.historyDays !== undefined) childPatch.historyDays = dto.historyDays;
 
-    await this.firestore
-      .collection(SETTINGS_COLLECTION)
-      .doc(familyId)
-      .set(
-        {
-          familyId,
-          perChild: { [childId]: childPatch },
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
+    // mergeNested is what keeps the other children's settings alive: a plain
+    // merge would replace the whole `perChild` map with a single-entry one,
+    // silently resetting every sibling to defaults.
+    await this.db.set(
+      SETTINGS_COLLECTION,
+      familyId,
+      { familyId, perChild: { [childId]: childPatch } },
+      { merge: true, mergeNested: true },
+    );
 
     if (dto.enabled === false) {
-      const profile = await this.firestore.findFirst('childProfiles', { id: childId });
+      const profile = await this.db.findFirst('childProfiles', { id: childId });
       if (profile?.userId) {
         await this.deviceTokenService.revokeAllForUser(profile.userId);
       }
@@ -348,7 +347,7 @@ export class LocationsService {
    * идентификаторами) и заодно проверяет, что ребёнок из этой семьи.
    */
   private async resolveChildId(familyId: string, childIdOrUserId: string): Promise<string> {
-    const resolved = await getChildProfileId(this.firestore, childIdOrUserId, familyId);
+    const resolved = await getChildProfileId(this.db, childIdOrUserId, familyId);
     if (!resolved) {
       throw new NotFoundException('Child not found in this family');
     }
@@ -356,7 +355,7 @@ export class LocationsService {
   }
 
   private async revokeFamilyDevices(familyId: string): Promise<void> {
-    const users = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    const users = await this.db.findMany('users', { familyId, role: 'CHILD' });
     await Promise.all(users.map((u: any) => this.deviceTokenService.revokeAllForUser(u.id)));
   }
 

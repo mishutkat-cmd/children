@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { CreateExchangeDto } from './dto/exchanges.dto';
 // Enums заменены на строки для SQLite
@@ -10,15 +10,15 @@ type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL
 @Injectable()
 export class ExchangesService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private ledgerService: LedgerService,
   ) {}
 
   async create(childId: string, familyId: string, dto: CreateExchangeDto) {
     // childId может быть userId или childProfileId, проверяем оба варианта
-    let childProfile = await this.firestore.findFirst('childProfiles', { userId: childId });
+    let childProfile = await this.db.findFirst('childProfiles', { userId: childId });
     if (!childProfile) {
-      childProfile = await this.firestore.findFirst('childProfiles', { id: childId });
+      childProfile = await this.db.findFirst('childProfiles', { id: childId });
     }
     if (!childProfile) {
       throw new NotFoundException(`Child not found: ${childId}`);
@@ -31,7 +31,7 @@ export class ExchangesService {
     let rewardGoal = null;
 
     if (dto.rewardGoalId) {
-      rewardGoal = await this.firestore.findFirst('rewards', { id: dto.rewardGoalId, familyId });
+      rewardGoal = await this.db.findFirst('rewards', { id: dto.rewardGoalId, familyId });
 
       if (!rewardGoal) {
         throw new NotFoundException('Reward not found');
@@ -42,7 +42,7 @@ export class ExchangesService {
       // Получаем курс конвертации из настроек семьи
       let conversionRate = 10; // По умолчанию 10 баллов = 1 грн
       try {
-        const familySettings = await this.firestore.findFirst('familySettings', { familyId });
+        const familySettings = await this.db.findFirst('familySettings', { familyId });
         if (familySettings?.conversionRate) {
           conversionRate = typeof familySettings.conversionRate === 'string' 
             ? parseFloat(familySettings.conversionRate) 
@@ -65,7 +65,7 @@ export class ExchangesService {
     // sync by every createEntry/deleteLedgerEntry transaction. Re-read it
     // immediately before the spend check so a concurrent earn/spend that
     // committed between request start and this point is honored.
-    const profilesForBalance = await this.firestore.findMany('childProfiles', { userId });
+    const profilesForBalance = await this.db.findMany('childProfiles', { userId });
     const freshBalance = profilesForBalance[0]?.pointsBalance ?? 0;
     if (freshBalance < pointsSpent) {
       throw new BadRequestException(
@@ -91,7 +91,7 @@ export class ExchangesService {
     };
     
     try {
-      await this.firestore.create('exchanges', exchangeData, exchangeId);
+      await this.db.create('exchanges', exchangeData, exchangeId);
     } catch (error: any) {
       console.error('[ExchangesService] Error creating exchange:', error.message);
       throw error;
@@ -115,12 +115,12 @@ export class ExchangesService {
       
       // Обновляем общую сумму заработанных денег ребенка
       const currentMoneyEarned = (child.moneyBalanceCents || 0) + dto.cashCents;
-      await this.firestore.update('childProfiles', childProfileId, {
+      await this.db.update('childProfiles', childProfileId, {
         moneyBalanceCents: currentMoneyEarned,
       });
     }
 
-    const exchange = await this.firestore.findFirst('exchanges', { id: exchangeId });
+    const exchange = await this.db.findFirst('exchanges', { id: exchangeId });
     if (!exchange) {
       throw new Error('Exchange was created but could not be retrieved');
     }
@@ -132,19 +132,19 @@ export class ExchangesService {
   }
 
   async findAll(childId: string, familyId: string) {
-    const exchanges = await this.firestore.findMany('exchanges', { childId, familyId }, { createdAt: 'desc' });
+    const exchanges = await this.db.findMany('exchanges', { childId, familyId }, { createdAt: 'desc' });
     return Promise.all(
       exchanges.map(async (exchange) => ({
         ...exchange,
         rewardGoal: exchange.rewardId
-          ? await this.firestore.findFirst('rewards', { id: exchange.rewardId })
+          ? await this.db.findFirst('rewards', { id: exchange.rewardId })
           : null,
       })),
     );
   }
 
   async findHistory(familyId: string) {
-    const exchanges = await this.firestore.findMany('exchanges', { familyId }, { createdAt: 'desc' });
+    const exchanges = await this.db.findMany('exchanges', { familyId }, { createdAt: 'desc' });
     const cashExchanges = exchanges.filter(
       (e: any) => e.cashCents != null && (e.status === 'APPROVED' || e.status === 'DELIVERED'),
     );
@@ -157,7 +157,7 @@ export class ExchangesService {
   }
 
   async findPending(familyId: string) {
-    const exchanges = await this.firestore.findMany(
+    const exchanges = await this.db.findMany(
       'exchanges',
       { familyId, status: 'PENDING' },
       { createdAt: 'desc' },
@@ -167,7 +167,7 @@ export class ExchangesService {
         try {
           const [reward, childProfile] = await Promise.all([
             exchange.rewardId
-              ? this.firestore.findFirst('rewards', { id: exchange.rewardId })
+              ? this.db.findFirst('rewards', { id: exchange.rewardId })
               : Promise.resolve(null),
             this.resolveChildProfile(exchange.childId),
           ]);
@@ -186,14 +186,14 @@ export class ExchangesService {
   private async resolveChildProfile(childId?: string) {
     if (!childId) return null;
     const [byId, byUserId] = await Promise.all([
-      this.firestore.findFirst('childProfiles', { id: childId }),
-      this.firestore.findFirst('childProfiles', { userId: childId }),
+      this.db.findFirst('childProfiles', { id: childId }),
+      this.db.findFirst('childProfiles', { userId: childId }),
     ]);
     return byId || byUserId || null;
   }
 
   async approve(id: string, familyId: string) {
-    const exchange = await this.firestore.findFirst('exchanges', { id, familyId });
+    const exchange = await this.db.findFirst('exchanges', { id, familyId });
 
     if (!exchange) {
       throw new NotFoundException('Exchange not found');
@@ -203,16 +203,16 @@ export class ExchangesService {
       throw new BadRequestException('Exchange is not pending');
     }
 
-    await this.firestore.update('exchanges', id, {
+    await this.db.update('exchanges', id, {
       status: 'APPROVED',
       decidedAt: new Date(),
     });
 
-    const updated = await this.firestore.findFirst('exchanges', { id });
+    const updated = await this.db.findFirst('exchanges', { id });
 
     // Create ledger entry (spend points)
     // Получаем userId из childProfile для ledger
-    const childProfile = await this.firestore.findFirst('childProfiles', { id: exchange.childId });
+    const childProfile = await this.db.findFirst('childProfiles', { id: exchange.childId });
     if (!childProfile) {
       throw new NotFoundException('Child profile not found');
     }
@@ -236,22 +236,22 @@ export class ExchangesService {
   }
 
   async reject(id: string, familyId: string) {
-    const exchange = await this.firestore.findFirst('exchanges', { id, familyId });
+    const exchange = await this.db.findFirst('exchanges', { id, familyId });
 
     if (!exchange) {
       throw new NotFoundException('Exchange not found');
     }
 
-    await this.firestore.update('exchanges', id, {
+    await this.db.update('exchanges', id, {
       status: 'REJECTED',
       decidedAt: new Date(),
     });
     
-    return this.firestore.findFirst('exchanges', { id });
+    return this.db.findFirst('exchanges', { id });
   }
 
   async markDelivered(id: string, familyId: string) {
-    const exchange = await this.firestore.findFirst('exchanges', { id, familyId });
+    const exchange = await this.db.findFirst('exchanges', { id, familyId });
 
     if (!exchange) {
       throw new NotFoundException('Exchange not found');
@@ -261,27 +261,27 @@ export class ExchangesService {
       throw new BadRequestException('Exchange must be approved first');
     }
 
-    await this.firestore.update('exchanges', id, {
+    await this.db.update('exchanges', id, {
       status: 'DELIVERED',
       deliveredAt: new Date(),
     });
 
     // Если это покупка товара из wishlist, обновляем wishlist
     if (exchange.rewardId) {
-      const wishlistItems = await this.firestore.findMany('wishlist', { 
+      const wishlistItems = await this.db.findMany('wishlist', { 
         childId: exchange.childId,
         rewardId: exchange.rewardId 
       });
       
       if (wishlistItems.length > 0) {
         const wishlistItem = wishlistItems[0];
-        const reward = await this.firestore.findFirst('rewards', { id: exchange.rewardId });
+        const reward = await this.db.findFirst('rewards', { id: exchange.rewardId });
         
         if (reward) {
           // Получаем курс конвертации
           let conversionRate = 10;
           try {
-            const familySettings = await this.firestore.findFirst('familySettings', { familyId });
+            const familySettings = await this.db.findFirst('familySettings', { familyId });
             if (familySettings?.conversionRate) {
               conversionRate = typeof familySettings.conversionRate === 'string' 
                 ? parseFloat(familySettings.conversionRate) 
@@ -305,7 +305,7 @@ export class ExchangesService {
           const rewardCostCents = reward.costPoints ? Math.round((reward.costPoints / conversionRate) * 100) : 0;
           
           // Обновляем wishlist item
-          await this.firestore.update('wishlist', wishlistItem.id, {
+          await this.db.update('wishlist', wishlistItem.id, {
             moneySpent: currentMoneySpent,
             isPurchased: currentMoneySpent >= rewardCostCents,
             status: currentMoneySpent >= rewardCostCents ? 'COMPLETED' : 'PENDING',
@@ -314,6 +314,6 @@ export class ExchangesService {
       }
     }
     
-    return this.firestore.findFirst('exchanges', { id });
+    return this.db.findFirst('exchanges', { id });
   }
 }

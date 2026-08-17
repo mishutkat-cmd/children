@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { StreakService } from './streak.service';
 
@@ -20,7 +20,7 @@ interface ChallengeReward {
 @Injectable()
 export class ChallengesService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private ledgerService: LedgerService,
     private streakService: StreakService,
   ) {}
@@ -32,7 +32,7 @@ export class ChallengesService {
     const startDate = dto.startDate ? new Date(dto.startDate) : new Date();
     const endDate = dto.endDate ? new Date(dto.endDate) : new Date();
     
-    await this.firestore.create('challenges', {
+    await this.db.create('challenges', {
       id: challengeId,
       familyId,
       title: dto.title,
@@ -51,12 +51,12 @@ export class ChallengesService {
       status: 'ACTIVE',
     }, challengeId);
     
-    return this.firestore.findFirst('challenges', { id: challengeId });
+    return this.db.findFirst('challenges', { id: challengeId });
   }
 
   async findAll(familyId: string, childId?: string) {
     try {
-      const challenges = await this.firestore.findMany(
+      const challenges = await this.db.findMany(
         'challenges',
         { familyId, status: 'ACTIVE' },
         { createdAt: 'desc' },
@@ -68,13 +68,13 @@ export class ChallengesService {
         // entries ONCE; pass into getChallengeStatsForParents so it
         // doesn't re-query per child or per challenge.
         const [children, ledgerEntries] = await Promise.all([
-          this.firestore.findMany('users', { familyId, role: 'CHILD' }),
-          this.firestore.findMany('ledgerEntries', { familyId, refType: 'CHALLENGE' }),
+          this.db.findMany('users', { familyId, role: 'CHILD' }),
+          this.db.findMany('ledgerEntries', { familyId, refType: 'CHALLENGE' }),
         ]);
         const childIds = children.map((c: any) => c.id);
         const profiles =
           childIds.length > 0
-            ? await this.firestore.findMany('childProfiles', { userId: { in: childIds } })
+            ? await this.db.findMany('childProfiles', { userId: { in: childIds } })
             : [];
         const profileByUserId = new Map<string, any>();
         for (const p of profiles) profileByUserId.set(p.userId, p);
@@ -101,8 +101,8 @@ export class ChallengesService {
 
       // childId may be userId or childProfileId — resolve once.
       const [byUserId, byId] = await Promise.all([
-        this.firestore.findFirst('childProfiles', { userId: childId }),
-        this.firestore.findFirst('childProfiles', { id: childId }),
+        this.db.findFirst('childProfiles', { userId: childId }),
+        this.db.findFirst('childProfiles', { id: childId }),
       ]);
       const childProfileId = byUserId?.id ?? byId?.id ?? childId;
 
@@ -214,15 +214,15 @@ export class ChallengesService {
   }
 
   async findOne(id: string, familyId: string, childId?: string) {
-    const challenge = await this.firestore.findFirst('challenges', { id, familyId });
+    const challenge = await this.db.findFirst('challenges', { id, familyId });
 
     if (!challenge) {
       throw new NotFoundException('Challenge not found');
     }
 
     if (childId) {
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
+      const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
+      const childProfileById = await this.db.findFirst('childProfiles', { id: childId });
       const childProfileId = childProfiles.length > 0 ? childProfiles[0].id : (childProfileById?.id || childId);
       
       const progress = await this.getChallengeProgress(challenge, childProfileId);
@@ -251,13 +251,13 @@ export class ChallengesService {
     if (dto.penaltyValue !== undefined) updateData.penaltyValue = dto.penaltyValue || 0;
     if (dto.status) updateData.status = dto.status;
 
-    await this.firestore.update('challenges', id, updateData);
-    return this.firestore.findFirst('challenges', { id });
+    await this.db.update('challenges', id, updateData);
+    return this.db.findFirst('challenges', { id });
   }
 
   async delete(id: string, familyId: string) {
     await this.findOne(id, familyId);
-    await this.firestore.delete('challenges', id);
+    await this.db.delete('challenges', id);
     return { success: true };
   }
 
@@ -266,12 +266,12 @@ export class ChallengesService {
    */
   async checkAndRewardChallenge(challengeId: string, familyId: string, childId: string) {
     // childId может быть userId или childProfileId
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
-    const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
+    const childProfileById = await this.db.findFirst('childProfiles', { id: childId });
     const childProfileId = childProfiles.length > 0 ? childProfiles[0].id : (childProfileById?.id || childId);
     const userId = childProfiles.length > 0 ? childProfiles[0].userId : childId;
 
-    const challenge = await this.firestore.findFirst('challenges', { id: challengeId, familyId });
+    const challenge = await this.db.findFirst('challenges', { id: challengeId, familyId });
 
     if (!challenge) {
       return null;
@@ -293,7 +293,7 @@ export class ChallengesService {
     }
 
     // Проверяем, не награжден ли уже
-    const allEntries = await this.firestore.findMany('ledgerEntries', {
+    const allEntries = await this.db.findMany('ledgerEntries', {
       familyId,
       childId: userId,
       refType: 'CHALLENGE',
@@ -322,12 +322,12 @@ export class ChallengesService {
 
     // Создаем уведомление для родителя о завершении челленджа
     try {
-      const user = userId ? await this.firestore.findFirst('users', { id: userId }) : null;
-      const childProfileForNotification = await this.firestore.findFirst('childProfiles', { id: childProfileId });
+      const user = userId ? await this.db.findFirst('users', { id: userId }) : null;
+      const childProfileForNotification = await this.db.findFirst('childProfiles', { id: childProfileId });
       
       if (user && user.familyId && childProfileForNotification) {
         const notificationId = crypto.randomUUID();
-        await this.firestore.create('notifications', {
+        await this.db.create('notifications', {
           id: notificationId,
           familyId: user.familyId,
           type: 'CHALLENGE_COMPLETED',
@@ -366,7 +366,7 @@ export class ChallengesService {
     today.setHours(0, 0, 0, 0);
 
     const inWindow = (task?: string, orderByPerformedAt = false) =>
-      this.firestore.findMany(
+      this.db.findMany(
         'completions',
         {
           childId,
@@ -514,7 +514,7 @@ export class ChallengesService {
     // Parallelize the task lookup with the completion query.
     if (rule.type === 'TASK_POINTS' && rule.taskId) {
       const [task, completions] = await Promise.all([
-        this.firestore.findFirst('tasks', { id: rule.taskId }),
+        this.db.findFirst('tasks', { id: rule.taskId }),
         inWindow(rule.taskId),
       ]);
       const pointsPerCompletion = task?.points || 0;

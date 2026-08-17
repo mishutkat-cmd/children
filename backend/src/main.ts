@@ -43,14 +43,29 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Файлы теперь хранятся в Firebase Storage, локальное хранение не нужно
-  // const uploadsDir = join(process.cwd(), 'uploads');
-  // if (existsSync(uploadsDir)) {
-  //   app.useStaticAssets(uploadsDir, {
-  //     prefix: '/uploads/',
-  //   });
-  //   console.log('[Server] Serving uploads from:', uploadsDir);
-  // }
+  // Public uploads (avatars, badges, rewards, wishlist, characters).
+  //
+  // In production Caddy serves this prefix directly off disk and these
+  // requests never reach Node — this handler is the local-dev path and a
+  // fallback if the vhost rule is missing. Only the public root is exposed;
+  // proof photos live under UPLOADS_PRIVATE_PATH and are served exclusively
+  // by the authenticated FilesController.
+  const uploadsDir = process.env.UPLOADS_PATH || join(process.cwd(), 'uploads');
+  if (existsSync(uploadsDir)) {
+    app.useStaticAssets(uploadsDir, {
+      prefix: '/uploads/',
+      // Upload names carry a timestamp and random suffix and are never
+      // rewritten, so they are safe to cache hard.
+      maxAge: '1y',
+      immutable: true,
+      index: false,
+      // Do not let a browser render user-uploaded content in our origin.
+      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+    });
+    console.log('[Server] Serving public uploads from:', uploadsDir);
+  } else {
+    console.log('[Server] Public uploads directory not present yet:', uploadsDir);
+  }
 
   // SPA serving only if FRONTEND_ENABLED and build dir + index.html exist
   const frontendEnabled = process.env.FRONTEND_ENABLED === 'true' || process.env.FRONTEND_ENABLED === '1';

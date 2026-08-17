@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { CreateBadgeDto, AwardBadgeDto } from './dto/badges.dto';
 
 /**
@@ -22,7 +22,7 @@ interface BadgeProgressCtx {
 
 @Injectable()
 export class BadgesService {
-  constructor(private firestore: FirestoreService) {}
+  constructor(private db: DocStore) {}
 
   // ─── Вспомогательные методы ─────────────────────────────────────────────────
 
@@ -38,8 +38,8 @@ export class BadgesService {
   }> {
     // Пробуем найти профиль по userId и по id параллельно
     const [byUserId, byId] = await Promise.all([
-      this.firestore.findFirst('childProfiles', { userId: childId }),
-      this.firestore.findFirst('childProfiles', { id: childId }),
+      this.db.findFirst('childProfiles', { userId: childId }),
+      this.db.findFirst('childProfiles', { id: childId }),
     ]);
     const childProfile = byUserId ?? byId;
     if (!childProfile) {
@@ -55,7 +55,7 @@ export class BadgesService {
    * Проверяет по обоим возможным childId (userId и childProfileId).
    */
   private async findExistingChildBadge(childProfileId: string, badgeId: string): Promise<any | null> {
-    return this.firestore.findFirst('childBadges', { childId: childProfileId, badgeId });
+    return this.db.findFirst('childBadges', { childId: childProfileId, badgeId });
   }
 
   /**
@@ -77,7 +77,7 @@ export class BadgesService {
         d.setHours(0, 0, 0, 0);
         if (!oldest || d < oldest) oldest = d;
       } else if (type === 'CHALLENGE' && challengeId) {
-        const challenge = await this.firestore.findFirst('challenges', { id: challengeId });
+        const challenge = await this.db.findFirst('challenges', { id: challengeId });
         if (challenge?.startDate) {
           const d = challenge.startDate instanceof Date
             ? challenge.startDate
@@ -199,7 +199,7 @@ export class BadgesService {
     challengeId: string,
     recentCompletions?: any[],
   ): Promise<{ current: number; target: number; type: string }> {
-    const challenge = await this.firestore.findFirst('challenges', { id: challengeId });
+    const challenge = await this.db.findFirst('challenges', { id: challengeId });
     if (!challenge) return { current: 0, target: 1, type: 'CHALLENGE' };
 
     const rule = typeof challenge.ruleJson === 'string' ? JSON.parse(challenge.ruleJson) : challenge.ruleJson;
@@ -208,7 +208,7 @@ export class BadgesService {
 
     const completions = recentCompletions && recentCompletions.length > 0
       ? recentCompletions
-      : await this.firestore.findMany(
+      : await this.db.findMany(
           'completions',
           {
             childId: childProfileId,
@@ -258,7 +258,7 @@ export class BadgesService {
     if (!recentSince) {
       return { childProfile };
     }
-    const recentCompletions = await this.firestore.findMany('completions', {
+    const recentCompletions = await this.db.findMany('completions', {
       childId: childProfileId,
       status: 'APPROVED',
       performedAt: { gte: recentSince },
@@ -270,8 +270,8 @@ export class BadgesService {
 
   async findAll(familyId: string) {
     const [badges, children] = await Promise.all([
-      this.firestore.findMany('badges', { familyId }, { createdAt: 'desc' }),
-      this.firestore.findMany('users', { familyId, role: 'CHILD' }),
+      this.db.findMany('badges', { familyId }, { createdAt: 'desc' }),
+      this.db.findMany('users', { familyId, role: 'CHILD' }),
     ]);
 
     if (children.length === 0) {
@@ -281,7 +281,7 @@ export class BadgesService {
     // Prefetch — one query each for the whole family instead of N per
     // (badge × child). Was N×M sequential round-trips per page render.
     const childIds = children.map((c: any) => c.id);
-    const allChildProfiles = await this.firestore.findMany('childProfiles', {
+    const allChildProfiles = await this.db.findMany('childProfiles', {
       userId: { in: childIds },
     });
     const profileByUser = new Map<string, any>();
@@ -289,7 +289,7 @@ export class BadgesService {
     const profileIds = allChildProfiles.map((p: any) => p.id);
     const childBadges =
       profileIds.length > 0
-        ? await this.firestore.findMany('childBadges', { childId: { in: profileIds } })
+        ? await this.db.findMany('childBadges', { childId: { in: profileIds } })
         : [];
     const earnedSet = new Set<string>();
     const earnedAtByKey = new Map<string, any>();
@@ -348,47 +348,47 @@ export class BadgesService {
   }
 
   async findOne(id: string, familyId: string) {
-    const badge = await this.firestore.findFirst('badges', { id, familyId });
+    const badge = await this.db.findFirst('badges', { id, familyId });
     if (!badge) throw new NotFoundException('Badge not found');
     return badge;
   }
 
   async create(familyId: string, dto: CreateBadgeDto) {
     const badgeId = crypto.randomUUID();
-    await this.firestore.create('badges', { id: badgeId, familyId, ...dto }, badgeId);
-    return this.firestore.findFirst('badges', { id: badgeId });
+    await this.db.create('badges', { id: badgeId, familyId, ...dto }, badgeId);
+    return this.db.findFirst('badges', { id: badgeId });
   }
 
   async update(id: string, familyId: string, dto: Partial<CreateBadgeDto>) {
     await this.findOne(id, familyId);
-    await this.firestore.update('badges', id, dto);
-    return this.firestore.findFirst('badges', { id });
+    await this.db.update('badges', id, dto);
+    return this.db.findFirst('badges', { id });
   }
 
   async delete(id: string, familyId: string) {
     await this.findOne(id, familyId);
-    await this.firestore.delete('badges', id);
+    await this.db.delete('badges', id);
     return { success: true };
   }
 
   async getChildBadges(childId: string) {
     const { childProfileId } = await this.resolveChildProfile(childId);
 
-    const childBadges = await this.firestore.findMany('childBadges', { childId: childProfileId }, { earnedAt: 'desc' });
+    const childBadges = await this.db.findMany('childBadges', { childId: childProfileId }, { earnedAt: 'desc' });
     return Promise.all(childBadges.map(async cb => ({
       ...cb,
-      badge: await this.firestore.findFirst('badges', { id: cb.badgeId }),
+      badge: await this.db.findFirst('badges', { id: cb.badgeId }),
     })));
   }
 
   async getChildBadgesWithProgress(childId: string, familyId: string) {
     const { childProfile, childProfileId } = await this.resolveChildProfile(childId);
-    const badges = await this.firestore.findMany('badges', { familyId }, { createdAt: 'desc' });
+    const badges = await this.db.findMany('badges', { familyId }, { createdAt: 'desc' });
     if (badges.length === 0) return [];
 
     // Prefetch childBadges + ctx (profile + recent completions) ONCE.
     const [existingBadges, ctx] = await Promise.all([
-      this.firestore.findMany('childBadges', { childId: childProfileId }),
+      this.db.findMany('childBadges', { childId: childProfileId }),
       this.buildCtx(childProfileId, childProfile, badges),
     ]);
     const existingByBadgeId = new Map<string, any>();
@@ -434,7 +434,7 @@ export class BadgesService {
   async awardBadge(childId: string, dto: AwardBadgeDto) {
     const { childProfile, childProfileId } = await this.resolveChildProfile(childId);
 
-    const badge = await this.firestore.findFirst('badges', { id: dto.badgeId });
+    const badge = await this.db.findFirst('badges', { id: dto.badgeId });
     if (!badge) throw new NotFoundException('Badge not found');
 
     // Идемпотентность: если уже выдан — возвращаем существующую запись
@@ -444,7 +444,7 @@ export class BadgesService {
     }
 
     const childBadgeId = crypto.randomUUID();
-    await this.firestore.create('childBadges', {
+    await this.db.create('childBadges', {
       id: childBadgeId,
       childId: childProfileId,
       badgeId: dto.badgeId,
@@ -454,10 +454,10 @@ export class BadgesService {
     // Уведомление для родителя
     try {
       const familyId = childProfile.familyId
-        ?? (await this.firestore.findFirst('users', { id: childProfile.userId }))?.familyId;
+        ?? (await this.db.findFirst('users', { id: childProfile.userId }))?.familyId;
       if (familyId) {
         const notificationId = crypto.randomUUID();
-        await this.firestore.create('notifications', {
+        await this.db.create('notifications', {
           id: notificationId,
           familyId,
           type: 'BADGE_EARNED',
@@ -475,7 +475,7 @@ export class BadgesService {
       console.error('[BadgesService] Notification error:', e.message);
     }
 
-    const childBadge = await this.firestore.findFirst('childBadges', { id: childBadgeId });
+    const childBadge = await this.db.findFirst('childBadges', { id: childBadgeId });
     return { ...childBadge, badge };
   }
 
@@ -498,11 +498,11 @@ export class BadgesService {
       return [];
     }
 
-    const badges = await this.firestore.findMany('badges', { familyId });
+    const badges = await this.db.findMany('badges', { familyId });
     if (badges.length === 0) return [];
 
     const [existingBadges, ctx] = await Promise.all([
-      this.firestore.findMany('childBadges', { childId: childProfileId }),
+      this.db.findMany('childBadges', { childId: childProfileId }),
       this.buildCtx(childProfileId, childProfile, badges),
     ]);
     const earnedBadgeIds = new Set<string>(existingBadges.map((cb: any) => cb.badgeId));
@@ -540,7 +540,7 @@ export class BadgesService {
    * Используется для ретроспективного исправления пропущенных назначений.
    */
   async checkAndAwardAllChildren(familyId: string): Promise<Record<string, any[]>> {
-    const children = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    const children = await this.db.findMany('users', { familyId, role: 'CHILD' });
     const results: Record<string, any[]> = {};
     await Promise.all(children.map(async child => {
       results[child.id] = await this.checkAndAwardBadges(child.id, familyId);

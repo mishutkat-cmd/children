@@ -1,16 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { UpdateDecayRuleDto, CreateStreakRuleDto, UpdateStreakRuleDto, CreateCharacterDto, UpdateCharacterDto } from './dto/motivation.dto';
 import { invalidateFamilySettingsCache } from '../common/cache/family-settings-cache';
 
 @Injectable()
 export class MotivationService {
-  constructor(private firestore: FirestoreService) {}
+  constructor(private db: DocStore) {}
 
   async getSettings(familyId: string) {
-    const decayRule = await this.firestore.findFirst('decayRules', { familyId });
-    const streakRules = await this.firestore.findMany('streakRules', { familyId, enabled: true });
-    const familySettings = await this.firestore.findFirst('familySettings', { familyId });
+    const decayRule = await this.db.findFirst('decayRules', { familyId });
+    const streakRules = await this.db.findMany('streakRules', { familyId, enabled: true });
+    const familySettings = await this.db.findFirst('familySettings', { familyId });
 
     return {
       decayRule: decayRule || null,
@@ -24,35 +24,35 @@ export class MotivationService {
       throw new Error('Conversion rate must be greater than 0');
     }
 
-    const existing = await this.firestore.findFirst('familySettings', { familyId });
+    const existing = await this.db.findFirst('familySettings', { familyId });
 
     if (existing) {
-      await this.firestore.update('familySettings', existing.id, { conversionRate });
+      await this.db.update('familySettings', existing.id, { conversionRate });
       invalidateFamilySettingsCache(familyId);
-      return this.firestore.findFirst('familySettings', { id: existing.id });
+      return this.db.findFirst('familySettings', { id: existing.id });
     }
 
     const settingsId = crypto.randomUUID();
-    await this.firestore.create('familySettings', {
+    await this.db.create('familySettings', {
       id: settingsId,
       familyId,
       conversionRate,
     }, settingsId);
     invalidateFamilySettingsCache(familyId);
 
-    return this.firestore.findFirst('familySettings', { id: settingsId });
+    return this.db.findFirst('familySettings', { id: settingsId });
   }
 
   async updateDecayRule(familyId: string, dto: UpdateDecayRuleDto) {
-    const existing = await this.firestore.findFirst('decayRules', { familyId });
+    const existing = await this.db.findFirst('decayRules', { familyId });
 
     if (existing) {
-      await this.firestore.update('decayRules', existing.id, dto);
-      return this.firestore.findFirst('decayRules', { id: existing.id });
+      await this.db.update('decayRules', existing.id, dto);
+      return this.db.findFirst('decayRules', { id: existing.id });
     }
 
     const decayRuleId = crypto.randomUUID();
-    await this.firestore.create('decayRules', {
+    await this.db.create('decayRules', {
       id: decayRuleId,
       familyId,
       decayType: dto.decayType || 'POINTS',
@@ -64,43 +64,43 @@ export class MotivationService {
       mode: dto.mode || 'WARN_ONLY',
     }, decayRuleId);
     
-    return this.firestore.findFirst('decayRules', { id: decayRuleId });
+    return this.db.findFirst('decayRules', { id: decayRuleId });
   }
 
   async createStreakRule(familyId: string, dto: CreateStreakRuleDto) {
     const streakRuleId = crypto.randomUUID();
-    await this.firestore.create('streakRules', {
+    await this.db.create('streakRules', {
       id: streakRuleId,
       familyId,
       ...dto,
     }, streakRuleId);
     
-    return this.firestore.findFirst('streakRules', { id: streakRuleId });
+    return this.db.findFirst('streakRules', { id: streakRuleId });
   }
 
   async updateStreakRule(id: string, familyId: string, dto: UpdateStreakRuleDto) {
-    const existing = await this.firestore.findFirst('streakRules', { id, familyId });
+    const existing = await this.db.findFirst('streakRules', { id, familyId });
     if (!existing) {
       throw new Error('Streak rule not found');
     }
     
-    await this.firestore.update('streakRules', id, dto);
-    return this.firestore.findFirst('streakRules', { id });
+    await this.db.update('streakRules', id, dto);
+    return this.db.findFirst('streakRules', { id });
   }
 
   async deleteStreakRule(id: string, familyId: string) {
-    const existing = await this.firestore.findFirst('streakRules', { id, familyId });
+    const existing = await this.db.findFirst('streakRules', { id, familyId });
     if (!existing) {
       throw new Error('Streak rule not found');
     }
     
-    await this.firestore.delete('streakRules', id);
+    await this.db.delete('streakRules', id);
     return { success: true };
   }
 
   // Character management
   async getCharacters(familyId: string) {
-    const characters = await this.firestore.findMany('characters', { familyId }, { createdAt: 'asc' });
+    const characters = await this.db.findMany('characters', { familyId }, { createdAt: 'asc' });
     // Если нет персонажей, создаем 3 по умолчанию
     if (characters.length === 0) {
       const defaultCharacters = [
@@ -111,12 +111,12 @@ export class MotivationService {
       const created = [];
       for (const char of defaultCharacters) {
         const charId = crypto.randomUUID();
-        await this.firestore.create('characters', {
+        await this.db.create('characters', {
           id: charId,
           familyId,
           ...char,
         }, charId);
-        const createdChar = await this.firestore.findFirst('characters', { id: charId });
+        const createdChar = await this.db.findFirst('characters', { id: charId });
         created.push(createdChar);
       }
       return created;
@@ -154,7 +154,7 @@ export class MotivationService {
 
   async createCharacter(familyId: string, dto: CreateCharacterDto) {
     const charId = crypto.randomUUID();
-    await this.firestore.create('characters', {
+    await this.db.create('characters', {
       id: charId,
       familyId,
       name: dto.name,
@@ -162,11 +162,11 @@ export class MotivationService {
       imageUrlLow: dto.imageUrlLow || null,
       imageUrlHigh: dto.imageUrlHigh || null,
     }, charId);
-    return this.firestore.findFirst('characters', { id: charId });
+    return this.db.findFirst('characters', { id: charId });
   }
 
   async updateCharacter(id: string, familyId: string, dto: UpdateCharacterDto) {
-    const existing = await this.firestore.findFirst('characters', { id, familyId });
+    const existing = await this.db.findFirst('characters', { id, familyId });
     if (!existing) {
       throw new NotFoundException('Character not found');
     }
@@ -177,17 +177,17 @@ export class MotivationService {
     if (dto.imageUrlLow !== undefined) updateData.imageUrlLow = dto.imageUrlLow || null;
     if (dto.imageUrlHigh !== undefined) updateData.imageUrlHigh = dto.imageUrlHigh || null;
     
-    await this.firestore.update('characters', id, updateData);
-    return this.firestore.findFirst('characters', { id });
+    await this.db.update('characters', id, updateData);
+    return this.db.findFirst('characters', { id });
   }
 
   async deleteCharacter(id: string, familyId: string) {
-    const existing = await this.firestore.findFirst('characters', { id, familyId });
+    const existing = await this.db.findFirst('characters', { id, familyId });
     if (!existing) {
       throw new NotFoundException('Character not found');
     }
     
-    await this.firestore.delete('characters', id);
+    await this.db.delete('characters', id);
     return { success: true };
   }
 }

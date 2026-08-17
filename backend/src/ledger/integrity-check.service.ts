@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { computeBalanceDelta } from './balance-delta';
 
 /**
@@ -25,7 +25,7 @@ import { computeBalanceDelta } from './balance-delta';
 export class IntegrityCheckService {
   private readonly logger = new Logger(IntegrityCheckService.name);
 
-  constructor(private firestore: FirestoreService) {}
+  constructor(private db: DocStore) {}
 
   // 03:30 every night — after the midnight scheduler in TasksScheduler so
   // ADJUST entries it creates are already counted.
@@ -37,14 +37,14 @@ export class IntegrityCheckService {
     let mismatches = 0;
 
     try {
-      const allChildren = await this.firestore.findMany('users', { role: 'CHILD' });
+      const allChildren = await this.db.findMany('users', { role: 'CHILD' });
 
       for (const child of allChildren) {
         const childId = child.id;
         try {
           const [entries, profiles] = await Promise.all([
-            this.firestore.findMany('ledgerEntries', { childId }),
-            this.firestore.findMany('childProfiles', { userId: childId }),
+            this.db.findMany('ledgerEntries', { childId }),
+            this.db.findMany('childProfiles', { userId: childId }),
           ]);
           if (profiles.length === 0) continue;
 

@@ -14,7 +14,7 @@
 import '../config/env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { fixAllBalancesForFamily } from '../ledger/fix-balances.script';
 
@@ -25,11 +25,11 @@ async function main() {
     logger: ['error', 'warn', 'log'],
   });
 
-  const firestore = app.get(FirestoreService);
+  const db = app.get(DocStore);
   const ledgerService = app.get(LedgerService);
 
   console.log('[recompute-all] Gathering families...');
-  const parents = await firestore.findMany('users', { role: 'PARENT' });
+  const parents = await db.findMany('users', { role: 'PARENT' });
   const familyIds = Array.from(new Set(parents.map((p: any) => p.familyId).filter(Boolean)));
   console.log(`[recompute-all] Found ${familyIds.length} families`);
 
@@ -38,7 +38,7 @@ async function main() {
 
   for (const familyId of familyIds) {
     try {
-      const result = await fixAllBalancesForFamily(firestore, ledgerService, familyId);
+      const result = await fixAllBalancesForFamily(db, ledgerService, familyId);
       totalFixed += result.fixed || 0;
       totalErrors += result.errors || 0;
       console.log(

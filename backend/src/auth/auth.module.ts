@@ -6,13 +6,11 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { DeviceTokenService } from './device-token.service';
-import { FirestoreModule } from '../firestore/firestore.module';
 import { MotivationModule } from '../motivation/motivation.module';
 import { LedgerModule } from '../ledger/ledger.module';
 
 @Module({
   imports: [
-    FirestoreModule,
     PassportModule,
     MotivationModule,
     LedgerModule,

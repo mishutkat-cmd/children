@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 
 @Injectable()
 export class NotificationsService {
-  constructor(private firestore: FirestoreService) {}
+  constructor(private db: DocStore) {}
 
   async findAll(familyId: string) {
-    const notifications = await this.firestore.findMany(
+    const notifications = await this.db.findMany(
       'notifications',
       { familyId },
       { createdAt: 'desc' },
@@ -37,28 +37,28 @@ export class NotificationsService {
 
   private async loadChildData(childId?: string) {
     if (!childId) return null;
-    const childProfile = await this.firestore.findFirst('childProfiles', { id: childId });
+    const childProfile = await this.db.findFirst('childProfiles', { id: childId });
     if (!childProfile) return null;
-    const user = await this.firestore.findFirst('users', { id: childProfile.userId });
+    const user = await this.db.findFirst('users', { id: childProfile.userId });
     return { ...childProfile, login: user?.login, email: user?.email };
   }
 
   private async loadRelatedData(refType?: string, refId?: string) {
     if (!refType || !refId) return null;
     if (refType === 'COMPLETION') {
-      const completion = await this.firestore.findFirst('completions', { id: refId });
+      const completion = await this.db.findFirst('completions', { id: refId });
       if (!completion) return null;
-      const task = await this.firestore.findFirst('tasks', { id: completion.taskId });
+      const task = await this.db.findFirst('tasks', { id: completion.taskId });
       return { completion, task };
     }
     if (refType === 'BADGE') {
-      const childBadge = await this.firestore.findFirst('childBadges', { id: refId });
+      const childBadge = await this.db.findFirst('childBadges', { id: refId });
       if (!childBadge) return null;
-      const badge = await this.firestore.findFirst('badges', { id: childBadge.badgeId });
+      const badge = await this.db.findFirst('badges', { id: childBadge.badgeId });
       return { childBadge, badge };
     }
     if (refType === 'CHALLENGE') {
-      const challenge = await this.firestore.findFirst('challenges', { id: refId });
+      const challenge = await this.db.findFirst('challenges', { id: refId });
       return { challenge };
     }
     return null;
@@ -66,28 +66,28 @@ export class NotificationsService {
 
   async getUnreadCount(familyId: string) {
     // Считаем все уведомления, у которых read !== true (включая legacy без поля).
-    const notifications = await this.firestore.findMany('notifications', { familyId });
+    const notifications = await this.db.findMany('notifications', { familyId });
     const unread = notifications.filter((n: any) => n.read !== true);
     return { count: unread.length };
   }
 
   async markAsRead(notificationId: string, familyId: string) {
-    const notification = await this.firestore.findFirst('notifications', { id: notificationId, familyId });
+    const notification = await this.db.findFirst('notifications', { id: notificationId, familyId });
     if (!notification) {
       throw new NotFoundException('Notification not found');
     }
 
-    await this.firestore.update('notifications', notificationId, { read: true });
-    return this.firestore.findFirst('notifications', { id: notificationId });
+    await this.db.update('notifications', notificationId, { read: true });
+    return this.db.findFirst('notifications', { id: notificationId });
   }
 
   async markAllAsRead(familyId: string) {
     // Берём ВСЕ уведомления семьи, включая записи без поля read (legacy),
     // и помечаем как прочитанные те, у которых read !== true.
-    const notifications = await this.firestore.findMany('notifications', { familyId });
+    const notifications = await this.db.findMany('notifications', { familyId });
     const unread = notifications.filter((n: any) => n.read !== true);
     await Promise.all(
-      unread.map((n: any) => this.firestore.update('notifications', n.id, { read: true })),
+      unread.map((n: any) => this.db.update('notifications', n.id, { read: true })),
     );
     return { success: true, marked: unread.length };
   }

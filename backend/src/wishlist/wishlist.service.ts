@@ -1,17 +1,17 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
-import { StorageService } from '../firebase/storage.service';
+import { DocStore } from '../db/doc-store.service';
+import { LocalStorageService } from '../files/local-storage.service';
 import { AddToWishlistDto, ReorderWishlistDto, UpdateWishlistItemDto } from './dto/wishlist.dto';
 
 @Injectable()
 export class WishlistService {
   constructor(
-    private firestore: FirestoreService,
-    private storageService: StorageService,
+    private db: DocStore,
+    private storageService: LocalStorageService,
   ) {}
 
   async findAll(childId: string) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
@@ -19,13 +19,13 @@ export class WishlistService {
     const childProfileId = childProfile.id;
 
     // Получаем данные пользователя для имени
-    const user = await this.firestore.findFirst('users', { id: childId });
+    const user = await this.db.findFirst('users', { id: childId });
 
-    const wishlistItems = await this.firestore.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' });
+    const wishlistItems = await this.db.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' });
 
     const result = [];
     for (const item of wishlistItems) {
-      const reward = await this.firestore.findFirst('rewards', { id: item.rewardId });
+      const reward = await this.db.findFirst('rewards', { id: item.rewardId });
       result.push({
         ...item,
         rewardGoal: reward,
@@ -42,18 +42,18 @@ export class WishlistService {
   }
 
   async add(childId: string, dto: AddToWishlistDto) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
     const childProfileId = childProfiles[0].id;
 
-    const reward = await this.firestore.findFirst('rewards', { id: dto.rewardGoalId });
+    const reward = await this.db.findFirst('rewards', { id: dto.rewardGoalId });
     if (!reward) {
       throw new NotFoundException('Reward not found');
     }
 
-    const existing = await this.firestore.findFirst('wishlist', { 
+    const existing = await this.db.findFirst('wishlist', { 
       childId: childProfileId, 
       rewardId: dto.rewardGoalId,
     });
@@ -63,13 +63,13 @@ export class WishlistService {
     }
 
     // Get max priority
-    const allItems = await this.firestore.findMany('wishlist', { childId: childProfileId });
+    const allItems = await this.db.findMany('wishlist', { childId: childProfileId });
     const maxPriority = allItems.length > 0 
       ? Math.max(...allItems.map(item => item.priority || 0))
       : 0;
 
     const wishlistId = crypto.randomUUID();
-    await this.firestore.create('wishlist', {
+    await this.db.create('wishlist', {
       id: wishlistId,
       childId: childProfileId,
       rewardId: dto.rewardGoalId,
@@ -82,7 +82,7 @@ export class WishlistService {
       isPurchased: false,
     }, wishlistId);
 
-    const item = await this.firestore.findFirst('wishlist', { id: wishlistId });
+    const item = await this.db.findFirst('wishlist', { id: wishlistId });
     return {
       ...item,
       rewardGoal: reward,
@@ -90,13 +90,13 @@ export class WishlistService {
   }
 
   async remove(childId: string, wishlistId: string) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
     const childProfileId = childProfiles[0].id;
 
-    const wishlist = await this.firestore.findFirst('wishlist', {
+    const wishlist = await this.db.findFirst('wishlist', {
       id: wishlistId,
       childId: childProfileId,
     });
@@ -105,23 +105,23 @@ export class WishlistService {
       throw new NotFoundException('Wishlist item not found');
     }
 
-    await this.firestore.delete('wishlist', wishlistId);
+    await this.db.delete('wishlist', wishlistId);
   }
 
   async removeForParent(wishlistId: string, familyId: string) {
     // Находим wishlist item
-    const wishlist = await this.firestore.findFirst('wishlist', { id: wishlistId });
+    const wishlist = await this.db.findFirst('wishlist', { id: wishlistId });
     if (!wishlist) {
       throw new NotFoundException('Wishlist item not found');
     }
 
     // Проверяем, что item принадлежит семье
-    const childProfiles = await this.firestore.findMany('childProfiles', { id: wishlist.childId });
+    const childProfiles = await this.db.findMany('childProfiles', { id: wishlist.childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child profile not found');
     }
     const childProfile = childProfiles[0];
-    const user = await this.firestore.findFirst('users', { id: childProfile.userId });
+    const user = await this.db.findFirst('users', { id: childProfile.userId });
     
     if (!user || user.familyId !== familyId) {
       throw new NotFoundException('Wishlist item not found or access denied');
@@ -129,7 +129,7 @@ export class WishlistService {
 
     // Удаляем reward image из Firebase Storage если есть
     if (wishlist.rewardId) {
-      const reward = await this.firestore.findFirst('rewards', { id: wishlist.rewardId });
+      const reward = await this.db.findFirst('rewards', { id: wishlist.rewardId });
       if (reward?.imageUrl) {
         await this.storageService.deleteFile(reward.imageUrl).catch(err => 
           console.warn(`Failed to delete reward image: ${reward.imageUrl}`, err)
@@ -137,18 +137,18 @@ export class WishlistService {
       }
     }
 
-    await this.firestore.delete('wishlist', wishlistId);
+    await this.db.delete('wishlist', wishlistId);
   }
 
   async reorder(childId: string, dto: ReorderWishlistDto) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
     const childProfileId = childProfiles[0].id;
 
     const updates = dto.items.map((item) =>
-      this.firestore.update('wishlist', item.id, { priority: item.priority })
+      this.db.update('wishlist', item.id, { priority: item.priority })
     );
 
     await Promise.all(updates);
@@ -157,18 +157,18 @@ export class WishlistService {
 
   async findAllForFamily(familyId: string) {
     // Получаем всех детей семьи
-    const children = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    const children = await this.db.findMany('users', { familyId, role: 'CHILD' });
     
     const result = [];
     for (const child of children) {
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: child.id });
+      const childProfiles = await this.db.findMany('childProfiles', { userId: child.id });
       if (childProfiles.length === 0) continue;
       
       const childProfileId = childProfiles[0].id;
-      const wishlistItems = await this.firestore.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' });
+      const wishlistItems = await this.db.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' });
       
       for (const item of wishlistItems) {
-        const reward = await this.firestore.findFirst('rewards', { id: item.rewardId });
+        const reward = await this.db.findFirst('rewards', { id: item.rewardId });
         result.push({
           ...item,
           rewardGoal: reward,
@@ -187,18 +187,18 @@ export class WishlistService {
 
   async update(wishlistId: string, familyId: string, dto: UpdateWishlistItemDto) {
     // Находим wishlist item
-    const wishlist = await this.firestore.findFirst('wishlist', { id: wishlistId });
+    const wishlist = await this.db.findFirst('wishlist', { id: wishlistId });
     if (!wishlist) {
       throw new NotFoundException('Wishlist item not found');
     }
 
     // Проверяем, что item принадлежит семье
-    const childProfiles = await this.firestore.findMany('childProfiles', { id: wishlist.childId });
+    const childProfiles = await this.db.findMany('childProfiles', { id: wishlist.childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child profile not found');
     }
     const childProfile = childProfiles[0];
-    const user = await this.firestore.findFirst('users', { id: childProfile.userId });
+    const user = await this.db.findFirst('users', { id: childProfile.userId });
     if (!user || user.familyId !== familyId) {
       throw new NotFoundException('Wishlist item not found');
     }
@@ -224,10 +224,10 @@ export class WishlistService {
       updateData.showOnDashboard = dto.showOnDashboard;
       // Если устанавливаем showOnDashboard для одного элемента, снимаем с других
       if (dto.showOnDashboard === true) {
-        const allItems = await this.firestore.findMany('wishlist', { childId: wishlist.childId });
+        const allItems = await this.db.findMany('wishlist', { childId: wishlist.childId });
         for (const item of allItems) {
           if (item.id !== wishlistId && item.showOnDashboard === true) {
-            await this.firestore.update('wishlist', item.id, { showOnDashboard: false });
+            await this.db.update('wishlist', item.id, { showOnDashboard: false });
           }
         }
       }
@@ -235,33 +235,33 @@ export class WishlistService {
     if (dto.isFavorite !== undefined) {
       updateData.isFavorite = dto.isFavorite;
       if (dto.isFavorite === true) {
-        const allItems = await this.firestore.findMany('wishlist', { childId: wishlist.childId });
+        const allItems = await this.db.findMany('wishlist', { childId: wishlist.childId });
         for (const item of allItems) {
           if (item.id !== wishlistId && (item.isFavorite === true || item.isFavorite === 'true' || item.isFavorite === 1)) {
-            await this.firestore.update('wishlist', item.id, { isFavorite: false });
+            await this.db.update('wishlist', item.id, { isFavorite: false });
           }
         }
       }
     }
 
     if (Object.keys(updateData).length > 0) {
-      await this.firestore.update('wishlist', wishlistId, updateData);
+      await this.db.update('wishlist', wishlistId, updateData);
     }
 
-    const updatedItem = await this.firestore.findFirst('wishlist', { id: wishlistId });
-    const reward = await this.firestore.findFirst('rewards', { id: updatedItem.rewardId });
+    const updatedItem = await this.db.findFirst('wishlist', { id: wishlistId });
+    const reward = await this.db.findFirst('rewards', { id: updatedItem.rewardId });
     return { ...updatedItem, rewardGoal: reward };
   }
 
   async updateForChild(wishlistId: string, childId: string, dto: UpdateWishlistItemDto) {
     // Находим wishlist item
-    const wishlist = await this.firestore.findFirst('wishlist', { id: wishlistId });
+    const wishlist = await this.db.findFirst('wishlist', { id: wishlistId });
     if (!wishlist) {
       throw new NotFoundException('Wishlist item not found');
     }
 
     // Проверяем, что item принадлежит ребенку
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child profile not found');
     }
@@ -291,10 +291,10 @@ export class WishlistService {
       updateData.showOnDashboard = dto.showOnDashboard;
       // Если устанавливаем showOnDashboard для одного элемента, снимаем с других
       if (dto.showOnDashboard === true) {
-        const allItems = await this.firestore.findMany('wishlist', { childId: childProfile.id });
+        const allItems = await this.db.findMany('wishlist', { childId: childProfile.id });
         for (const item of allItems) {
           if (item.id !== wishlistId && item.showOnDashboard === true) {
-            await this.firestore.update('wishlist', item.id, { showOnDashboard: false });
+            await this.db.update('wishlist', item.id, { showOnDashboard: false });
           }
         }
       }
@@ -302,21 +302,21 @@ export class WishlistService {
     if (dto.isFavorite !== undefined) {
       updateData.isFavorite = dto.isFavorite;
       if (dto.isFavorite === true) {
-        const allItems = await this.firestore.findMany('wishlist', { childId: childProfile.id });
+        const allItems = await this.db.findMany('wishlist', { childId: childProfile.id });
         for (const item of allItems) {
           if (item.id !== wishlistId && (item.isFavorite === true || item.isFavorite === 'true' || item.isFavorite === 1)) {
-            await this.firestore.update('wishlist', item.id, { isFavorite: false });
+            await this.db.update('wishlist', item.id, { isFavorite: false });
           }
         }
       }
     }
 
     if (Object.keys(updateData).length > 0) {
-      await this.firestore.update('wishlist', wishlistId, updateData);
+      await this.db.update('wishlist', wishlistId, updateData);
     }
 
-    const updatedItem = await this.firestore.findFirst('wishlist', { id: wishlistId });
-    const reward = await this.firestore.findFirst('rewards', { id: updatedItem.rewardId });
+    const updatedItem = await this.db.findFirst('wishlist', { id: wishlistId });
+    const reward = await this.db.findFirst('rewards', { id: updatedItem.rewardId });
     return { ...updatedItem, rewardGoal: reward };
   }
 }

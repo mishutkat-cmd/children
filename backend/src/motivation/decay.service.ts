@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 
 @Injectable()
 export class DecayService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private ledgerService: LedgerService,
   ) {}
 
@@ -21,13 +21,13 @@ export class DecayService {
    * instead of full-history scans. The loop itself is parallelized.
    */
   async processDecayForFamily(familyId: string) {
-    const decayRule = await this.firestore.findFirst('decayRules', { familyId });
+    const decayRule = await this.db.findFirst('decayRules', { familyId });
     if (!decayRule || !decayRule.enabled || decayRule.mode === 'OFF') return;
 
     // Parallel: list of children + their profiles in two batched reads.
-    const children = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    const children = await this.db.findMany('users', { familyId, role: 'CHILD' });
     if (children.length === 0) return;
-    const profiles = await this.firestore.findMany('childProfiles', {
+    const profiles = await this.db.findMany('childProfiles', {
       userId: { in: children.map((c: any) => c.id) },
     });
     const profileByUser = new Map<string, any>();
@@ -204,8 +204,8 @@ export class DecayService {
     today.setHours(0, 0, 0, 0);
 
     const [decayRule, childProfiles] = await Promise.all([
-      this.firestore.findFirst('decayRules', { familyId }),
-      this.firestore.findMany('childProfiles', { userId: childId }),
+      this.db.findFirst('decayRules', { familyId }),
+      this.db.findMany('childProfiles', { userId: childId }),
     ]);
 
     if (!decayRule || !decayRule.enabled || decayRule.mode === 'OFF') {

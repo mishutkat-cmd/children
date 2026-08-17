@@ -5,14 +5,14 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 
 @Controller('ledger')
 @UseGuards(JwtAuthGuard)
 export class LedgerController {
   constructor(
     private ledgerService: LedgerService,
-    private firestore: FirestoreService,
+    private db: DocStore,
     private cleanupService: CleanupService,
   ) {}
 
@@ -25,11 +25,11 @@ export class LedgerController {
    */
   private async resolveChildAndCheckAccess(rawChildId: string, user: RequestUser): Promise<string> {
     let userId: string | null = null;
-    const byUserId = await this.firestore.findFirst('childProfiles', { userId: rawChildId });
+    const byUserId = await this.db.findFirst('childProfiles', { userId: rawChildId });
     if (byUserId) {
       userId = rawChildId;
     } else {
-      const byProfileId = await this.firestore.findFirst('childProfiles', { id: rawChildId });
+      const byProfileId = await this.db.findFirst('childProfiles', { id: rawChildId });
       if (!byProfileId) throw new NotFoundException('Child not found');
       const raw = (byProfileId as any).userId;
       userId = typeof raw === 'string' ? raw : (raw && typeof raw.id === 'string' ? raw.id : null);
@@ -37,7 +37,7 @@ export class LedgerController {
     if (!userId) throw new NotFoundException('Child not found');
 
     if (user.role === 'PARENT') {
-      const inFamily = await this.firestore.findFirst('users', { id: userId, familyId: user.familyId });
+      const inFamily = await this.db.findFirst('users', { id: userId, familyId: user.familyId });
       if (!inFamily) throw new ForbiddenException('Child is not in your family');
       return userId;
     }
@@ -65,8 +65,8 @@ export class LedgerController {
       return { success: false, error: 'Укажите положительное количество баллов' };
     }
     const isPenalty = body?.type === 'penalty';
-    const childProfile = await this.firestore.findFirst('childProfiles', { userId: childId });
-    const childProfileById = childProfile || await this.firestore.findFirst('childProfiles', { id: childId });
+    const childProfile = await this.db.findFirst('childProfiles', { userId: childId });
+    const childProfileById = childProfile || await this.db.findFirst('childProfiles', { id: childId });
     if (!childProfileById) {
       return { success: false, error: 'Ребёнок не найден' };
     }
@@ -82,14 +82,14 @@ export class LedgerController {
       return { success: false, error: 'Ребёнок не найден' };
     }
     const familyId = user.familyId;
-    const userInFamily = await this.firestore.findFirst('users', { id: userId, familyId });
+    const userInFamily = await this.db.findFirst('users', { id: userId, familyId });
     if (!userInFamily) {
       return { success: false, error: 'Ребёнок не из вашей семьи' };
     }
     const metaJson = body.reason ? { reason: String(body.reason).trim() } : undefined;
     const entryType = isPenalty ? 'PENALTY' : 'BONUS';
     await this.ledgerService.createEntry(familyId, userId, entryType, 'MANUAL', amount, undefined, metaJson);
-    const profile = await this.firestore.findFirst('childProfiles', { userId });
+    const profile = await this.db.findFirst('childProfiles', { userId });
     const newBalance = profile?.pointsBalance ?? 0;
     return { success: true, newBalance, amount, type: isPenalty ? 'penalty' : 'bonus' };
   }
@@ -99,11 +99,11 @@ export class LedgerController {
   @Roles('PARENT')
   async getDiagnostics(@Param('childId') childId: string, @User() user: RequestUser) {
     const userId = await this.resolveChildAndCheckAccess(childId, user);
-    const childProfile = await this.firestore.findFirst('childProfiles', { userId });
+    const childProfile = await this.db.findFirst('childProfiles', { userId });
     const childProfileId = childProfile?.id || childId;
     
     // Получаем все ledger entries
-    const allEntries = await this.firestore.findMany('ledgerEntries', { childId: userId });
+    const allEntries = await this.db.findMany('ledgerEntries', { childId: userId });
     
     // Рассчитываем баланс вручную
     const calculatedBalance = allEntries.reduce((sum, entry) => {
@@ -119,11 +119,11 @@ export class LedgerController {
     }, 0);
     
     // Получаем текущий баланс из ChildProfile
-    const currentProfile = await this.firestore.findFirst('childProfiles', { id: childProfileId });
+    const currentProfile = await this.db.findFirst('childProfiles', { id: childProfileId });
     const currentBalance = currentProfile?.pointsBalance || 0;
     
     // Получаем все completions для проверки дублирования
-    const completions = await this.firestore.findMany('completions', { childId: childProfileId });
+    const completions = await this.db.findMany('completions', { childId: childProfileId });
     
     // Проверяем дублирование ledger entries для completions
     const completionLedgerMap = new Map<string, any[]>();
@@ -201,7 +201,7 @@ export class LedgerController {
     console.log('[LedgerController] Fix all balances requested for family:', user.familyId);
     
     // Получаем всех детей из семьи пользователя
-    const children = await this.firestore.findMany('users', { 
+    const children = await this.db.findMany('users', { 
       familyId: user.familyId, 
       role: 'CHILD' 
     });
@@ -213,7 +213,7 @@ export class LedgerController {
     for (const child of children) {
       try {
         const userId = child.id;
-        const childProfiles = await this.firestore.findMany('childProfiles', { userId });
+        const childProfiles = await this.db.findMany('childProfiles', { userId });
         
         if (childProfiles.length === 0) {
           console.warn(`[LedgerController] No child profile found for userId: ${userId}`);
@@ -232,7 +232,7 @@ export class LedgerController {
         console.log(`[LedgerController] Processing child: ${childProfile.name || child.login} (${userId})`);
         
         // Шаг 1: Удаляем дубликаты
-        const allEntries = await this.firestore.findMany('ledgerEntries', { childId: userId });
+        const allEntries = await this.db.findMany('ledgerEntries', { childId: userId });
         const completionEntries = new Map<string, any[]>();
         
         for (const entry of allEntries) {
@@ -258,7 +258,7 @@ export class LedgerController {
             // Удаляем все кроме первой
             for (let i = 1; i < entries.length; i++) {
               try {
-                await this.firestore.delete('ledgerEntries', entries[i].id);
+                await this.db.delete('ledgerEntries', entries[i].id);
                 duplicatesRemoved++;
                 console.log(`[LedgerController] Removed duplicate ledger entry: ${entries[i].id} for completion: ${completionId}`);
               } catch (error: any) {
@@ -318,7 +318,7 @@ export class LedgerController {
     const userId = await this.resolveChildAndCheckAccess(childId, user);
     
     // Получаем все ledger entries
-    const allEntries = await this.firestore.findMany('ledgerEntries', { childId: userId });
+    const allEntries = await this.db.findMany('ledgerEntries', { childId: userId });
     
     // Группируем по refType и refId для COMPLETION
     const completionEntries = new Map<string, any[]>();
@@ -365,7 +365,7 @@ export class LedgerController {
     let deletedCount = 0;
     for (const entryId of toDelete) {
       try {
-        await this.firestore.delete('ledgerEntries', entryId);
+        await this.db.delete('ledgerEntries', entryId);
         deletedCount++;
       } catch (error: any) {
         console.error(`[LedgerController] Error deleting duplicate entry ${entryId}:`, error.message);

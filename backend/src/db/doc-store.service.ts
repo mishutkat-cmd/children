@@ -391,8 +391,74 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
     this.db.prepare(`UPDATE ${table} SET doc = ? WHERE id = ?`).run(JSON.stringify(current), id);
   }
 
+  /**
+   * Create-or-merge by id — the equivalent of Firestore's
+   * `doc(id).set(data, { merge: true })`.
+   *
+   * With `merge` the patch is applied over the existing document and
+   * `createdAt` is preserved; without it the document is replaced wholesale.
+   * Unlike `updateSync`, a missing document is created rather than an error,
+   * which is what the settings and last-known-location writes rely on.
+   *
+   * `mergeNested` additionally merges one level down, for the case Firestore
+   * handled natively: `perChild: { [childId]: patch }` must not wipe the other
+   * children's settings.
+   */
+  setSync(
+    collection: string,
+    id: string,
+    data: Record<string, any>,
+    options?: { merge?: boolean; mergeNested?: boolean },
+  ): void {
+    const table = tableFor(collection);
+    const row = this.db.prepare(`SELECT doc FROM ${table} WHERE id = ?`).get(id) as
+      | { doc: string }
+      | undefined;
+
+    const now = new Date().toISOString();
+    const { id: _i, ...rest } = data;
+    const patch = DocStore.encodeDoc(rest);
+
+    let next: Record<string, any>;
+    if (!row) {
+      next = { ...patch, createdAt: patch.createdAt ?? now, updatedAt: now };
+    } else if (options?.merge) {
+      const current = JSON.parse(row.doc);
+      next = { ...current, ...patch };
+      if (options.mergeNested) {
+        for (const [key, value] of Object.entries(patch)) {
+          const existing = current[key];
+          const isPlainObject = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
+          if (isPlainObject(value) && isPlainObject(existing)) {
+            next[key] = { ...existing, ...value };
+          }
+        }
+      }
+      next.createdAt = current.createdAt ?? now;
+      next.updatedAt = now;
+    } else {
+      next = { ...patch, createdAt: patch.createdAt ?? now, updatedAt: now };
+    }
+
+    this.db
+      .prepare(`INSERT OR REPLACE INTO ${table} (id, doc) VALUES (?, ?)`)
+      .run(id, JSON.stringify(next));
+  }
+
   deleteSync(collection: string, id: string): void {
     this.db.prepare(`DELETE FROM ${tableFor(collection)} WHERE id = ?`).run(id);
+  }
+
+  /**
+   * Bulk delete by predicate. Firestore had no such thing — callers looped
+   * over paged reads and issued batched deletes — so this collapses those
+   * loops into one statement. Returns the number of rows removed.
+   */
+  deleteManySync(collection: string, where?: Record<string, any>): number {
+    const { sql, params } = DocStore.buildWhere(where);
+    let query = `DELETE FROM ${tableFor(collection)}`;
+    if (sql) query += ` WHERE ${sql}`;
+    return this.db.prepare(query).run(...params).changes;
   }
 
   /**
@@ -442,6 +508,23 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
 
   async delete(collection: string, id: string): Promise<void> {
     this.deleteSync(collection, id);
+  }
+
+  async set(
+    collection: string,
+    id: string,
+    data: Record<string, any>,
+    options?: { merge?: boolean; mergeNested?: boolean },
+  ): Promise<void> {
+    this.setSync(collection, id, data, options);
+  }
+
+  async deleteMany(collection: string, where?: Record<string, any>): Promise<number> {
+    return this.deleteManySync(collection, where);
+  }
+
+  async get(collection: string, id: string): Promise<any | null> {
+    return this.getSync(collection, id);
   }
 
   /** Kept for signature compatibility with the old Firestore shim. */

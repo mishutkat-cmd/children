@@ -1,21 +1,28 @@
 import { Controller, Get } from '@nestjs/common';
-import { FirebaseService, FirebaseStatus } from '../firebase/firebase.service';
+import { DocStore } from '../db/doc-store.service';
 import { envFileUsed } from '../config/env';
 import { existsSync } from 'fs';
 import { join } from 'path';
+
+interface DatabaseStatus {
+  enabled: boolean;
+  path: string;
+  documents: number;
+  reason?: string;
+}
 
 interface HealthResponse {
   ok: boolean;
   ts: string;
   uptime: number;
-  env: { firebaseEnabled: boolean; frontendEnabled: boolean };
+  env: { databaseEnabled: boolean; frontendEnabled: boolean };
 }
 
 interface HealthResponseLegacy {
   ok: boolean;
   status: string;
   timestamp: string;
-  firebase?: FirebaseStatus & { reason?: string };
+  database?: DatabaseStatus;
   frontend?: { enabled: boolean; found: boolean };
   nodeVersion: string;
   uptime: number;
@@ -36,27 +43,33 @@ interface FrontendStatusResponse {
 
 @Controller()
 export class HealthController {
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(private readonly db: DocStore) {}
 
   @Get('health')
   getHealth(): HealthResponse & HealthResponseLegacy {
-    const firebaseStatus = this.firebaseService.getStatus();
+    const databaseStatus = this.db.getStatus();
     const frontendStatus = this.getFrontendStatusInternal();
     const ts = new Date().toISOString();
+
+    // `ok` now actually means something. It used to be hardcoded true even
+    // when Firestore was unreachable, so a monitor watching it could not tell
+    // a healthy process from one that could not read a single document.
+    const ok = databaseStatus.enabled;
+
     return {
-      ok: true,
+      ok,
       ts,
       uptime: process.uptime(),
       env: {
-        firebaseEnabled: firebaseStatus.enabled,
+        databaseEnabled: databaseStatus.enabled,
         frontendEnabled: frontendStatus.enabled,
       },
-      firebase: { ...firebaseStatus },
+      database: databaseStatus,
       frontend: { enabled: frontendStatus.enabled, found: frontendStatus.found },
       nodeVersion: process.version,
-      status: 'ok',
+      status: ok ? 'ok' : 'degraded',
       timestamp: ts,
-      ...(firebaseStatus.reason && { firebaseReason: firebaseStatus.reason }),
+      ...(databaseStatus.reason && { databaseReason: databaseStatus.reason }),
       ...(frontendStatus.reason && { frontendReason: frontendStatus.reason }),
     };
   }
@@ -134,16 +147,22 @@ export class HealthController {
     const fs = require('fs');
     const cwd = process.cwd();
     const portPresent = process.env.PORT !== undefined && process.env.PORT !== '';
-    let firebaseAdminResolvable: string | { error: string } = '';
+
+    const databaseStatus = this.db.getStatus();
+    // Writability is worth checking separately: the file can exist and open
+    // read-only if the deploy user's permissions drift, and every write would
+    // then fail at request time with nothing in the health output to explain it.
+    let databaseWritable: boolean | { error: string };
     try {
-      firebaseAdminResolvable = require.resolve('firebase-admin');
+      fs.accessSync(databaseStatus.path, fs.constants.W_OK);
+      databaseWritable = true;
     } catch (e: any) {
-      firebaseAdminResolvable = { error: e?.message || 'not found' };
+      databaseWritable = { error: e?.message || 'not writable' };
     }
-    const firebaseSaConfigured = process.env.FIREBASE_SA_PATH;
+
+    const uploadsPath = process.env.UPLOADS_PATH || join(cwd, 'uploads');
     const secretsPathsExist = {
       backendEnv: fs.existsSync(join(cwd, '.env')),
-      firebaseSa: firebaseSaConfigured ? fs.existsSync(firebaseSaConfigured) : null,
     };
     const configuredPath = process.env.FRONTEND_BUILD_PATH;
     const frontendConfiguredPathExists =
@@ -155,7 +174,14 @@ export class HealthController {
       cwd,
       portPresent,
       envFileUsed: envFileUsed ?? null,
-      firebaseAdminResolvable,
+      database: {
+        ...databaseStatus,
+        writable: databaseWritable,
+      },
+      uploads: {
+        path: uploadsPath,
+        exists: fs.existsSync(uploadsPath),
+      },
       secretsPathsExist,
       frontendConfiguredPathExists,
       mode,

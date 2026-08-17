@@ -3,18 +3,18 @@
  * Можно запустить через endpoint или напрямую
  */
 
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from './ledger.service';
 
 export async function fixAllBalancesForFamily(
-  firestore: FirestoreService,
+  db: DocStore,
   ledgerService: LedgerService,
   familyId: string,
 ): Promise<any> {
   console.log(`[FixBalancesScript] Starting fix for family: ${familyId}`);
   
   // Получаем всех детей из семьи
-  const children = await firestore.findMany('users', { 
+  const children = await db.findMany('users', { 
     familyId, 
     role: 'CHILD' 
   });
@@ -26,7 +26,7 @@ export async function fixAllBalancesForFamily(
   for (const child of children) {
     try {
       const userId = child.id;
-      const childProfiles = await firestore.findMany('childProfiles', { userId });
+      const childProfiles = await db.findMany('childProfiles', { userId });
       
       if (childProfiles.length === 0) {
         console.warn(`[FixBalancesScript] No child profile found for userId: ${userId}`);
@@ -45,7 +45,7 @@ export async function fixAllBalancesForFamily(
       console.log(`[FixBalancesScript] Processing child: ${childProfile.name || child.login} (${userId})`);
       
       // Шаг 1: Удаляем дубликаты
-      const allEntries = await firestore.findMany('ledgerEntries', { childId: userId });
+      const allEntries = await db.findMany('ledgerEntries', { childId: userId });
       const completionEntries = new Map<string, any[]>();
       
       for (const entry of allEntries) {
@@ -71,7 +71,7 @@ export async function fixAllBalancesForFamily(
           // Удаляем все кроме первой
           for (let i = 1; i < entries.length; i++) {
             try {
-              await firestore.delete('ledgerEntries', entries[i].id);
+              await db.delete('ledgerEntries', entries[i].id);
               duplicatesRemoved++;
               console.log(`[FixBalancesScript] Removed duplicate ledger entry: ${entries[i].id} for completion: ${completionId}`);
             } catch (error: any) {

@@ -18,7 +18,7 @@
 import '../config/env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 
 async function main() {
@@ -26,11 +26,11 @@ async function main() {
     logger: ['error', 'warn', 'log'],
   });
 
-  const firestore = app.get(FirestoreService);
+  const db = app.get(DocStore);
   const ledger = app.get(LedgerService);
 
   console.log('[backfill] scanning APPROVED completions...');
-  const completions = await firestore.findMany('completions', { status: 'APPROVED' });
+  const completions = await db.findMany('completions', { status: 'APPROVED' });
   console.log(`[backfill] candidates: ${completions.length}`);
 
   let scanned = 0;
@@ -51,7 +51,7 @@ async function main() {
 
     // completion.childId is the childProfile.id; the ledger uses the
     // user's userId. Resolve.
-    const childProfile = await firestore.findFirst('childProfiles', { id: c.childId });
+    const childProfile = await db.findFirst('childProfiles', { id: c.childId });
     const userId = childProfile?.userId;
     if (!userId || typeof userId !== 'string') {
       skippedNoUser++;
@@ -59,7 +59,7 @@ async function main() {
       continue;
     }
 
-    const existing = await firestore.findMany('ledgerEntries', {
+    const existing = await db.findMany('ledgerEntries', {
       refType: 'COMPLETION',
       refId: c.id,
       type: 'EARN',
@@ -69,7 +69,7 @@ async function main() {
       continue;
     }
 
-    const task = await firestore.findFirst('tasks', { id: c.taskId });
+    const task = await db.findFirst('tasks', { id: c.taskId });
 
     try {
       await ledger.createEntry(

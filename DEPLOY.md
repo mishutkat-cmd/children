@@ -17,7 +17,7 @@
 
 ## Структура проекта
 
-- `backend/` — NestJS API (Firestore, JWT, опционально раздаёт SPA)
+- `backend/` — NestJS API (локальный SQLite, JWT, опционально раздаёт SPA)
 - `web/` — React + Vite SPA
 - `frontend/build/` — куда `scripts/deploy.sh` копирует собранный фронт; бэкенд раздаёт его при `FRONTEND_ENABLED=true`
 - `scripts/deploy.sh` — git-based деплой (запускается на сервере; то же делает CI)
@@ -35,7 +35,11 @@
 | `JWT_EXPIRES_IN` | например `7d` |
 | `FRONTEND_ENABLED` | `true` чтобы бэкенд раздавал SPA |
 | `FRONTEND_BUILD_PATH` | абсолютный путь к `frontend/build` (на проде `/home/odoo/crmproject/children/frontend/build`) |
-| `FIREBASE_SA_PATH` | абсолютный путь к Firebase service account JSON |
+| `DATABASE_PATH` | абсолютный путь к файлу SQLite (`.../backend/data/children.db`) |
+| `UPLOADS_PATH` | каталог публичных загрузок, его же отдаёт Caddy по `/uploads/*` |
+| `UPLOADS_PRIVATE_PATH` | каталог фотоподтверждений, **вне** веб-корня |
+| `UPLOADS_PUBLIC_BASE` | префикс публичных URL (по умолчанию `/uploads`) |
+| `FIREBASE_SA_PATH` | нужен только скрипту миграции; приложение в Firebase больше не ходит |
 | `FIREBASE_SA_JSON` | альтернатива: содержимое JSON прямо в env |
 | `PORT` | TCP-порт (`3010`) **или** путь к unix-сокету (начинается с `/` или `.sock`) |
 | `NODE_ENV` | `production` |
@@ -127,6 +131,13 @@ PM2 рестартит на crash, при `max_memory_restart=600M`, и посл
 - `scripts/auto-restart.sh` — bash-супервизор, без зависимостей.
 - `scripts/healthcheck.sh` — внешний watchdog по `/health`, в cron как страховка.
 
+## Резервные копии
+
+Firestore бэкапил себя сам — теперь это наша забота. `scripts/backup-db.sh`
+снимает консистентный снимок через `VACUUM INTO` (не `cp`: база в режиме WAL)
+и проверяет `integrity_check` на результате. Ставится в cron, подробности в
+[MIGRATION.md](MIGRATION.md).
+
 ## Caddy vhost
 
 В `/etc/caddy/Caddyfile`:
@@ -145,8 +156,12 @@ Reload без даунтайма: `sudo systemctl reload caddy`. TLS Caddy по�
 
 ## Диагностика
 
-- **GET `/health`** — общий статус (`firebase`, `frontend`, `uptime`)
-- **GET `/diagnostics`** — `cwd`, `portPresent`, `envFileUsed`, `firebaseAdminResolvable`, `secretsPathsExist`, `frontendConfiguredPathExists`, `mode` (port/socket)
+- **GET `/health`** — общий статус (`database`, `frontend`, `uptime`). `ok: false`,
+  если база не открылась: раньше это поле было захардкожено в `true` и не отличало
+  живой процесс от неспособного прочитать ни одного документа
+- **GET `/diagnostics`** — `cwd`, `portPresent`, `envFileUsed`, `database` (путь,
+  число документов, **доступность на запись**), `uploads`, `secretsPathsExist`,
+  `frontendConfiguredPathExists`, `mode` (port/socket)
 - **GET `/frontend/status`** — найден ли SPA build, какие пути проверены
 
 ```bash

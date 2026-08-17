@@ -1,19 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import * as admin from 'firebase-admin';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { BadgesService } from '../badges/badges.service';
 import { LedgerType, computeBalanceDelta, computeTotalEarnedDelta } from './balance-delta';
 
 type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
 
 /**
- * Recursively drop keys whose value is `undefined`. Firestore's admin
- * client refuses documents that contain `undefined` (it throws inside
- * Transaction.set / WriteBatch.set with "Cannot use \"undefined\" as a
- * Firestore value"), so any caller that builds metaJson with optional
- * fields like `{ multiplier: cond ? 5 : undefined }` would crash the
- * whole createEntry transaction — silently swallowing the ledger entry
- * AND the balance increment on the way out. Strip those before write.
+ * Recursively drop keys whose value is `undefined`.
+ *
+ * Firestore refused documents containing `undefined` and took the whole
+ * transaction down with them — a caller building
+ * `{ multiplier: cond ? 5 : undefined }` would lose the ledger entry AND the
+ * balance increment. SQLite has no such restriction (JSON.stringify simply
+ * omits those keys), but the stripping stays: it keeps stored documents free
+ * of keys whose only value is "absent", which the read paths already treat as
+ * meaningful.
  */
 function stripUndefined(value: any): any {
   if (value === null || typeof value !== 'object') return value;
@@ -29,7 +30,7 @@ function stripUndefined(value: any): any {
 @Injectable()
 export class LedgerService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private badgesService: BadgesService,
   ) {}
 
@@ -52,16 +53,14 @@ export class LedgerService {
       // increment with it. Always strip before persisting.
       const safeMetaJson = metaJson ? stripUndefined(metaJson) : null;
       const entryData = {
-        id: entryId,
         familyId,
         childId,
         type,
         refType,
-        refId: refId ?? null, // Firestore не принимает undefined
+        refId: refId ?? null,
         amount,
         metaJson: safeMetaJson,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // createdAt/updatedAt are stamped by the store, not by the caller.
       };
 
       // Atomic write: insert the ledger entry AND adjust the denormalized
@@ -77,37 +76,29 @@ export class LedgerService {
       //
       // All three are authoritative denormalizations; IntegrityCheckService
       // audits them periodically.
-      await this.firestore.runTransaction(async (tx) => {
-        const profilesQuery = this.firestore
-          .collection('childProfiles')
-          .where('userId', '==', childId)
-          .limit(1);
-        const profilesSnap = await tx.get(profilesQuery);
+      //
+      // The transaction callback is synchronous on purpose: a SQLite
+      // transaction is tied to the connection, so awaiting inside it would let
+      // other work interleave between BEGIN and COMMIT.
+      this.db.transaction(() => {
+        this.db.createSync('ledgerEntries', entryData, entryId);
 
-        const ledgerRef = this.firestore.collection('ledgerEntries').doc(entryId);
-        tx.set(ledgerRef, entryData);
+        const profile = this.db.findFirstSync('childProfiles', { userId: childId });
+        if (!profile) return;
 
-        if (!profilesSnap.empty) {
-          const updates: Record<string, any> = {
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          };
-          if (delta !== 0) {
-            updates.pointsBalance = admin.firestore.FieldValue.increment(delta);
-          }
-          if (earnDelta !== 0) {
-            updates.totalEarned = admin.firestore.FieldValue.increment(earnDelta);
-          }
-          // refType === 'COMPLETION' is the "real activity" signal that
-          // decay watches. EXCHANGE/MANUAL/DECAY etc. don't reset the
-          // decay clock — only completing a task does.
-          if (refType === 'COMPLETION') {
-            updates.lastCompletionAt = admin.firestore.FieldValue.serverTimestamp();
-          }
-          // Skip the write if nothing actually changed (e.g. ADJUST with
-          // amount=0 and not a completion). Keeps the write count honest.
-          if (Object.keys(updates).length > 1) {
-            tx.update(profilesSnap.docs[0].ref, updates);
-          }
+        const deltas: Record<string, number> = {};
+        if (delta !== 0) deltas.pointsBalance = delta;
+        if (earnDelta !== 0) deltas.totalEarned = earnDelta;
+
+        // refType === 'COMPLETION' is the "real activity" signal that decay
+        // watches. EXCHANGE/MANUAL/DECAY etc. don't reset the decay clock —
+        // only completing a task does.
+        const extra = refType === 'COMPLETION' ? { lastCompletionAt: new Date() } : undefined;
+
+        // Skip the write if nothing actually changed (e.g. ADJUST with
+        // amount=0 and not a completion).
+        if (Object.keys(deltas).length > 0 || extra) {
+          this.db.incrementSync('childProfiles', profile.id, deltas, extra);
         }
       });
 
@@ -116,7 +107,7 @@ export class LedgerService {
       // the ledger entry.
       void this.runPostCreateSideEffects(childId);
 
-      return this.firestore.findFirst('ledgerEntries', { id: entryId });
+      return this.db.findFirst('ledgerEntries', { id: entryId });
     } catch (error: any) {
       console.error('[LedgerService] Error creating ledger entry:', error.message);
       throw error;
@@ -125,7 +116,7 @@ export class LedgerService {
 
   private async runPostCreateSideEffects(childId: string) {
     try {
-      const user = await this.firestore.findFirst('users', { id: childId });
+      const user = await this.db.findFirst('users', { id: childId });
       if (user?.familyId) {
         await this.badgesService.checkAndAwardBadges(childId, user.familyId, {});
       }
@@ -143,7 +134,7 @@ export class LedgerService {
     }
     
     try {
-      const allEntries = await this.firestore.findMany('ledgerEntries', { childId });
+      const allEntries = await this.db.findMany('ledgerEntries', { childId });
       
       // Логирование только в development
       if (process.env.NODE_ENV === 'development') {
@@ -198,18 +189,18 @@ export class LedgerService {
       }
 
       // Найти ChildProfile по userId
-      const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+      const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
       
       if (childProfiles.length > 0) {
         const childProfileId = childProfiles[0].id;
-        await this.firestore.update('childProfiles', childProfileId, { pointsBalance: balance });
+        await this.db.update('childProfiles', childProfileId, { pointsBalance: balance });
         // Логирование только в development
         if (process.env.NODE_ENV === 'development') {
           console.log('[LedgerService] Balance updated successfully:', balance);
         }
         // Проверяем и начисляем бейджи по условиям (POINTS и т.д.) после изменения баланса (не ломаем ответ при ошибке)
         try {
-          const user = await this.firestore.findFirst('users', { id: childId });
+          const user = await this.db.findFirst('users', { id: childId });
           const famId = user?.familyId;
           if (famId) {
             await this.badgesService.checkAndAwardBadges(childId, famId, {});
@@ -234,7 +225,7 @@ export class LedgerService {
   }
 
   async getChildLedger(childId: string, from?: Date, to?: Date) {
-    const allEntries = await this.firestore.findMany('ledgerEntries', { childId }, { createdAt: 'desc' });
+    const allEntries = await this.db.findMany('ledgerEntries', { childId }, { createdAt: 'desc' });
 
     // Filter by date range if provided
     if (from || to) {
@@ -261,7 +252,7 @@ export class LedgerService {
     // Pre-fetch outside the transaction so we can surface authz errors
     // before any writes are attempted. The transaction below re-reads the
     // entry to make the delete + balance adjustment atomic.
-    const initial = await this.firestore.findFirst('ledgerEntries', { id: entryId });
+    const initial = await this.db.findFirst('ledgerEntries', { id: entryId });
     if (!initial) throw new Error('Запись не найдена');
     if (initial.familyId !== familyId) throw new Error('Запись из другой семьи');
     if (!allowedTypes.includes(initial.type)) {
@@ -270,18 +261,13 @@ export class LedgerService {
 
     const childId: string = initial.childId;
 
-    const newBalance: number = await this.firestore.runTransaction(async (tx) => {
-      const ledgerRef = this.firestore.collection('ledgerEntries').doc(entryId);
-      const ledgerSnap = await tx.get(ledgerRef);
-      if (!ledgerSnap.exists) throw new Error('Запись не найдена');
-      const entry = ledgerSnap.data() as any;
+    const newBalance: number = this.db.transaction(() => {
+      // Re-read inside the transaction: the pre-fetch above was only for the
+      // authorization checks, and the row could have changed since.
+      const entry = this.db.getSync('ledgerEntries', entryId);
+      if (!entry) throw new Error('Запись не найдена');
 
-      const profilesSnap = await tx.get(
-        this.firestore
-          .collection('childProfiles')
-          .where('userId', '==', childId)
-          .limit(1),
-      );
+      const profile = this.db.findFirstSync('childProfiles', { userId: childId });
 
       const reverseDelta = -computeBalanceDelta(entry.type, entry.amount);
       // Same reversal logic for the lifetime-earned counter: if a BONUS
@@ -289,32 +275,25 @@ export class LedgerService {
       // back out too. PENALTY/SPEND/ADJUST never contributed to
       // totalEarned, so the reverse there is 0.
       const reverseEarnDelta = -computeTotalEarnedDelta(entry.type, entry.amount);
-      tx.delete(ledgerRef);
 
-      if (!profilesSnap.empty) {
-        const profileDoc = profilesSnap.docs[0];
-        const updates: Record<string, any> = {
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-        if (reverseDelta !== 0) {
-          updates.pointsBalance = admin.firestore.FieldValue.increment(reverseDelta);
-        }
-        if (reverseEarnDelta !== 0) {
-          updates.totalEarned = admin.firestore.FieldValue.increment(reverseEarnDelta);
-        }
-        // lastCompletionAt: we intentionally don't try to "rewind" it
-        // here. To find the previous completion we'd have to read the
-        // full ledger inside the transaction — and deleteLedgerEntry is
-        // only used for manual BONUS/PENALTY removal (never COMPLETION
-        // entries), so the field stays correct in practice. Integrity
-        // check would catch any drift.
-        if (Object.keys(updates).length > 1) {
-          tx.update(profileDoc.ref, updates);
-        }
-        const oldBalance = (profileDoc.data() as any).pointsBalance || 0;
-        return oldBalance + reverseDelta;
+      this.db.deleteSync('ledgerEntries', entryId);
+
+      if (!profile) return 0;
+
+      const deltas: Record<string, number> = {};
+      if (reverseDelta !== 0) deltas.pointsBalance = reverseDelta;
+      if (reverseEarnDelta !== 0) deltas.totalEarned = reverseEarnDelta;
+
+      // lastCompletionAt: we intentionally don't try to "rewind" it here. To
+      // find the previous completion we'd have to scan the ledger inside the
+      // transaction — and deleteLedgerEntry is only used for manual
+      // BONUS/PENALTY removal (never COMPLETION entries), so the field stays
+      // correct in practice. Integrity check would catch any drift.
+      if (Object.keys(deltas).length > 0) {
+        this.db.incrementSync('childProfiles', profile.id, deltas);
       }
-      return 0;
+
+      return (profile.pointsBalance || 0) + reverseDelta;
     });
 
     return { success: true, newBalance };
@@ -334,7 +313,7 @@ export class LedgerService {
    * чтобы не показывать автоматические начисления (DECAY, COMPLETION и т.д.).
    */
   private async getFamilyManualEntries(familyId: string, type: LedgerType) {
-    const entries = await this.firestore.findMany(
+    const entries = await this.db.findMany(
       'ledgerEntries',
       { familyId, type },
       { createdAt: 'desc' },
@@ -345,11 +324,11 @@ export class LedgerService {
     for (const entry of manualEntries) {
       let childName = 'Ребёнок';
       try {
-        const profile = await this.firestore.findFirst('childProfiles', { userId: entry.childId });
+        const profile = await this.db.findFirst('childProfiles', { userId: entry.childId });
         if (profile) {
           childName = profile.name || childName;
         } else {
-          const user = await this.firestore.findFirst('users', { id: entry.childId });
+          const user = await this.db.findFirst('users', { id: entry.childId });
           childName = user?.login || childName;
         }
       } catch {
@@ -384,7 +363,7 @@ export class LedgerService {
   async getFamilyPenalties(familyId: string) {
     // Для штрафов оставляем как было — показываем все, включая автоматические,
     // потому что родителю важно видеть и DECAY. Но не даём удалять не-MANUAL.
-    const entries = await this.firestore.findMany(
+    const entries = await this.db.findMany(
       'ledgerEntries',
       { familyId, type: 'PENALTY' },
       { createdAt: 'desc' },
@@ -394,11 +373,11 @@ export class LedgerService {
     for (const entry of entries) {
       let childName = 'Ребёнок';
       try {
-        const profile = await this.firestore.findFirst('childProfiles', { userId: entry.childId });
+        const profile = await this.db.findFirst('childProfiles', { userId: entry.childId });
         if (profile) {
           childName = profile.name || childName;
         } else {
-          const user = await this.firestore.findFirst('users', { id: entry.childId });
+          const user = await this.db.findFirst('users', { id: entry.childId });
           childName = user?.login || childName;
         }
       } catch {

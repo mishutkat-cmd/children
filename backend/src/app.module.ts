@@ -3,8 +3,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from './config/config.module';
-import { FirebaseModule } from './firebase/firebase.module';
-import { FirestoreModule } from './firestore/firestore.module';
+import { DbModule } from './db/db.module';
+import { FilesModule } from './files/files.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { ChildrenModule } from './children/children.module';
@@ -26,8 +26,10 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
     // Default soft global limit; tight per-route limits on /auth/* via @Throttle().
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     ConfigModule,
-    FirebaseModule,
-    FirestoreModule,
+    // DbModule and FilesModule are @Global — listed once here, injectable
+    // everywhere, exactly as FirestoreModule/FirebaseModule were.
+    DbModule,
+    FilesModule,
     HealthModule,
     StorageKvModule,
     AuthModule,

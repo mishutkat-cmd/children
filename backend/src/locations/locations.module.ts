@@ -3,11 +3,10 @@ import { LocationsController } from './locations.controller';
 import { LocationsIngestController } from './locations.ingest.controller';
 import { LocationsService } from './locations.service';
 import { DeviceTokenGuard } from '../common/guards/device-token.guard';
-import { FirestoreModule } from '../firestore/firestore.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [FirestoreModule, AuthModule],
+  imports: [AuthModule],
   controllers: [LocationsController, LocationsIngestController],
   providers: [LocationsService, DeviceTokenGuard],
   exports: [LocationsService],

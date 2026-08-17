@@ -1,6 +1,6 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 
 /**
  * Долгоживущий токен устройства для фоновой отправки геолокации.
@@ -44,7 +44,7 @@ export class DeviceTokenService {
 
   constructor(
     private jwtService: JwtService,
-    private firestore: FirestoreService,
+    private db: DocStore,
   ) {}
 
   /**
@@ -58,21 +58,21 @@ export class DeviceTokenService {
     deviceId: string,
     platform?: string,
   ): Promise<{ token: string; expiresInDays: number; childId: string }> {
-    const profiles = await this.firestore.findMany('childProfiles', { userId });
+    const profiles = await this.db.findMany('childProfiles', { userId });
     const childProfile = profiles[0];
     if (!childProfile) {
       throw new UnauthorizedException('Child profile not found');
     }
 
-    const existing = await this.firestore.findMany('deviceTokens', { userId, deviceId });
+    const existing = await this.db.findMany('deviceTokens', { userId, deviceId });
     for (const old of existing) {
       if (!old.revokedAt) {
-        await this.firestore.update('deviceTokens', old.id, { revokedAt: new Date() });
+        await this.db.update('deviceTokens', old.id, { revokedAt: new Date() });
       }
     }
 
     const tokenId = crypto.randomUUID();
-    await this.firestore.create(
+    await this.db.create(
       'deviceTokens',
       {
         id: tokenId,
@@ -119,7 +119,7 @@ export class DeviceTokenService {
       throw new UnauthorizedException('Token is not a device token');
     }
 
-    const record = await this.firestore.findFirst('deviceTokens', { id: payload.jti });
+    const record = await this.db.findFirst('deviceTokens', { id: payload.jti });
     if (!record) {
       throw new UnauthorizedException('Device token not found');
     }
@@ -140,11 +140,11 @@ export class DeviceTokenService {
 
   /** Отозвать все токены ребёнка — например, когда родитель выключил шеринг. */
   async revokeAllForUser(userId: string): Promise<number> {
-    const tokens = await this.firestore.findMany('deviceTokens', { userId });
+    const tokens = await this.db.findMany('deviceTokens', { userId });
     let revoked = 0;
     for (const t of tokens) {
       if (!t.revokedAt) {
-        await this.firestore.update('deviceTokens', t.id, { revokedAt: new Date() });
+        await this.db.update('deviceTokens', t.id, { revokedAt: new Date() });
         revoked++;
       }
     }
@@ -155,6 +155,6 @@ export class DeviceTokenService {
   private async touch(record: any): Promise<void> {
     const last = record.lastUsedAt ? new Date(record.lastUsedAt).getTime() : 0;
     if (Date.now() - last < LAST_USED_THROTTLE_MS) return;
-    await this.firestore.update('deviceTokens', record.id, { lastUsedAt: new Date() });
+    await this.db.update('deviceTokens', record.id, { lastUsedAt: new Date() });
   }
 }

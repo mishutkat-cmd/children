@@ -1,9 +1,9 @@
 import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { StreakService } from '../motivation/streak.service';
 import { DecayService } from '../motivation/decay.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { StorageService } from '../firebase/storage.service';
+import { LocalStorageService } from '../files/local-storage.service';
 import { CreateChildDto, UpdateChildDto, CreateParentDto } from './dto/children.dto';
 import { getCached, setCached } from '../common/cache/family-settings-cache';
 import * as bcrypt from 'bcryptjs';
@@ -11,39 +11,39 @@ import * as bcrypt from 'bcryptjs';
 @Injectable()
 export class ChildrenService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private streakService: StreakService,
     private decayService: DecayService,
     private ledgerService: LedgerService,
-    private storageService: StorageService,
+    private storageService: LocalStorageService,
   ) {}
 
   private async getFamilySettingsCached(familyId: string): Promise<any | null> {
     const cached = getCached(familyId);
     if (cached !== undefined) return cached;
-    const value = await this.firestore.findFirst('familySettings', { familyId });
+    const value = await this.db.findFirst('familySettings', { familyId });
     setCached(familyId, value);
     return value;
   }
 
   async findAll(familyId: string) {
-    const users = await this.firestore.findMany('users', { familyId, role: 'CHILD' });
+    const users = await this.db.findMany('users', { familyId, role: 'CHILD' });
     return Promise.all(
       users.map(async (user) => {
-        const profiles = await this.firestore.findMany('childProfiles', { userId: user.id });
+        const profiles = await this.db.findMany('childProfiles', { userId: user.id });
         return { ...user, childProfile: profiles[0] ?? null };
       }),
     );
   }
 
   async findOne(id: string, familyId: string) {
-    const user = await this.firestore.findFirst('users', { id, familyId, role: 'CHILD' });
+    const user = await this.db.findFirst('users', { id, familyId, role: 'CHILD' });
 
     if (!user) {
       throw new NotFoundException('Child not found');
     }
 
-    const profiles = await this.firestore.findMany('childProfiles', { userId: user.id });
+    const profiles = await this.db.findMany('childProfiles', { userId: user.id });
     const childProfile = profiles.length > 0 ? profiles[0] : null;
 
     return {
@@ -56,7 +56,7 @@ export class ChildrenService {
     const userId = crypto.randomUUID();
     const profileId = crypto.randomUUID();
 
-    await this.firestore.create('users', {
+    await this.db.create('users', {
       id: userId,
       login: dto.login,
       role: 'CHILD',
@@ -64,7 +64,7 @@ export class ChildrenService {
       passwordHash: dto.pin ? await this.hashPin(dto.pin) : null,
     }, userId);
 
-    await this.firestore.create('childProfiles', {
+    await this.db.create('childProfiles', {
       id: profileId,
       userId: userId,
       name: dto.name,
@@ -75,8 +75,8 @@ export class ChildrenService {
       selectedCharacterId: null, // По умолчанию нет выбранного персонажа
     }, profileId);
 
-    const user = await this.firestore.findFirst('users', { id: userId });
-    const profile = await this.firestore.findFirst('childProfiles', { id: profileId });
+    const user = await this.db.findFirst('users', { id: userId });
+    const profile = await this.db.findFirst('childProfiles', { id: profileId });
 
     return {
       ...user,
@@ -88,13 +88,13 @@ export class ChildrenService {
     await this.findOne(id, familyId);
 
     if (dto.pin) {
-      await this.firestore.update('users', id, {
+      await this.db.update('users', id, {
         passwordHash: await this.hashPin(dto.pin),
       });
     }
 
     if (dto.name || dto.avatarUrl !== undefined || dto.selectedCharacterId !== undefined) {
-      const profiles = await this.firestore.findMany('childProfiles', { userId: id });
+      const profiles = await this.db.findMany('childProfiles', { userId: id });
       if (profiles.length > 0) {
         const updateData: any = {};
         if (dto.name) {
@@ -106,7 +106,7 @@ export class ChildrenService {
         if (dto.selectedCharacterId !== undefined) {
           updateData.selectedCharacterId = dto.selectedCharacterId || null;
         }
-        await this.firestore.update('childProfiles', profiles[0].id, updateData);
+        await this.db.update('childProfiles', profiles[0].id, updateData);
       }
     }
 
@@ -134,22 +134,22 @@ export class ChildrenService {
       character,
       familySettings,
     ] = await Promise.all([
-      this.firestore.findMany('ledgerEntries', { childId: userId }),
-      this.firestore.findMany(
+      this.db.findMany('ledgerEntries', { childId: userId }),
+      this.db.findMany(
         'completions',
         { childId: childProfileId, status: 'APPROVED' },
         { performedAt: 'desc' },
         10,
       ),
-      this.firestore.findMany('completions', { childId: childProfileId, status: 'PENDING' }),
-      this.firestore.findMany('exchanges', { childId, status: 'PENDING' }),
+      this.db.findMany('completions', { childId: childProfileId, status: 'PENDING' }),
+      this.db.findMany('exchanges', { childId, status: 'PENDING' }),
       this.streakService.getStreakState(childId),
       this.decayService.getDecayStatus(childId, familyId),
       childProfileId
-        ? this.firestore.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' })
+        ? this.db.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' })
         : Promise.resolve([] as any[]),
       profile?.selectedCharacterId
-        ? this.firestore.findFirst('characters', { id: profile.selectedCharacterId, familyId })
+        ? this.db.findFirst('characters', { id: profile.selectedCharacterId, familyId })
         : Promise.resolve(null),
       this.getFamilySettingsCached(familyId),
     ]);
@@ -172,7 +172,7 @@ export class ChildrenService {
       ),
     );
     const refIdCompletions = refIdsForCompletion.length
-      ? await this.firestore.findMany('completions', { id: { in: refIdsForCompletion } })
+      ? await this.db.findMany('completions', { id: { in: refIdsForCompletion } })
       : [];
     const completionsById = new Map<string, any>(refIdCompletions.map((c: any) => [c.id, c]));
 
@@ -207,7 +207,7 @@ export class ChildrenService {
     const recentCompletions = await Promise.all(
       recentApproved.map(async (completion: any) => ({
         ...completion,
-        task: await this.firestore.findFirst('tasks', { id: completion.taskId }),
+        task: await this.db.findFirst('tasks', { id: completion.taskId }),
       })),
     );
 
@@ -231,7 +231,7 @@ export class ChildrenService {
 
     let wishlistGoal: any = null;
     if (activeWishlistItem) {
-      const reward = await this.firestore.findFirst('rewards', { id: activeWishlistItem.rewardId });
+      const reward = await this.db.findFirst('rewards', { id: activeWishlistItem.rewardId });
       if (reward) {
         const conversionRate =
           (typeof familySettings?.conversionRate === 'string'
@@ -303,7 +303,7 @@ export class ChildrenService {
   }
 
   async findAllParents(familyId: string) {
-    const parents = await this.firestore.findMany('users', { familyId, role: 'PARENT' });
+    const parents = await this.db.findMany('users', { familyId, role: 'PARENT' });
     return parents.map(p => ({
       id: p.id,
       email: p.email,
@@ -350,8 +350,8 @@ export class ChildrenService {
       // LedgerService.createEntry transactional path. No O(history)
       // recompute on the read side.
       const [allEntries, completedCompletions] = await Promise.all([
-        this.firestore.findMany('ledgerEntries', { childId }),
-        this.firestore.findMany('completions', { childId: childProfileId, status: 'APPROVED' }),
+        this.db.findMany('ledgerEntries', { childId }),
+        this.db.findMany('completions', { childId: childProfileId, status: 'APPROVED' }),
       ]);
 
       // Aggregate earned/spent in one pass.
@@ -378,7 +378,7 @@ export class ChildrenService {
         ),
       );
       const refCompletions = refIds.length
-        ? await this.firestore.findMany('completions', { id: { in: refIds } })
+        ? await this.db.findMany('completions', { id: { in: refIds } })
         : [];
       const completionsById = new Map<string, any>(refCompletions.map((c: any) => [c.id, c]));
 
@@ -414,12 +414,12 @@ export class ChildrenService {
       // moneyBalanceCents was never backfilled).
       let totalMoneyEarned = child.childProfile?.moneyBalanceCents || 0;
       if (totalMoneyEarned === 0) {
-        const allExchanges = await this.firestore.findMany('exchanges', { childId });
+        const allExchanges = await this.db.findMany('exchanges', { childId });
         totalMoneyEarned = allExchanges
           .filter((e: any) => e.cashCents != null && (e.status === 'APPROVED' || e.status === 'DELIVERED'))
           .reduce((sum: number, e: any) => sum + (e.cashCents || 0), 0);
         if (totalMoneyEarned > 0) {
-          this.firestore
+          this.db
             .update('childProfiles', childProfileId, { moneyBalanceCents: totalMoneyEarned })
             .catch((err: any) =>
               console.warn('[ChildrenService] Failed to update moneyBalanceCents:', err?.message),
@@ -465,8 +465,8 @@ export class ChildrenService {
   }
 
   async createParent(familyId: string, dto: CreateParentDto) {
-    const existingByEmail = dto.email ? await this.firestore.findFirst('users', { email: dto.email }) : null;
-    const existingByLogin = await this.firestore.findFirst('users', { login: dto.login });
+    const existingByEmail = dto.email ? await this.db.findFirst('users', { email: dto.email }) : null;
+    const existingByLogin = await this.db.findFirst('users', { login: dto.login });
 
     if (existingByEmail || existingByLogin) {
       throw new ConflictException('User with this email or login already exists');
@@ -475,7 +475,7 @@ export class ChildrenService {
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const userId = crypto.randomUUID();
 
-    await this.firestore.create('users', {
+    await this.db.create('users', {
       id: userId,
       email: dto.email,
       login: dto.login,
@@ -484,7 +484,7 @@ export class ChildrenService {
       familyId,
     }, userId);
 
-    const user = await this.firestore.findFirst('users', { id: userId });
+    const user = await this.db.findFirst('users', { id: userId });
     return {
       id: user.id,
       email: user.email,
@@ -495,7 +495,7 @@ export class ChildrenService {
 
   async delete(id: string, familyId: string) {
     // Проверяем, что пользователь существует и принадлежит семье
-    const user = await this.firestore.findFirst('users', { id, familyId, role: 'CHILD' });
+    const user = await this.db.findFirst('users', { id, familyId, role: 'CHILD' });
 
     if (!user) {
       throw new NotFoundException('Child not found');
@@ -504,14 +504,14 @@ export class ChildrenService {
     const userId = user.id;
 
     // Ищем childProfile (может не существовать, если был создан старым способом)
-    const profiles = await this.firestore.findMany('childProfiles', { userId });
+    const profiles = await this.db.findMany('childProfiles', { userId });
     const childProfile = profiles.length > 0 ? profiles[0] : null;
     const childProfileId = childProfile?.id;
 
     // Удаляем все связанные данные
     // 1. Completions (выполнения заданий) - используем childProfileId если есть
     if (childProfileId) {
-      const completions = await this.firestore.findMany('completions', { childId: childProfileId });
+      const completions = await this.db.findMany('completions', { childId: childProfileId });
       for (const completion of completions) {
         // Удаляем proof файл из Firebase Storage если есть
         if (completion.proofUrl) {
@@ -519,59 +519,59 @@ export class ChildrenService {
             console.warn(`Failed to delete proof file: ${completion.proofUrl}`, err)
           );
         }
-        await this.firestore.delete('completions', completion.id);
+        await this.db.delete('completions', completion.id);
       }
     }
 
     // 2. Exchanges (обмены) - могут использовать childProfileId или userId
     if (childProfileId) {
-      const exchanges = await this.firestore.findMany('exchanges', { childId: childProfileId });
+      const exchanges = await this.db.findMany('exchanges', { childId: childProfileId });
       for (const exchange of exchanges) {
-        await this.firestore.delete('exchanges', exchange.id);
+        await this.db.delete('exchanges', exchange.id);
       }
     }
     // Также проверяем по userId на случай, если exchanges используют userId
-    const exchangesByUserId = await this.firestore.findMany('exchanges', { childId: userId });
+    const exchangesByUserId = await this.db.findMany('exchanges', { childId: userId });
     for (const exchange of exchangesByUserId) {
-      await this.firestore.delete('exchanges', exchange.id);
+      await this.db.delete('exchanges', exchange.id);
     }
 
     // 3. Ledger entries (записи в балансе) - используют userId
-    const ledgerEntries = await this.firestore.findMany('ledgerEntries', { childId: userId });
+    const ledgerEntries = await this.db.findMany('ledgerEntries', { childId: userId });
     for (const entry of ledgerEntries) {
-      await this.firestore.delete('ledgerEntries', entry.id);
+      await this.db.delete('ledgerEntries', entry.id);
     }
 
     // 4. Wishlist (список желаний) - используем childProfileId если есть
     if (childProfileId) {
-      const wishlistItems = await this.firestore.findMany('wishlist', { childId: childProfileId });
+      const wishlistItems = await this.db.findMany('wishlist', { childId: childProfileId });
       for (const item of wishlistItems) {
         // Удаляем reward image из Firebase Storage если есть
         if (item.rewardId) {
-          const reward = await this.firestore.findFirst('rewards', { id: item.rewardId });
+          const reward = await this.db.findFirst('rewards', { id: item.rewardId });
           if (reward?.imageUrl) {
             await this.storageService.deleteFile(reward.imageUrl).catch(err => 
               console.warn(`Failed to delete reward image: ${reward.imageUrl}`, err)
             );
           }
         }
-        await this.firestore.delete('wishlist', item.id);
+        await this.db.delete('wishlist', item.id);
       }
     }
 
     // 5. Child badges (бейджи ребенка) - используем childProfileId если есть
     if (childProfileId) {
-      const childBadges = await this.firestore.findMany('childBadges', { childId: childProfileId });
+      const childBadges = await this.db.findMany('childBadges', { childId: childProfileId });
       for (const badge of childBadges) {
-        await this.firestore.delete('childBadges', badge.id);
+        await this.db.delete('childBadges', badge.id);
       }
     }
 
     // 6. Task assignments (назначения заданий) - используем childProfileId если есть
     if (childProfileId) {
-      const taskAssignments = await this.firestore.findMany('taskAssignments', { childId: childProfileId });
+      const taskAssignments = await this.db.findMany('taskAssignments', { childId: childProfileId });
       for (const assignment of taskAssignments) {
-        await this.firestore.delete('taskAssignments', assignment.id);
+        await this.db.delete('taskAssignments', assignment.id);
       }
     }
 
@@ -583,11 +583,11 @@ export class ChildrenService {
           console.warn(`Failed to delete avatar file: ${childProfile.avatarUrl}`, err)
         );
       }
-      await this.firestore.delete('childProfiles', childProfileId);
+      await this.db.delete('childProfiles', childProfileId);
     }
 
     // 8. User (пользователь) - всегда удаляем
-    await this.firestore.delete('users', userId);
+    await this.db.delete('users', userId);
 
     return { success: true, message: 'Child deleted successfully' };
   }

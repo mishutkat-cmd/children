@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { CreateTaskDto, UpdateTaskDto, AssignTaskDto } from './dto/tasks.dto';
 // Enums заменены на строки для SQLite
 type TaskStatus = 'ACTIVE' | 'ARCHIVED';
@@ -7,7 +7,7 @@ type TaskFrequency = 'ONCE' | 'DAILY' | 'WEEKLY' | 'CUSTOM';
 
 @Injectable()
 export class TasksService {
-  constructor(private firestore: FirestoreService) {}
+  constructor(private db: DocStore) {}
 
   async findAll(familyId: string, status?: string) {
     try {
@@ -20,14 +20,14 @@ export class TasksService {
       let tasks;
       try {
         // Пытаемся получить с сортировкой
-        tasks = await this.firestore.findMany('tasks', where, { createdAt: 'desc' });
+        tasks = await this.db.findMany('tasks', where, { createdAt: 'desc' });
       } catch (error: any) {
         // Если ошибка индекса, получаем без сортировки и сортируем в памяти
         if (error.message && error.message.includes('index')) {
           if (process.env.NODE_ENV === 'development') {
             console.warn('[TasksService] Index error, fetching without sort and sorting in memory');
           }
-          tasks = await this.firestore.findMany('tasks', where);
+          tasks = await this.db.findMany('tasks', where);
           // Сортируем в памяти по createdAt
           tasks.sort((a: any, b: any) => {
             const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
@@ -68,11 +68,11 @@ export class TasksService {
       const result = await Promise.all(
         filteredTasks.map(async (task) => {
           try {
-            const assignments = await this.firestore.findMany('taskAssignments', { taskId: task.id });
+            const assignments = await this.db.findMany('taskAssignments', { taskId: task.id });
             const assignmentsWithChildren = await Promise.all(
               assignments.map(async (assignment) => {
                 try {
-                  const childProfile = await this.firestore.findFirst('childProfiles', { id: assignment.childId });
+                  const childProfile = await this.db.findFirst('childProfiles', { id: assignment.childId });
                   return { ...assignment, child: childProfile };
                 } catch (error: any) {
                   if (process.env.NODE_ENV === 'development') {
@@ -105,18 +105,18 @@ export class TasksService {
   }
 
   async findOne(id: string, familyId: string) {
-    const task = await this.firestore.findFirst('tasks', { id, familyId });
+    const task = await this.db.findFirst('tasks', { id, familyId });
 
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    const assignments = await this.firestore.findMany('taskAssignments', { taskId: id });
+    const assignments = await this.db.findMany('taskAssignments', { taskId: id });
     // Оптимизация: загружаем все childProfiles параллельно вместо последовательных запросов
     const assignmentsWithChildren = await Promise.all(
       assignments.map(async (assignment) => {
         try {
-          const childProfile = await this.firestore.findFirst('childProfiles', { id: assignment.childId });
+          const childProfile = await this.db.findFirst('childProfiles', { id: assignment.childId });
           return {
             ...assignment,
             child: childProfile,
@@ -160,9 +160,9 @@ export class TasksService {
         status: 'ACTIVE',
       };
       
-      await this.firestore.create('tasks', taskData, taskId);
+      await this.db.create('tasks', taskData, taskId);
       
-      const createdTask = await this.firestore.findFirst('tasks', { id: taskId });
+      const createdTask = await this.db.findFirst('tasks', { id: taskId });
       
       if (!createdTask) {
         console.error('[TasksService] Task was not found after creation! TaskId:', taskId);
@@ -175,11 +175,11 @@ export class TasksService {
       }
       
       // Добавляем taskAssignments для возврата (оптимизировано: параллельные запросы)
-      const assignments = await this.firestore.findMany('taskAssignments', { taskId: taskId });
+      const assignments = await this.db.findMany('taskAssignments', { taskId: taskId });
       const assignmentsWithChildren = await Promise.all(
         assignments.map(async (assignment) => {
           try {
-            const childProfile = await this.firestore.findFirst('childProfiles', { id: assignment.childId });
+            const childProfile = await this.db.findFirst('childProfiles', { id: assignment.childId });
             return {
               ...assignment,
               child: childProfile,
@@ -228,21 +228,21 @@ export class TasksService {
       if (dto.requiresProof !== undefined) updateData.requiresProof = dto.requiresProof || false;
       if (dto.requiresParentApproval !== undefined) updateData.requiresParentApproval = dto.requiresParentApproval !== false;
       
-      await this.firestore.update('tasks', id, updateData);
+      await this.db.update('tasks', id, updateData);
       console.log('[TasksService] Task updated successfully:', id);
       
-      const updatedTask = await this.firestore.findFirst('tasks', { id });
+      const updatedTask = await this.db.findFirst('tasks', { id });
       if (!updatedTask) {
         console.error('[TasksService] Task was not found after update! TaskId:', id);
         throw new Error('Task was updated but could not be retrieved');
       }
       
       // Добавляем taskAssignments для возврата
-      const assignments = await this.firestore.findMany('taskAssignments', { taskId: id });
+      const assignments = await this.db.findMany('taskAssignments', { taskId: id });
       const assignmentsWithChildren = [];
       for (const assignment of assignments) {
         try {
-          const childProfile = await this.firestore.findFirst('childProfiles', { id: assignment.childId });
+          const childProfile = await this.db.findFirst('childProfiles', { id: assignment.childId });
           assignmentsWithChildren.push({
             ...assignment,
             child: childProfile,
@@ -269,14 +269,14 @@ export class TasksService {
 
   async archive(id: string, familyId: string) {
     await this.findOne(id, familyId);
-    await this.firestore.update('tasks', id, { status: 'ARCHIVED' });
-    return this.firestore.findFirst('tasks', { id });
+    await this.db.update('tasks', id, { status: 'ARCHIVED' });
+    return this.db.findFirst('tasks', { id });
   }
 
   async unarchive(id: string, familyId: string) {
     await this.findOne(id, familyId);
-    await this.firestore.update('tasks', id, { status: 'ACTIVE' });
-    return this.firestore.findFirst('tasks', { id });
+    await this.db.update('tasks', id, { status: 'ACTIVE' });
+    return this.db.findFirst('tasks', { id });
   }
 
   async delete(id: string, familyId: string) {
@@ -285,14 +285,14 @@ export class TasksService {
     
     try {
       // 1. Удаляем все taskAssignments для этой задачи
-      const assignments = await this.firestore.findMany('taskAssignments', { taskId: id });
+      const assignments = await this.db.findMany('taskAssignments', { taskId: id });
       console.log(`[TasksService] Deleting ${assignments.length} taskAssignments for task ${id}`);
       for (const assignment of assignments) {
-        await this.firestore.delete('taskAssignments', assignment.id);
+        await this.db.delete('taskAssignments', assignment.id);
       }
       
       // 2. Удаляем саму задачу
-      await this.firestore.delete('tasks', id);
+      await this.db.delete('tasks', id);
       console.log(`[TasksService] Task ${id} deleted successfully`);
       
       return { success: true, message: 'Task deleted successfully' };
@@ -307,16 +307,16 @@ export class TasksService {
     await this.findOne(id, familyId);
 
     // Remove existing assignments
-    const existingAssignments = await this.firestore.findMany('taskAssignments', { taskId: id });
+    const existingAssignments = await this.db.findMany('taskAssignments', { taskId: id });
     for (const assignment of existingAssignments) {
-      await this.firestore.delete('taskAssignments', assignment.id);
+      await this.db.delete('taskAssignments', assignment.id);
     }
 
     // Create new assignments
     if (dto.childIds && dto.childIds.length > 0) {
       for (const childId of dto.childIds) {
         const assignmentId = crypto.randomUUID();
-        await this.firestore.create('taskAssignments', {
+        await this.db.create('taskAssignments', {
           id: assignmentId,
           taskId: id,
           childId,
@@ -328,18 +328,18 @@ export class TasksService {
   }
 
   async getChildTasks(childId: string, familyId: string, todayOnly: boolean = false) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
     const childProfileId = childProfiles[0].id;
 
     // Get assigned tasks or ALL tasks (taskAssignments use childProfileId; task.assignedTo may be userId from form)
-    const assignedTaskIds = await this.firestore.findMany('taskAssignments', { childId: childProfileId });
+    const assignedTaskIds = await this.db.findMany('taskAssignments', { childId: childProfileId });
     const assignedIds = assignedTaskIds.map((a) => a.taskId);
 
     // Get all active tasks for family
-    const allTasks = await this.firestore.findMany('tasks', { familyId, status: 'ACTIVE' });
+    const allTasks = await this.db.findMany('tasks', { familyId, status: 'ACTIVE' });
     
     // Filter: show task if for ALL, or in taskAssignments for this child, or task.assignedTo === this child's userId
     const tasks = allTasks.filter(task => 
@@ -357,7 +357,7 @@ export class TasksService {
         // Firestore doesn't support date range queries easily, so we'll filter in memory
         completionsWhere.status = 'APPROVED';
       }
-      const allCompletions = await this.firestore.findMany('completions', completionsWhere);
+      const allCompletions = await this.db.findMany('completions', completionsWhere);
       
       // Filter by date if todayOnly
       const completions = todayOnly 
@@ -398,7 +398,7 @@ export class TasksService {
   }
 
   async getChildTasksForDate(childId: string, familyId: string, dateString: string) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
@@ -414,11 +414,11 @@ export class TasksService {
     nextDay.setDate(nextDay.getDate() + 1);
 
     // Get assigned tasks or ALL tasks (taskAssignments use childProfileId; task.assignedTo may be userId)
-    const assignedTaskIds = await this.firestore.findMany('taskAssignments', { childId: childProfileId });
+    const assignedTaskIds = await this.db.findMany('taskAssignments', { childId: childProfileId });
     const assignedIds = assignedTaskIds.map((a) => a.taskId);
 
     // Get all active tasks for family
-    const allTasks = await this.firestore.findMany('tasks', { familyId, status: 'ACTIVE' });
+    const allTasks = await this.db.findMany('tasks', { familyId, status: 'ACTIVE' });
     
     // Filter: show task if for ALL, or in taskAssignments, or task.assignedTo === this child's userId
     const tasks = allTasks.filter(task => 
@@ -431,7 +431,7 @@ export class TasksService {
     
     for (const task of tasks) {
       // Get completions for the target date
-      const allCompletions = await this.firestore.findMany('completions', { 
+      const allCompletions = await this.db.findMany('completions', { 
         childId: childProfileId, 
         taskId: task.id 
       });
@@ -495,8 +495,8 @@ export class TasksService {
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const [allTasks, children] = await Promise.all([
-      this.firestore.findMany('tasks', { familyId, status: 'ACTIVE' }),
-      this.firestore.findMany('users', { familyId, role: 'CHILD' }),
+      this.db.findMany('tasks', { familyId, status: 'ACTIVE' }),
+      this.db.findMany('users', { familyId, role: 'CHILD' }),
     ]);
     const tasks = allTasks.filter((t: any) => t.status === 'ACTIVE');
 
@@ -515,8 +515,8 @@ export class TasksService {
     const taskIds = tasks.map((t: any) => t.id);
 
     const [profiles, assignments] = await Promise.all([
-      this.firestore.findMany('childProfiles', { userId: { in: childIds } }),
-      this.firestore.findMany('taskAssignments', { taskId: { in: taskIds } }),
+      this.db.findMany('childProfiles', { userId: { in: childIds } }),
+      this.db.findMany('taskAssignments', { taskId: { in: taskIds } }),
     ]);
     const profileByUserId = new Map<string, any>();
     for (const p of profiles) profileByUserId.set(p.userId, p);
@@ -528,7 +528,7 @@ export class TasksService {
     const completionIdCandidates = [...new Set([...profileIds, ...childIds])];
     const todayCompletions =
       completionIdCandidates.length > 0
-        ? await this.firestore.findMany('completions', {
+        ? await this.db.findMany('completions', {
             childId: { in: completionIdCandidates },
             performedAt: { gte: today, lte: tomorrow },
           })

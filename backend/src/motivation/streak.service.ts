@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 
 interface StreakState {
@@ -13,7 +13,7 @@ interface StreakState {
 @Injectable()
 export class StreakService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private ledgerService: LedgerService,
   ) {}
 
@@ -26,14 +26,14 @@ export class StreakService {
     taskId: string,
     completionDate: Date,
   ) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       return;
     }
     const child = childProfiles[0];
 
     // Получаем активные правила streak для семьи
-    const streakRules = await this.firestore.findMany('streakRules', {
+    const streakRules = await this.db.findMany('streakRules', {
       familyId,
       enabled: true,
     });
@@ -52,7 +52,7 @@ export class StreakService {
     const todayStr = today.toISOString().split('T')[0];
 
     // Получаем задание для проверки категории
-    const task = await this.firestore.findFirst('tasks', { id: taskId });
+    const task = await this.db.findFirst('tasks', { id: taskId });
 
     if (!task) {
       return;
@@ -145,7 +145,7 @@ export class StreakService {
     // Сохраняем обновленное состояние. Native Firestore map — readers
     // remain backward-compatible via the typeof-string fallback, but new
     // writes never store stringified JSON.
-    await this.firestore.update('childProfiles', child.id, {
+    await this.db.update('childProfiles', child.id, {
       streakState,
     });
 
@@ -180,10 +180,10 @@ export class StreakService {
           tomorrow.setDate(tomorrow.getDate() + 1);
 
           // childId может быть userId или childProfileId
-          const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+          const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
           const childProfileId = childProfiles.length > 0 ? childProfiles[0].id : childId;
 
-          const allCompletions = await this.firestore.findMany('completions', {
+          const allCompletions = await this.db.findMany('completions', {
             childId: childProfileId,
             familyId,
             status: 'APPROVED',
@@ -214,13 +214,13 @@ export class StreakService {
    * Получает текущее состояние streak для ребенка
    */
   async getStreakState(childId: string) {
-    const childProfiles = await this.firestore.findMany('childProfiles', { userId: childId });
+    const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       return { currentStreak: 0, streaks: [] };
     }
     const child = childProfiles[0];
 
-    const user = await this.firestore.findFirst('users', { id: child.userId });
+    const user = await this.db.findFirst('users', { id: child.userId });
     if (!user) {
       return { currentStreak: 0, streaks: [] };
     }
@@ -230,7 +230,7 @@ export class StreakService {
       : {};
 
     // Получаем правила для контекста
-    const rules = await this.firestore.findMany('streakRules', {
+    const rules = await this.db.findMany('streakRules', {
       familyId: user.familyId,
       enabled: true,
     });

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { FirestoreService } from '../firestore/firestore.service';
+import { DocStore } from '../db/doc-store.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { StreakService } from '../motivation/streak.service';
 import { ChallengesService } from '../motivation/challenges.service';
@@ -13,7 +13,7 @@ type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL
 @Injectable()
 export class CompletionsService {
   constructor(
-    private firestore: FirestoreService,
+    private db: DocStore,
     private ledgerService: LedgerService,
     private streakService: StreakService,
     private challengesService: ChallengesService,
@@ -35,9 +35,9 @@ export class CompletionsService {
 
       // Проверяем, является ли childId userId или ChildProfile.id
       console.log('[CompletionsService] Looking for childProfile by userId:', childId);
-      const childProfileByUserId = await this.firestore.findFirst('childProfiles', { userId: childId });
+      const childProfileByUserId = await this.db.findFirst('childProfiles', { userId: childId });
       console.log('[CompletionsService] Looking for childProfile by id:', childId);
-      const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
+      const childProfileById = await this.db.findFirst('childProfiles', { id: childId });
       const childProfile = childProfileByUserId || childProfileById;
 
       if (!childProfile) {
@@ -48,7 +48,7 @@ export class CompletionsService {
       console.log('[CompletionsService] Child profile found:', { childProfileId: childProfile.id, userId: childProfile.userId });
 
       // Проверяем, что user принадлежит к familyId
-      const user = await this.firestore.findFirst('users', { id: childProfile.userId, familyId });
+      const user = await this.db.findFirst('users', { id: childProfile.userId, familyId });
       if (!user) {
         throw new NotFoundException(`Child not found in family: childId=${childId}, familyId=${familyId}`);
       }
@@ -57,7 +57,7 @@ export class CompletionsService {
       childProfileId = childProfile.id;
       userId = childProfile.userId;
 
-      const task = await this.firestore.findFirst('tasks', { id: dto.taskId, familyId });
+      const task = await this.db.findFirst('tasks', { id: dto.taskId, familyId });
 
       if (!task) {
         throw new NotFoundException('Task not found');
@@ -80,7 +80,7 @@ export class CompletionsService {
       targetDateEnd.setHours(0, 0, 0, 0);
       
       // Check if already completed on target date - для всех типов задач можно выполнить только один раз в день
-      const allCompletions = await this.firestore.findMany('completions', { 
+      const allCompletions = await this.db.findMany('completions', { 
         childId: childProfileId, 
         taskId: task.id,
       });
@@ -155,7 +155,7 @@ export class CompletionsService {
       // Проверяем, был ли вызван из child endpoint или parent endpoint
       const createdByUserId = childId === userId ? userId : null; // null означает, что родитель создал
       
-      await this.firestore.create('completions', {
+      await this.db.create('completions', {
         id: completionId,
         familyId,
         pointsAwarded: pointsAwarded,
@@ -172,9 +172,9 @@ export class CompletionsService {
       // Создаем уведомление для родителя, если completion создан ребенком
       if (createdByUserId) {
         try {
-          const childProfileForNotification = await this.firestore.findFirst('childProfiles', { id: childProfileId });
+          const childProfileForNotification = await this.db.findFirst('childProfiles', { id: childProfileId });
           const notificationId = crypto.randomUUID();
-          await this.firestore.create('notifications', {
+          await this.db.create('notifications', {
             id: notificationId,
             familyId,
             type: 'COMPLETION_CREATED',
@@ -193,7 +193,7 @@ export class CompletionsService {
         }
       }
 
-      const completion = await this.firestore.findFirst('completions', { id: completionId });
+      const completion = await this.db.findFirst('completions', { id: completionId });
       const completionWithTask = {
         ...completion,
         task,
@@ -202,7 +202,7 @@ export class CompletionsService {
       // Начисляем баллы сразу при выполнении, независимо от статуса
       // LedgerEntry.childId в схеме ссылается на User.id (userId)
       // Проверяем, нет ли уже ledger entry для этого completion (защита от дублирования)
-      const existingLedgerEntries = await this.firestore.findMany('ledgerEntries', {
+      const existingLedgerEntries = await this.db.findMany('ledgerEntries', {
         childId: userId,
         refType: 'COMPLETION',
         refId: completionId,
@@ -270,8 +270,8 @@ export class CompletionsService {
     let childProfileId = childId;
     
     // Проверяем, является ли childId userId или ChildProfile.id
-    const childProfileByUserId = await this.firestore.findFirst('childProfiles', { userId: childId });
-    const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
+    const childProfileByUserId = await this.db.findFirst('childProfiles', { userId: childId });
+    const childProfileById = await this.db.findFirst('childProfiles', { id: childId });
     const childProfile = childProfileByUserId || childProfileById;
     
     if (childProfile) {
@@ -284,7 +284,7 @@ export class CompletionsService {
       where.taskId = taskId;
     }
     
-    const completions = await this.firestore.findMany('completions', where, { performedAt: 'desc' });
+    const completions = await this.db.findMany('completions', where, { performedAt: 'desc' });
     
     // Filter by date range if provided
     let filtered = completions;
@@ -301,13 +301,13 @@ export class CompletionsService {
     return Promise.all(
       filtered.map(async (completion) => ({
         ...completion,
-        task: await this.firestore.findFirst('tasks', { id: completion.taskId }),
+        task: await this.db.findFirst('tasks', { id: completion.taskId }),
       })),
     );
   }
 
   async findPending(familyId: string) {
-    const completions = await this.firestore.findMany(
+    const completions = await this.db.findMany(
       'completions',
       { familyId, status: 'PENDING' },
       { createdAt: 'desc' },
@@ -321,11 +321,11 @@ export class CompletionsService {
       completions.map(async (completion) => {
         try {
           const [task, childProfile] = await Promise.all([
-            this.firestore.findFirst('tasks', { id: completion.taskId }),
+            this.db.findFirst('tasks', { id: completion.taskId }),
             this.resolveChildProfile(completion.childId),
           ]);
           const user = childProfile
-            ? await this.firestore.findFirst('users', { id: childProfile.userId, familyId })
+            ? await this.db.findFirst('users', { id: childProfile.userId, familyId })
             : null;
           const childData: any = {
             ...childProfile,
@@ -350,14 +350,14 @@ export class CompletionsService {
   private async resolveChildProfile(childId?: string) {
     if (!childId) return null;
     const [byId, byUserId] = await Promise.all([
-      this.firestore.findFirst('childProfiles', { id: childId }),
-      this.firestore.findFirst('childProfiles', { userId: childId }),
+      this.db.findFirst('childProfiles', { id: childId }),
+      this.db.findFirst('childProfiles', { userId: childId }),
     ]);
     return byId || byUserId || null;
   }
 
   async approve(id: string, familyId: string) {
-    const completion = await this.firestore.findFirst('completions', { id, familyId });
+    const completion = await this.db.findFirst('completions', { id, familyId });
 
     if (!completion) {
       throw new NotFoundException('Completion not found');
@@ -367,12 +367,12 @@ export class CompletionsService {
       throw new BadRequestException('Completion is not pending');
     }
 
-    const task = await this.firestore.findFirst('tasks', { id: completion.taskId });
+    const task = await this.db.findFirst('tasks', { id: completion.taskId });
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    const childProfile = await this.firestore.findFirst('childProfiles', { id: completion.childId });
+    const childProfile = await this.db.findFirst('childProfiles', { id: completion.childId });
     if (!childProfile) {
       throw new NotFoundException('Child profile not found');
     }
@@ -386,7 +386,7 @@ export class CompletionsService {
     const pointsAlreadyAwarded = completion.pointsAwarded > 0;
 
     // Проверяем, есть ли уже запись в ledger для этого completion, чтобы избежать дублирования
-    const existingLedgerEntries = await this.firestore.findMany('ledgerEntries', {
+    const existingLedgerEntries = await this.db.findMany('ledgerEntries', {
       childId: userId,
       refType: 'COMPLETION',
       refId: completion.id,
@@ -401,13 +401,13 @@ export class CompletionsService {
       existingEntriesCount: existingLedgerEntries.length,
     });
 
-    await this.firestore.update('completions', id, {
+    await this.db.update('completions', id, {
       status: 'APPROVED',
       approvedAt: new Date(),
       // pointsAwarded уже установлен при создании, не меняем
     });
 
-    const updated = await this.firestore.findFirst('completions', { id });
+    const updated = await this.db.findFirst('completions', { id });
 
     // Если баллы еще не начислены (старая логика), начисляем их сейчас
     // Но с новой логикой баллы уже начислены при создании
@@ -449,10 +449,10 @@ export class CompletionsService {
       });
 
       // Update completion with final points
-      await this.firestore.update('completions', id, { pointsAwarded: finalPoints });
+      await this.db.update('completions', id, { pointsAwarded: finalPoints });
 
       // Проверяем еще раз перед созданием ledger entry (на случай параллельных запросов)
-      const finalLedgerCheck = await this.firestore.findMany('ledgerEntries', {
+      const finalLedgerCheck = await this.db.findMany('ledgerEntries', {
         childId: userId,
         refType: 'COMPLETION',
         refId: completion.id,
@@ -483,7 +483,7 @@ export class CompletionsService {
     }
     
     // Check and reward challenges for this completion
-    const allChallenges = await this.firestore.findMany('challenges', { familyId, status: 'ACTIVE' });
+    const allChallenges = await this.db.findMany('challenges', { familyId, status: 'ACTIVE' });
     const now = new Date();
     const activeChallenges = allChallenges.filter(challenge => {
       const startDate = challenge.startDate?.toDate ? challenge.startDate.toDate() : new Date(challenge.startDate);
@@ -501,7 +501,7 @@ export class CompletionsService {
     }
 
     // Проверяем и начисляем бейджи
-    const allCompletions = await this.firestore.findMany('completions', { childId: completion.childId, status: 'APPROVED' });
+    const allCompletions = await this.db.findMany('completions', { childId: completion.childId, status: 'APPROVED' });
     const totalCompletions = allCompletions.length;
     
     await this.badgesService.checkAndAwardBadges(completion.childId, familyId, {
@@ -513,17 +513,17 @@ export class CompletionsService {
   }
 
   async reject(id: string, familyId: string) {
-    const completion = await this.firestore.findFirst('completions', { id, familyId });
+    const completion = await this.db.findFirst('completions', { id, familyId });
 
     if (!completion) {
       throw new NotFoundException('Completion not found');
     }
 
-    await this.firestore.update('completions', id, {
+    await this.db.update('completions', id, {
       status: 'REJECTED',
     });
     
-    return this.firestore.findFirst('completions', { id });
+    return this.db.findFirst('completions', { id });
   }
 
   // Отметить задание как не выполненное (отменить completion)
@@ -536,8 +536,8 @@ export class CompletionsService {
     let childProfileId = childId;
     let userId = childId;
 
-    const childProfileByUserId = await this.firestore.findFirst('childProfiles', { userId: childId });
-    const childProfileById = await this.firestore.findFirst('childProfiles', { id: childId });
+    const childProfileByUserId = await this.db.findFirst('childProfiles', { userId: childId });
+    const childProfileById = await this.db.findFirst('childProfiles', { id: childId });
     const childProfile = childProfileByUserId || childProfileById;
 
     if (!childProfile) {
@@ -545,7 +545,7 @@ export class CompletionsService {
     }
 
     // Проверяем, что user принадлежит к familyId
-    const user = await this.firestore.findFirst('users', { id: childProfile.userId, familyId });
+    const user = await this.db.findFirst('users', { id: childProfile.userId, familyId });
     if (!user) {
       throw new NotFoundException(`Child not found in family: childId=${childId}, familyId=${familyId}`);
     }
@@ -554,7 +554,7 @@ export class CompletionsService {
     userId = childProfile.userId;
 
     // Найти completion за эту дату (ищем и APPROVED, и PENDING)
-    const allCompletions = await this.firestore.findMany('completions', { 
+    const allCompletions = await this.db.findMany('completions', { 
       taskId, 
       childId: childProfileId, 
       familyId,
@@ -579,7 +579,7 @@ export class CompletionsService {
       return { success: true, message: 'Task is not marked as completed' };
     }
 
-    const task = await this.firestore.findFirst('tasks', { id: completion.taskId });
+    const task = await this.db.findFirst('tasks', { id: completion.taskId });
 
     console.log('[CompletionsService] markAsNotCompleted - Found completion:', {
       completionId: completion.id,
@@ -591,7 +591,7 @@ export class CompletionsService {
     });
 
     // Находим все EARN записи для этого completion
-    const earnEntries = await this.firestore.findMany('ledgerEntries', {
+    const earnEntries = await this.db.findMany('ledgerEntries', {
       childId: userId,
       refType: 'COMPLETION',
       refId: completion.id,
@@ -599,7 +599,7 @@ export class CompletionsService {
     });
     
     // Находим все ADJUST записи для этого completion с причиной отмены
-    const adjustEntries = await this.firestore.findMany('ledgerEntries', {
+    const adjustEntries = await this.db.findMany('ledgerEntries', {
       childId: userId,
       refType: 'COMPLETION',
       refId: completion.id,
@@ -660,7 +660,7 @@ export class CompletionsService {
     // Mark the completion as cancelled. The compensating ADJUST entry
     // (created above when remainingPointsToDeduct > 0) already adjusted
     // pointsBalance transactionally — no extra recompute needed.
-    await this.firestore.update('completions', completion.id, {
+    await this.db.update('completions', completion.id, {
       status: 'REJECTED',
       pointsAwarded: 0,
     });
