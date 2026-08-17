@@ -143,7 +143,8 @@ export default function Layout({ children }: LayoutProps) {
     let tabValue = 0
     
     if (effectiveIsParent) {
-      // Для parent: 7 табов (0-6): Главная, Дети, Задания, Челленджи, Бейджи, Конвертация, Список бажань
+      // Для parent: 9 табов (0-8): Главная, Дети, Задания, Челленджи, Бейджи,
+      // Конвертация, Список бажань, Отчёт, Карта
       // Порядок проверки важен - более специфичные пути должны проверяться первыми
       if (path === '/parent' || path === '/parent/') tabValue = 0
       else if (path.startsWith('/parent/children')) tabValue = 1
@@ -153,12 +154,13 @@ export default function Layout({ children }: LayoutProps) {
       else if (path.startsWith('/parent/conversion')) tabValue = 5
       else if (path.startsWith('/parent/wishlist')) tabValue = 6
       else if (path.startsWith('/parent/reports')) tabValue = 7
+      else if (path.startsWith('/parent/map')) tabValue = 8
       else tabValue = 0
 
-      const maxTabIndex = 7 // 8 табов: 0-7
+      const maxTabIndex = 8 // 9 табов: 0-8
       const calculatedValue = Math.max(0, Math.min(tabValue, maxTabIndex))
 
-      const knownPaths = ['/parent', '/parent/children', '/parent/tasks', '/parent/challenges', '/parent/badges', '/parent/conversion', '/parent/wishlist', '/parent/reports']
+      const knownPaths = ['/parent', '/parent/children', '/parent/tasks', '/parent/challenges', '/parent/badges', '/parent/conversion', '/parent/wishlist', '/parent/reports', '/parent/map']
       const isKnownPath = knownPaths.some(knownPath => path === knownPath || path.startsWith(knownPath + '/'))
       
       return isKnownPath ? calculatedValue : 0
@@ -443,6 +445,10 @@ export default function Layout({ children }: LayoutProps) {
                 <Tab
                   label="Отчёт"
                   onClick={() => navigate('/parent/reports')}
+                />
+                <Tab
+                  label={t('nav.map')}
+                  onClick={() => navigate('/parent/map')}
                 />
               </>
             ) : (

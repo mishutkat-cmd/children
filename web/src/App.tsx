@@ -28,6 +28,9 @@ const ParentWishlist = lazy(() => import('./pages/parent/Wishlist'))
 const ParentApprovals = lazy(() => import('./pages/parent/Approvals'))
 const ChildBadges = lazy(() => import('./pages/parent/ChildBadges'))
 const ParentReports = lazy(() => import('./pages/parent/Reports'))
+// Карта грузится отдельным чанком: leaflet весит ~40 КБ gz и не нужен
+// на остальных страницах.
+const ParentMap = lazy(() => import('./pages/parent/Map'))
 
 function PageLoader() {
   return (
@@ -76,6 +79,7 @@ function App() {
         <Route path="/parent/wishlist" element={<PrivateRoute role="PARENT"><ParentWishlist /></PrivateRoute>} />
         <Route path="/parent/approvals" element={<PrivateRoute role="PARENT"><ParentApprovals /></PrivateRoute>} />
         <Route path="/parent/reports" element={<PrivateRoute role="PARENT"><ParentReports /></PrivateRoute>} />
+        <Route path="/parent/map" element={<PrivateRoute role="PARENT"><ParentMap /></PrivateRoute>} />
 
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>

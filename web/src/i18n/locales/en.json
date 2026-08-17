@@ -29,7 +29,8 @@
     "settings": "Settings",
     "logout": "Log out",
     "changePhoto": "Change profile photo",
-    "bonusOrPenalty": "Add or deduct points"
+    "bonusOrPenalty": "Add or deduct points",
+    "map": "Map"
   },
   "auth": {
     "loginTitle": "Sign in",
@@ -85,7 +86,31 @@
     "manageChallenges": "Manage challenges",
     "createChallenge": "Create challenge",
     "viewBadges": "View badges",
-    "noBadgesYet": "This child has no badges yet"
+    "noBadgesYet": "This child has no badges yet",
+    "map": {
+      "title": "Map",
+      "refresh": "Refresh",
+      "loadError": "Could not load locations",
+      "noChildren": "Add a child on the Children tab first",
+      "nobodyReported": "None of the children have reported a location yet. Check that location sharing is enabled in the child app.",
+      "trackingDisabled": "Location sharing is turned off in settings",
+      "neverReported": "Has not reported a location yet",
+      "permissionOff": "The child turned location access off",
+      "mocked": "Coordinates are faked by an app",
+      "updateNow": "Update now",
+      "showTrack": "Today's track",
+      "hideTrack": "Hide track",
+      "noData": "no data",
+      "justNow": "just now",
+      "minutesAgo_one": "{{count}} minute ago",
+      "minutesAgo_other": "{{count}} minutes ago",
+      "hoursAgo_one": "{{count}} hour ago",
+      "hoursAgo_other": "{{count}} hours ago",
+      "daysAgo_one": "{{count}} day ago",
+      "daysAgo_other": "{{count}} days ago",
+      "accuracyMeters": "±{{value}} m",
+      "accuracyKm": "±{{value}} km"
+    }
   },
   "achievement": {
     "badgeUnlocked": "Badge earned!",

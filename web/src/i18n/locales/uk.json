@@ -29,7 +29,8 @@
     "settings": "Налаштування",
     "logout": "Вихід",
     "changePhoto": "Змінити фото профілю",
-    "bonusOrPenalty": "Начислити або оштрафувати бали"
+    "bonusOrPenalty": "Начислити або оштрафувати бали",
+    "map": "Карта"
   },
   "auth": {
     "loginTitle": "Вхід в систему",
@@ -85,7 +86,34 @@
     "manageChallenges": "Керування челленджами",
     "createChallenge": "Створити челлендж",
     "viewBadges": "Переглянути бейджі",
-    "noBadgesYet": "У цієї дитини поки немає бейджів"
+    "noBadgesYet": "У цієї дитини поки немає бейджів",
+    "map": {
+      "title": "Карта",
+      "refresh": "Оновити",
+      "loadError": "Не вдалося завантажити місцезнаходження",
+      "noChildren": "Спочатку додайте дитину на вкладці «Діти»",
+      "nobodyReported": "Ніхто з дітей ще не передавав місцезнаходження. Перевірте, чи увімкнена геолокація в застосунку дитини.",
+      "trackingDisabled": "Геолокацію вимкнено в налаштуваннях",
+      "neverReported": "Ще не передавав місцезнаходження",
+      "permissionOff": "Дитина вимкнула доступ до геолокації",
+      "mocked": "Координати підроблені застосунком",
+      "updateNow": "Оновити",
+      "showTrack": "Трек за день",
+      "hideTrack": "Сховати трек",
+      "noData": "немає даних",
+      "justNow": "щойно",
+      "minutesAgo_one": "{{count}} хвилину тому",
+      "minutesAgo_few": "{{count}} хвилини тому",
+      "minutesAgo_many": "{{count}} хвилин тому",
+      "hoursAgo_one": "{{count}} годину тому",
+      "hoursAgo_few": "{{count}} години тому",
+      "hoursAgo_many": "{{count}} годин тому",
+      "daysAgo_one": "{{count}} день тому",
+      "daysAgo_few": "{{count}} дні тому",
+      "daysAgo_many": "{{count}} днів тому",
+      "accuracyMeters": "±{{value}} м",
+      "accuracyKm": "±{{value}} км"
+    }
   },
   "achievement": {
     "badgeUnlocked": "Отримано бейдж!",

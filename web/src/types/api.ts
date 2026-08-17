@@ -241,3 +241,46 @@ export interface CreateBadgeDto {
 export interface CreateExchangeDto {
   rewardGoalId: string
 }
+
+// ── Геолокация ────────────────────────────────────────────────
+
+export interface ChildLocation {
+  lat: number
+  lng: number
+  accuracy: number
+  altitude?: number | null
+  speed?: number | null
+  heading?: number | null
+  isMoving: boolean
+  /** Android: координаты подделаны mock-провайдером. */
+  mocked: boolean
+  battery?: number | null
+  isCharging: boolean
+  source: 'background' | 'foreground' | 'manual'
+  permissionState?: string | null
+  servicesEnabled: boolean
+  capturedAt: string
+  receivedAt?: string | null
+  /** Возраст точки в секундах на момент ответа сервера. */
+  ageSec: number | null
+  /** Старше 15 минут — на карте показываем приглушённо. */
+  isStale: boolean
+}
+
+export interface ChildLocationRow {
+  childId: string
+  userId: string
+  name: string
+  login: string
+  avatarUrl?: string | null
+  trackingEnabled: boolean
+  location: ChildLocation | null
+}
+
+export interface ChildLocationHistory {
+  childId: string
+  from: string
+  to: string
+  count: number
+  points: ChildLocation[]
+}

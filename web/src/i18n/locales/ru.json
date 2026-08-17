@@ -29,7 +29,8 @@
     "settings": "Настройки",
     "logout": "Выход",
     "changePhoto": "Изменить фото профиля",
-    "bonusOrPenalty": "Начислить или штрафовать баллы"
+    "bonusOrPenalty": "Начислить или штрафовать баллы",
+    "map": "Карта"
   },
   "auth": {
     "loginTitle": "Вход в систему",
@@ -85,7 +86,34 @@
     "manageChallenges": "Управление челленджами",
     "createChallenge": "Создать челлендж",
     "viewBadges": "Посмотреть бейджи",
-    "noBadgesYet": "У ребёнка пока нет бейджей"
+    "noBadgesYet": "У ребёнка пока нет бейджей",
+    "map": {
+      "title": "Карта",
+      "refresh": "Обновить",
+      "loadError": "Не удалось загрузить местоположения",
+      "noChildren": "Сначала добавьте ребёнка на вкладке «Дети»",
+      "nobodyReported": "Никто из детей ещё не передавал местоположение. Проверьте, что в приложении ребёнка включена геолокация.",
+      "trackingDisabled": "Геолокация выключена в настройках",
+      "neverReported": "Ещё не передавал местоположение",
+      "permissionOff": "Ребёнок отключил доступ к геолокации",
+      "mocked": "Координаты подделаны приложением",
+      "updateNow": "Обновить",
+      "showTrack": "Трек за день",
+      "hideTrack": "Скрыть трек",
+      "noData": "нет данных",
+      "justNow": "только что",
+      "minutesAgo_one": "{{count}} минуту назад",
+      "minutesAgo_few": "{{count}} минуты назад",
+      "minutesAgo_many": "{{count}} минут назад",
+      "hoursAgo_one": "{{count}} час назад",
+      "hoursAgo_few": "{{count}} часа назад",
+      "hoursAgo_many": "{{count}} часов назад",
+      "daysAgo_one": "{{count}} день назад",
+      "daysAgo_few": "{{count}} дня назад",
+      "daysAgo_many": "{{count}} дней назад",
+      "accuracyMeters": "±{{value}} м",
+      "accuracyKm": "±{{value}} км"
+    }
   },
   "achievement": {
     "badgeUnlocked": "Получен бейдж!",
