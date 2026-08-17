@@ -22,8 +22,13 @@ const SETTINGS_COLLECTION = 'locationSettings';
 
 export const DEFAULT_LOCATION_SETTINGS = {
   enabled: true,
+  /** В движении: минута — компромисс между «видно, куда идёт» и расходом. */
   movingIntervalSec: 60,
-  idleIntervalSec: 300,
+  /**
+   * В покое: 10 минут. Держим строго меньше STALE_AFTER_SEC, иначе неподвижный
+   * телефон постоянно выглядел бы «протухшим» на карте.
+   */
+  idleIntervalSec: 600,
   historyDays: 7,
 };
 
@@ -106,6 +111,8 @@ export class LocationsService {
         rejected,
         trackingEnabled: true,
         nextIntervalSec: settings.idleIntervalSec,
+        movingIntervalSec: settings.movingIntervalSec,
+        idleIntervalSec: settings.idleIntervalSec,
         highAccuracy: this.isRefreshRequested(last),
       };
     }
@@ -154,6 +161,10 @@ export class LocationsService {
       rejected,
       trackingEnabled: true,
       nextIntervalSec: isMoving ? settings.movingIntervalSec : settings.idleIntervalSec,
+      // Обе ступени сразу: устройство настраивает и режим движения, и покой,
+      // поэтому частоту можно менять на сервере, не пересобирая приложение.
+      movingIntervalSec: settings.movingIntervalSec,
+      idleIntervalSec: settings.idleIntervalSec,
       highAccuracy: this.isRefreshRequested(last),
     };
   }
