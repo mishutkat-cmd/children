@@ -6,13 +6,15 @@
  *   node dist/cli/migrate-firestore-to-sqlite.js --dry-run     # inspect first
  *   node dist/cli/migrate-firestore-to-sqlite.js               # do it
  *
- * Options:
- *   --dry-run              read and report, write nothing
- *   --db=<path>            target SQLite file (default: $DATABASE_PATH or ./data/children.db)
- *   --uploads=<path>       target file directory (default: ./uploads)
- *   --public-base=<prefix> URL prefix the rewritten links use (default: /uploads)
- *   --skip-files           migrate documents only, leave storage URLs untouched
- *   --from-dump=<file>     read documents from a JSON dump instead of live Firestore
+ * Options (all default to the env vars the running app reads, so a plain
+ * invocation puts everything exactly where the app and Caddy expect it):
+ *   --dry-run                 read and report, write nothing
+ *   --db=<path>               target SQLite file        ($DATABASE_PATH)
+ *   --uploads=<path>          public files              ($UPLOADS_PATH)
+ *   --uploads-private=<path>  proof photos, not web-served ($UPLOADS_PRIVATE_PATH)
+ *   --public-base=<prefix>    URL prefix for public links  ($UPLOADS_PUBLIC_BASE)
+ *   --skip-files              migrate documents only, leave storage URLs untouched
+ *   --from-dump=<file>        read documents from a JSON dump instead of live Firestore
  *
  * Idempotent: documents are written by primary key, so re-running re-syncs
  * rather than duplicating. Run it once with the app stopped for the real
@@ -30,6 +32,7 @@ interface Options {
   dryRun: boolean;
   dbPath: string;
   uploadsDir: string;
+  privateUploadsDir: string;
   publicBase: string;
   skipFiles: boolean;
   fromDump: string | null;
@@ -40,14 +43,33 @@ function parseArgs(argv: string[]): Options {
     const hit = argv.find((a) => a.startsWith(`--${name}=`));
     return hit ? hit.slice(name.length + 3) : null;
   };
+  // Defaults come from the same env vars the running app reads. Falling back
+  // to `cwd/uploads` instead would silently drop the files next to whichever
+  // directory the operator happened to run this from — which is not where the
+  // app, or Caddy, will look for them.
+  const uploadsDir = get('uploads') || process.env.UPLOADS_PATH || join(process.cwd(), 'uploads');
   return {
     dryRun: argv.includes('--dry-run'),
     dbPath: get('db') || DocStore.resolveDbPath(),
-    uploadsDir: get('uploads') || join(process.cwd(), 'uploads'),
-    publicBase: (get('public-base') || '/uploads').replace(/\/$/, ''),
+    uploadsDir,
+    privateUploadsDir:
+      get('uploads-private') || process.env.UPLOADS_PRIVATE_PATH || join(dirname(uploadsDir), 'uploads-private'),
+    publicBase: (get('public-base') || process.env.UPLOADS_PUBLIC_BASE || '/uploads').replace(/\/$/, ''),
     skipFiles: argv.includes('--skip-files'),
     fromDump: get('from-dump'),
   };
+}
+
+/**
+ * Folders whose objects were public in Firebase (`makePublic()` was called on
+ * upload) and stay public here. Anything else — today only `proofs` — was
+ * served through expiring signed URLs and must land outside the web-served
+ * root, behind the authenticated route.
+ */
+const PUBLIC_FOLDERS = new Set(['avatars', 'badges', 'rewards', 'wishlist', 'characters']);
+
+function isPublicObject(objectPath: string): boolean {
+  return PUBLIC_FOLDERS.has(objectPath.split('/')[0]);
 }
 
 /** Firestore Timestamps arrive as {_seconds,_nanoseconds} or as Timestamp instances. */
@@ -86,16 +108,23 @@ const BUCKET = process.env.FIREBASE_STORAGE_BUCKET || 'childrenevolvenext.fireba
  * Anything else is left exactly as-is.
  */
 function rewriteUrl(value: string, publicBase: string): { url: string; objectPath: string | null } {
+  // Private objects get the authenticated route, not the static prefix.
+  // Rewriting a proof photo to `${publicBase}/proofs/...` would publish every
+  // child's proof photo at a guessable URL — the exact thing the signed URLs
+  // in Firebase existed to prevent.
+  const localUrl = (objectPath: string) =>
+    isPublicObject(objectPath) ? `${publicBase}/${objectPath}` : `/api/v1/files/${objectPath}`;
+
   const direct = `https://storage.googleapis.com/${BUCKET}/`;
   if (value.startsWith(direct)) {
     const objectPath = decodeURIComponent(value.slice(direct.length).split('?')[0].split('#')[0]);
-    return { url: `${publicBase}/${objectPath}`, objectPath };
+    return { url: localUrl(objectPath), objectPath };
   }
 
   const apiMatch = value.match(/^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/([^/]+)\/o\/([^?#]+)/);
   if (apiMatch && apiMatch[1] === BUCKET) {
     const objectPath = decodeURIComponent(apiMatch[2]);
-    return { url: `${publicBase}/${objectPath}`, objectPath };
+    return { url: localUrl(objectPath), objectPath };
   }
 
   return { url: value, objectPath: null };
@@ -154,20 +183,28 @@ function readFromDump(path: string): { docs: Record<string, any[]>; unknown: str
   return { docs, unknown };
 }
 
-async function downloadFiles(uploadsDir: string, referenced: Set<string>, dryRun: boolean) {
+async function downloadFiles(
+  uploadsDir: string,
+  privateUploadsDir: string,
+  referenced: Set<string>,
+  dryRun: boolean,
+) {
   const admin = require('firebase-admin');
   const bucket = admin.storage().bucket(BUCKET);
   const [files] = await bucket.getFiles();
 
   let downloaded = 0;
   let bytes = 0;
+  let privateCount = 0;
   const present = new Set<string>();
 
   for (const file of files) {
     present.add(file.name);
     if (file.name.endsWith('/')) continue; // directory placeholder
 
-    const target = join(uploadsDir, file.name);
+    const root = isPublicObject(file.name) ? uploadsDir : privateUploadsDir;
+    if (root === privateUploadsDir) privateCount++;
+    const target = join(root, file.name);
     bytes += Number(file.metadata?.size || 0);
 
     if (dryRun) {
@@ -192,7 +229,7 @@ async function downloadFiles(uploadsDir: string, referenced: Set<string>, dryRun
   const missing = [...referenced].filter((p) => !present.has(p));
   const orphaned = [...present].filter((p) => !p.endsWith('/') && !referenced.has(p));
 
-  return { downloaded, bytes, missing, orphaned };
+  return { downloaded, bytes, missing, orphaned, privateCount };
 }
 
 async function main() {
@@ -201,7 +238,8 @@ async function main() {
   console.log('=== Firestore -> SQLite migration ===');
   console.log('  mode:      ', options.dryRun ? 'DRY RUN (no writes)' : 'WRITE');
   console.log('  database:  ', options.dbPath);
-  console.log('  uploads:   ', options.uploadsDir);
+  console.log('  uploads:   ', options.uploadsDir, '(public)');
+  console.log('  uploads:   ', options.privateUploadsDir, '(private, not web-served)');
   console.log('  public URL:', options.publicBase + '/...');
   console.log('  source:    ', options.fromDump ? `dump ${options.fromDump}` : 'live Firestore');
   console.log('');
@@ -258,8 +296,14 @@ async function main() {
 
   if (!options.skipFiles) {
     console.log('\n--- files ---');
-    const result = await downloadFiles(options.uploadsDir, referenced, options.dryRun);
+    const result = await downloadFiles(
+      options.uploadsDir,
+      options.privateUploadsDir,
+      referenced,
+      options.dryRun,
+    );
     console.log(`  objects:    ${result.downloaded} (${(result.bytes / 1048576).toFixed(1)} MB)`);
+    console.log(`  private:    ${result.privateCount} (proof photos, kept out of the web root)`);
     console.log(`  referenced: ${referenced.size}`);
     if (result.missing.length) {
       console.error(`  !! ${result.missing.length} URL(s) point at objects that do not exist:`);
