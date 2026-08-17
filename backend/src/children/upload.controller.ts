@@ -83,6 +83,8 @@ export class UploadController {
   constructor(private firebaseService: FirebaseService) {}
 
   @Post('avatar')
+  // аватар меняет и ребёнок, и родитель
+  @Roles('PARENT', 'CHILD')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -146,6 +148,8 @@ export class UploadController {
   }
 
   @Post('proof')
+  // фото-подтверждение задания загружает ребёнок
+  @Roles('PARENT', 'CHILD')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -167,6 +171,8 @@ export class UploadController {
   }
 
   @Post('wishlist')
+  // картинку желания добавляет ребёнок
+  @Roles('PARENT', 'CHILD')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
