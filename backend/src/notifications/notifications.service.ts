@@ -5,70 +5,95 @@ import { DocStore } from '../db/doc-store.service';
 export class NotificationsService {
   constructor(private db: DocStore) {}
 
+  /**
+   * The bell list, enriched with the child and the thing each notification
+   * refers to.
+   *
+   * Enrichment used to be per-notification: 50 rows x 2-4 lookups was up to
+   * ~200 queries per load. They ran concurrently, which hid the cost behind
+   * Firestore's latency, but the work was real. Now every related document is
+   * collected up front and fetched with one query per collection — 6 queries
+   * regardless of how many notifications come back.
+   */
   async findAll(familyId: string) {
     const notifications = await this.db.findMany(
       'notifications',
       { familyId },
       { createdAt: 'desc' },
-      50, // Ограничиваем последними 50 уведомлениями
+      50,
     );
+    if (notifications.length === 0) return [];
 
-    // Enrich every notification in parallel. Was sequential for-of —
-    // 50 notifications meant up to ~200 sequential Firestore round-trips
-    // per dashboard load. Now: one parallel batch, ~2-3 reads per item
-    // running concurrently.
-    return Promise.all(
-      notifications.map(async (notification) => {
-        const [childData, relatedData] = await Promise.all([
-          this.loadChildData(notification.childId),
-          this.loadRelatedData(notification.refType, notification.refId),
-        ]);
-        return {
-          ...notification,
-          // Нормализуем поле read: undefined → false, чтобы фронт стабильно
-          // показывал статус и счётчик соответствовал списку.
-          read: notification.read === true,
-          child: childData,
-          related: relatedData,
-        };
-      }),
-    );
-  }
+    const idsOf = (predicate: (n: any) => boolean, pick: (n: any) => string | undefined) => [
+      ...new Set(notifications.filter(predicate).map(pick).filter(Boolean) as string[]),
+    ];
 
-  private async loadChildData(childId?: string) {
-    if (!childId) return null;
-    const childProfile = await this.db.findFirst('childProfiles', { id: childId });
-    if (!childProfile) return null;
-    const user = await this.db.findFirst('users', { id: childProfile.userId });
-    return { ...childProfile, login: user?.login, email: user?.email };
-  }
+    const childIds = idsOf(() => true, (n) => n.childId);
+    const completionIds = idsOf((n) => n.refType === 'COMPLETION', (n) => n.refId);
+    const childBadgeIds = idsOf((n) => n.refType === 'BADGE', (n) => n.refId);
+    const challengeIds = idsOf((n) => n.refType === 'CHALLENGE', (n) => n.refId);
 
-  private async loadRelatedData(refType?: string, refId?: string) {
-    if (!refType || !refId) return null;
-    if (refType === 'COMPLETION') {
-      const completion = await this.db.findFirst('completions', { id: refId });
-      if (!completion) return null;
-      const task = await this.db.findFirst('tasks', { id: completion.taskId });
-      return { completion, task };
-    }
-    if (refType === 'BADGE') {
-      const childBadge = await this.db.findFirst('childBadges', { id: refId });
-      if (!childBadge) return null;
-      const badge = await this.db.findFirst('badges', { id: childBadge.badgeId });
-      return { childBadge, badge };
-    }
-    if (refType === 'CHALLENGE') {
-      const challenge = await this.db.findFirst('challenges', { id: refId });
-      return { challenge };
-    }
-    return null;
+    const byId = (rows: any[]) => new Map<string, any>(rows.map((r) => [r.id, r]));
+    const fetch = (collection: string, ids: string[]) =>
+      ids.length ? this.db.findMany(collection, { id: { in: ids } }) : Promise.resolve([]);
+
+    const [profiles, completions, childBadges, challenges] = await Promise.all([
+      fetch('childProfiles', childIds),
+      fetch('completions', completionIds),
+      fetch('childBadges', childBadgeIds),
+      fetch('challenges', challengeIds),
+    ]);
+
+    const profileById = byId(profiles);
+    const completionById = byId(completions);
+    const childBadgeById = byId(childBadges);
+    const challengeById = byId(challenges);
+
+    // Second hop: the users behind those profiles, the tasks behind those
+    // completions, the badges behind those childBadges. Also one query each.
+    const [users, tasks, badges] = await Promise.all([
+      fetch('users', [...new Set(profiles.map((p: any) => p.userId).filter(Boolean))]),
+      fetch('tasks', [...new Set(completions.map((c: any) => c.taskId).filter(Boolean))]),
+      fetch('badges', [...new Set(childBadges.map((b: any) => b.badgeId).filter(Boolean))]),
+    ]);
+
+    const userById = byId(users);
+    const taskById = byId(tasks);
+    const badgeById = byId(badges);
+
+    return notifications.map((notification: any) => {
+      const profile = notification.childId ? profileById.get(notification.childId) : null;
+      const user = profile?.userId ? userById.get(profile.userId) : null;
+
+      let related: any = null;
+      if (notification.refType === 'COMPLETION' && notification.refId) {
+        const completion = completionById.get(notification.refId);
+        if (completion) related = { completion, task: taskById.get(completion.taskId) ?? null };
+      } else if (notification.refType === 'BADGE' && notification.refId) {
+        const childBadge = childBadgeById.get(notification.refId);
+        if (childBadge) related = { childBadge, badge: badgeById.get(childBadge.badgeId) ?? null };
+      } else if (notification.refType === 'CHALLENGE' && notification.refId) {
+        related = { challenge: challengeById.get(notification.refId) ?? null };
+      }
+
+      return {
+        ...notification,
+        // Normalize `read`: undefined -> false, so the frontend shows a stable
+        // status and the badge count matches the list.
+        read: notification.read === true,
+        child: profile ? { ...profile, login: user?.login, email: user?.email } : null,
+        related,
+      };
+    });
   }
 
   async getUnreadCount(familyId: string) {
-    // Считаем все уведомления, у которых read !== true (включая legacy без поля).
-    const notifications = await this.db.findMany('notifications', { familyId });
-    const unread = notifications.filter((n: any) => n.read !== true);
-    return { count: unread.length };
+    // Counted in SQL. This used to read every notification the family has ever
+    // received (1135 of them in production) to count the ones not marked read.
+    // `read: { not: true }` keeps the old semantics: legacy rows written before
+    // the field existed still count as unread.
+    const count = await this.db.count('notifications', { familyId, read: { not: true } });
+    return { count };
   }
 
   async markAsRead(notificationId: string, familyId: string) {
@@ -82,13 +107,12 @@ export class NotificationsService {
   }
 
   async markAllAsRead(familyId: string) {
-    // Берём ВСЕ уведомления семьи, включая записи без поля read (legacy),
-    // и помечаем как прочитанные те, у которых read !== true.
-    const notifications = await this.db.findMany('notifications', { familyId });
-    const unread = notifications.filter((n: any) => n.read !== true);
-    await Promise.all(
-      unread.map((n: any) => this.db.update('notifications', n.id, { read: true })),
+    // One statement instead of read-all-then-update-each.
+    const marked = await this.db.updateMany(
+      'notifications',
+      { familyId, read: { not: true } },
+      { read: true },
     );
-    return { success: true, marked: unread.length };
+    return { success: true, marked };
   }
 }

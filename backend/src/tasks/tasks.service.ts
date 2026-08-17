@@ -346,32 +346,33 @@ export class TasksService {
       task.assignedTo === 'ALL' || assignedIds.includes(task.id) || task.assignedTo === childId
     );
 
-    // Add completions for each task
-    const tasksWithCompletions = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    for (const task of tasks) {
-      const completionsWhere: any = { childId: childProfileId, taskId: task.id };
-      if (todayOnly) {
-        // Firestore doesn't support date range queries easily, so we'll filter in memory
-        completionsWhere.status = 'APPROVED';
-      }
-      const allCompletions = await this.db.findMany('completions', completionsWhere);
-      
-      // Filter by date if todayOnly
-      const completions = todayOnly 
-        ? allCompletions.filter(c => {
-            const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-            return performedAt >= today && performedAt < new Date(today.getTime() + 24 * 60 * 60 * 1000);
-          })
-        : allCompletions;
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
 
-      tasksWithCompletions.push({
-        ...task,
-        completions,
-      });
+    // One query for every task's completions, not one per task. With 25 active
+    // tasks this was 25 sequential round-trips; the date filter that used to
+    // run in memory (Firestore could not combine it with the equality filters)
+    // is now part of the query.
+    const taskIds = tasks.map((t: any) => t.id);
+    const where: any = { childId: childProfileId, taskId: { in: taskIds } };
+    if (todayOnly) {
+      where.status = 'APPROVED';
+      where.performedAt = { gte: today, lt: tomorrow };
     }
+    const allCompletions = taskIds.length ? await this.db.findMany('completions', where) : [];
+
+    const completionsByTask = new Map<string, any[]>();
+    for (const c of allCompletions) {
+      const list = completionsByTask.get(c.taskId) ?? [];
+      list.push(c);
+      completionsByTask.set(c.taskId, list);
+    }
+
+    const tasksWithCompletions = tasks.map((task: any) => ({
+      ...task,
+      completions: completionsByTask.get(task.id) ?? [],
+    }));
 
     // Filter by frequency for today
     if (todayOnly) {
@@ -425,29 +426,30 @@ export class TasksService {
       task.assignedTo === 'ALL' || assignedIds.includes(task.id) || task.assignedTo === childId
     );
 
-    // Add completions for each task
-    const tasksWithCompletions = [];
     const dayOfWeek = targetDate.getDay();
-    
-    for (const task of tasks) {
-      // Get completions for the target date
-      const allCompletions = await this.db.findMany('completions', { 
-        childId: childProfileId, 
-        taskId: task.id 
-      });
-      
-      // Filter completions by target date
-      const completions = allCompletions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        performedAt.setHours(0, 0, 0, 0);
-        return performedAt.getTime() === targetDate.getTime();
-      });
 
-      tasksWithCompletions.push({
-        ...task,
-        completions,
-      });
+    // One query for the whole day across every task, instead of one query per
+    // task followed by an in-memory date filter.
+    const taskIds = tasks.map((t: any) => t.id);
+    const dayCompletions = taskIds.length
+      ? await this.db.findMany('completions', {
+          childId: childProfileId,
+          taskId: { in: taskIds },
+          performedAt: { gte: targetDate, lt: nextDay },
+        })
+      : [];
+
+    const completionsByTask = new Map<string, any[]>();
+    for (const c of dayCompletions) {
+      const list = completionsByTask.get(c.taskId) ?? [];
+      list.push(c);
+      completionsByTask.set(c.taskId, list);
     }
+
+    const tasksWithCompletions = tasks.map((task: any) => ({
+      ...task,
+      completions: completionsByTask.get(task.id) ?? [],
+    }));
 
     // Filter by frequency for the target date
     return tasksWithCompletions.filter((task) => {

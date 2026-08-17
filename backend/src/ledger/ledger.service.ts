@@ -315,45 +315,55 @@ export class LedgerService {
   private async getFamilyManualEntries(familyId: string, type: LedgerType) {
     const entries = await this.db.findMany(
       'ledgerEntries',
-      { familyId, type },
+      { familyId, type, refType: 'MANUAL' },
       { createdAt: 'desc' },
     );
-    const manualEntries = entries.filter((e: any) => e.refType === 'MANUAL');
+    return this.withChildNames(entries);
+  }
 
-    const result = [];
-    for (const entry of manualEntries) {
-      let childName = 'Ребёнок';
-      try {
-        const profile = await this.db.findFirst('childProfiles', { userId: entry.childId });
-        if (profile) {
-          childName = profile.name || childName;
-        } else {
-          const user = await this.db.findFirst('users', { id: entry.childId });
-          childName = user?.login || childName;
-        }
-      } catch {
-        // ignore lookup errors, keep default name
-      }
+  /**
+   * Attach a display name to each entry.
+   *
+   * Was two lookups per entry inside a sequential loop; a family with a long
+   * penalty history paid for that on every dashboard load. Both lookups are
+   * now one query each for the whole set.
+   */
+  private async withChildNames(entries: any[]) {
+    if (entries.length === 0) return [];
+
+    const childIds = [...new Set(entries.map((e: any) => e.childId).filter(Boolean) as string[])];
+    const [profiles, users] = await Promise.all([
+      this.db.findMany('childProfiles', { userId: { in: childIds } }),
+      this.db.findMany('users', { id: { in: childIds } }),
+    ]);
+
+    const nameByChildId = new Map<string, string>();
+    // Profile name wins; the user login is the fallback for children whose
+    // profile is missing, matching the previous lookup order.
+    for (const user of users) if (user.login) nameByChildId.set(user.id, user.login);
+    for (const profile of profiles) if (profile.name) nameByChildId.set(profile.userId, profile.name);
+
+    return entries.map((entry: any) => {
       let reason: string | null = null;
       if (entry.metaJson) {
         try {
-          const meta = typeof entry.metaJson === 'string' ? JSON.parse(entry.metaJson) : entry.metaJson;
+          const meta =
+            typeof entry.metaJson === 'string' ? JSON.parse(entry.metaJson) : entry.metaJson;
           reason = meta?.reason || null;
         } catch {
-          // ignore
+          // Unparseable meta — leave the reason blank rather than failing the list.
         }
       }
-      result.push({
+      return {
         id: entry.id,
         childId: entry.childId,
-        childName,
+        childName: nameByChildId.get(entry.childId) || 'Ребёнок',
         amount: Math.abs(entry.amount || 0),
         refType: entry.refType,
         reason,
         createdAt: entry.createdAt,
-      });
-    }
-    return result;
+      };
+    });
   }
 
   /**
@@ -368,41 +378,7 @@ export class LedgerService {
       { familyId, type: 'PENALTY' },
       { createdAt: 'desc' },
     );
-
-    const result = [];
-    for (const entry of entries) {
-      let childName = 'Ребёнок';
-      try {
-        const profile = await this.db.findFirst('childProfiles', { userId: entry.childId });
-        if (profile) {
-          childName = profile.name || childName;
-        } else {
-          const user = await this.db.findFirst('users', { id: entry.childId });
-          childName = user?.login || childName;
-        }
-      } catch {
-        // ignore lookup errors, keep default name
-      }
-      let reason: string | null = null;
-      if (entry.metaJson) {
-        try {
-          const meta = typeof entry.metaJson === 'string' ? JSON.parse(entry.metaJson) : entry.metaJson;
-          reason = meta?.reason || null;
-        } catch {
-          // ignore
-        }
-      }
-      result.push({
-        id: entry.id,
-        childId: entry.childId,
-        childName,
-        amount: Math.abs(entry.amount || 0),
-        refType: entry.refType,
-        reason,
-        createdAt: entry.createdAt,
-      });
-    }
-    return result;
+    return this.withChildNames(entries);
   }
 
   /**

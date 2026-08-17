@@ -6,6 +6,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { LocalStorageService } from '../files/local-storage.service';
 import { CreateChildDto, UpdateChildDto, CreateParentDto } from './dto/children.dto';
 import { getCached, setCached } from '../common/cache/family-settings-cache';
+import { queryForDay, startOfToday } from './day-points';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
@@ -124,25 +125,29 @@ export class ChildrenService {
     // No O(history) recompute on the read path — profile from findOne above
     // already carries the current balance.
     const [
-      allLedgerEntries,
+      todayPointsBalance,
       recentApproved,
-      pendingCompletionsList,
-      pendingExchangesList,
+      pendingCompletions,
+      pendingExchanges,
       streakStateData,
       decayStatus,
       allWishlistItems,
       character,
       familySettings,
     ] = await Promise.all([
-      this.db.findMany('ledgerEntries', { childId: userId }),
+      // Asks about today only, instead of reading the child's whole earning
+      // history and the completions behind it. See day-points.ts.
+      queryForDay(this.db, { userId, childProfileId, targetDate: startOfToday() }),
       this.db.findMany(
         'completions',
         { childId: childProfileId, status: 'APPROVED' },
         { performedAt: 'desc' },
         10,
       ),
-      this.db.findMany('completions', { childId: childProfileId, status: 'PENDING' }),
-      this.db.findMany('exchanges', { childId, status: 'PENDING' }),
+      // Counted in SQL — the documents themselves were never used, only
+      // `.length` of them.
+      this.db.count('completions', { childId: childProfileId, status: 'PENDING' }),
+      this.db.count('exchanges', { childId, status: 'PENDING' }),
       this.streakService.getStreakState(childId),
       this.decayService.getDecayStatus(childId, familyId),
       childProfileId
@@ -154,65 +159,19 @@ export class ChildrenService {
       this.getFamilySettingsCached(familyId),
     ]);
 
-    // Today balance: batch-fetch the completions referenced by EARN/BONUS
-    // entries in ONE `id: in` query instead of N findFirst calls.
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const earnEntries = allLedgerEntries.filter(
-      (e: any) => e.type === 'EARN' || e.type === 'BONUS',
-    );
-    const refIdsForCompletion = Array.from(
-      new Set(
-        earnEntries
-          .filter((e: any) => e.refType === 'COMPLETION' && e.refId)
-          .map((e: any) => e.refId as string),
-      ),
-    );
-    const refIdCompletions = refIdsForCompletion.length
-      ? await this.db.findMany('completions', { id: { in: refIdsForCompletion } })
+    // Recent approved completions, enriched with their task in one query
+    // rather than one per completion.
+    const recentTaskIds = [
+      ...new Set(recentApproved.map((c: any) => c.taskId).filter(Boolean) as string[]),
+    ];
+    const recentTasks = recentTaskIds.length
+      ? await this.db.findMany('tasks', { id: { in: recentTaskIds } })
       : [];
-    const completionsById = new Map<string, any>(refIdCompletions.map((c: any) => [c.id, c]));
-
-    const toDate = (v: any): Date =>
-      v?.toDate ? v.toDate() : new Date(v);
-    const isToday = (d: Date) => {
-      const m = new Date(d);
-      m.setHours(0, 0, 0, 0);
-      return m.getTime() === today.getTime();
-    };
-
-    const todayPointsBalance = earnEntries.reduce((sum: number, entry: any) => {
-      if (entry.refType === 'COMPLETION' && entry.refId) {
-        const completion = completionsById.get(entry.refId);
-        if (!completion) {
-          // missing completion → fall back to ledger createdAt window
-          const created = toDate(entry.createdAt);
-          return created >= today && created < tomorrow ? sum + (entry.amount || 0) : sum;
-        }
-        if (completion.status !== 'APPROVED') return sum;
-        if (!completion.performedAt) {
-          const created = toDate(entry.createdAt);
-          return created >= today && created < tomorrow ? sum + (entry.amount || 0) : sum;
-        }
-        return isToday(toDate(completion.performedAt)) ? sum + (entry.amount || 0) : sum;
-      }
-      const created = toDate(entry.createdAt);
-      return created >= today && created < tomorrow ? sum + (entry.amount || 0) : sum;
-    }, 0);
-
-    // Recent approved completions — enrich with task in parallel.
-    const recentCompletions = await Promise.all(
-      recentApproved.map(async (completion: any) => ({
-        ...completion,
-        task: await this.db.findFirst('tasks', { id: completion.taskId }),
-      })),
-    );
-
-    const pendingCompletions = pendingCompletionsList.length;
-    const pendingExchanges = pendingExchangesList.length;
+    const taskById = new Map<string, any>(recentTasks.map((t: any) => [t.id, t]));
+    const recentCompletions = recentApproved.map((completion: any) => ({
+      ...completion,
+      task: taskById.get(completion.taskId) ?? null,
+    }));
 
     // Streak state shape compatibility.
     const streakState =
@@ -349,66 +308,19 @@ export class ChildrenService {
       // pointsBalance on child.childProfile is authoritative now — see
       // LedgerService.createEntry transactional path. No O(history)
       // recompute on the read side.
-      const [allEntries, completedCompletions] = await Promise.all([
-        this.db.findMany('ledgerEntries', { childId }),
-        this.db.findMany('completions', { childId: childProfileId, status: 'APPROVED' }),
-      ]);
-
-      // Aggregate earned/spent in one pass.
-      let totalPointsEarned = 0;
-      let totalPointsSpent = 0;
-      const earnedEntries: any[] = [];
-      for (const e of allEntries) {
-        const amt = e.amount || 0;
-        if (e.type === 'EARN' || e.type === 'BONUS') {
-          totalPointsEarned += amt;
-          earnedEntries.push(e);
-        } else if (e.type === 'SPEND') {
-          totalPointsSpent += Math.abs(amt);
-        }
-      }
-
-      // Target-date balance: batch-fetch the referenced completions
-      // instead of one findFirst per entry.
-      const refIds = Array.from(
-        new Set(
-          earnedEntries
-            .filter((e: any) => e.refType === 'COMPLETION' && e.refId)
-            .map((e: any) => e.refId as string),
-        ),
-      );
-      const refCompletions = refIds.length
-        ? await this.db.findMany('completions', { id: { in: refIds } })
-        : [];
-      const completionsById = new Map<string, any>(refCompletions.map((c: any) => [c.id, c]));
-
-      const toDate = (v: any): Date => (v?.toDate ? v.toDate() : new Date(v));
-      const inWindow = (d: Date) => d >= targetDate && d < nextDay;
-      const dayMatch = (d: Date) => {
-        const m = new Date(d);
-        m.setHours(0, 0, 0, 0);
-        return m.getTime() === targetDate.getTime();
-      };
-
-      let todayPointsBalance = 0;
-      for (const entry of earnedEntries) {
-        const amt = entry.amount || 0;
-        if (entry.refType === 'COMPLETION' && entry.refId) {
-          const completion = completionsById.get(entry.refId);
-          if (completion) {
-            if (completion.status !== 'APPROVED') continue;
-            if (completion.performedAt) {
-              if (dayMatch(toDate(completion.performedAt))) todayPointsBalance += amt;
-              continue;
-            }
-          }
-          // Missing completion or no performedAt → fall back to createdAt window.
-        }
-        if (entry.createdAt) {
-          const created = toDate(entry.createdAt);
-          if (!isNaN(created.getTime()) && inWindow(created)) todayPointsBalance += amt;
-        }
-      }
+      //
+      // The totals are summed and counted in SQL. Previously this loaded the
+      // child's entire ledger (329 rows) and every approved completion (321
+      // rows) into memory to produce three numbers. Only the EARN/BONUS rows
+      // are actually needed as documents, for the target-date breakdown below.
+      const [totalPointsEarned, totalPointsSpent, completedTasksCount, todayPointsBalance] =
+        await Promise.all([
+          this.db.sum('ledgerEntries', 'amount', { childId, type: { in: ['EARN', 'BONUS'] } }),
+          // Absolute: SPEND amounts are inconsistently signed in stored data.
+          this.db.sum('ledgerEntries', 'amount', { childId, type: 'SPEND' }, { absolute: true }),
+          this.db.count('completions', { childId: childProfileId, status: 'APPROVED' }),
+          queryForDay(this.db, { userId: childId, childProfileId, targetDate }),
+        ]);
 
       // Money earned (legacy fallback for old profiles where
       // moneyBalanceCents was never backfilled).
@@ -452,7 +364,7 @@ export class ChildrenService {
         todayPointsBalance,
         totalMoneyEarned: totalMoneyEarned / 100,
         totalMoneyEarnedCents: totalMoneyEarned,
-        completedTasksCount: completedCompletions.length,
+        completedTasksCount,
         maxStreak,
       };
     } catch (childError: any) {

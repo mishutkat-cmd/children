@@ -278,14 +278,12 @@ async function main() {
       // none of it does, so a failure never leaves a half-migrated table.
       store.transaction(() => {
         for (const doc of list) {
-          const { id, createdAt, updatedAt, ...rest } = doc;
-          store.createSync(collection, rest, id);
-          // createSync server-stamps the timestamps; a migration must keep the
-          // originals, so restore them directly.
-          const restored: Record<string, any> = {};
-          if (createdAt) restored.createdAt = createdAt;
-          if (updatedAt) restored.updatedAt = updatedAt;
-          if (Object.keys(restored).length) store.updateSync(collection, id, restored);
+          const { id, ...rest } = doc;
+          // preserveTimestamps is essential, not cosmetic: without it every
+          // imported document is stamped with the moment of the import, and
+          // every createdAt-ordered list — notifications, ledger history, task
+          // lists — silently loses its ordering.
+          store.createSync(collection, rest, id, { preserveTimestamps: true });
         }
       });
     }

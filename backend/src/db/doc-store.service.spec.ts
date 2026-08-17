@@ -37,6 +37,29 @@ describe('DocStore', () => {
       expect(store.getSync('tasks', id).createdAt.getFullYear()).toBeGreaterThan(2000);
     });
 
+    it('keeps the supplied timestamps when importing existing documents', () => {
+      // Without this an import restamps every document with the moment of the
+      // import, and every createdAt-ordered list in the product silently loses
+      // its order.
+      const created = new Date('2026-02-01T10:00:00.000Z');
+      const updated = new Date('2026-03-01T10:00:00.000Z');
+      const id = store.createSync(
+        'tasks',
+        { title: 't', createdAt: created, updatedAt: updated },
+        'imported',
+        { preserveTimestamps: true },
+      );
+
+      const task = store.getSync('tasks', id);
+      expect(task.createdAt.toISOString()).toBe(created.toISOString());
+      expect(task.updatedAt.toISOString()).toBe(updated.toISOString());
+    });
+
+    it('falls back to now when an imported document has no timestamps', () => {
+      const id = store.createSync('tasks', { title: 't' }, 'no-stamps', { preserveTimestamps: true });
+      expect(store.getSync('tasks', id).createdAt.getFullYear()).toBeGreaterThan(2000);
+    });
+
     it('revives date fields as Date and leaves other strings alone', () => {
       const performed = new Date('2026-03-01T10:00:00.000Z');
       const id = store.createSync('completions', { performedAt: performed, note: '2026-03-01' });
@@ -342,6 +365,84 @@ describe('DocStore', () => {
       store.createSync('locationPoints', { childId: 'c1' }, 'p1');
       expect(store.deleteManySync('locationPoints', { childId: { in: [] } })).toBe(0);
       expect(store.countSync('locationPoints')).toBe(1);
+    });
+  });
+
+  describe('sumSync', () => {
+    beforeEach(() => {
+      store.createSync('ledgerEntries', { childId: 'c1', type: 'EARN', amount: 10 });
+      store.createSync('ledgerEntries', { childId: 'c1', type: 'BONUS', amount: 5 });
+      store.createSync('ledgerEntries', { childId: 'c1', type: 'SPEND', amount: -30 });
+      store.createSync('ledgerEntries', { childId: 'c1', type: 'SPEND', amount: 20 });
+      store.createSync('ledgerEntries', { childId: 'c2', type: 'EARN', amount: 999 });
+    });
+
+    it('sums a field for matching documents only', () => {
+      expect(store.sumSync('ledgerEntries', 'amount', { childId: 'c1', type: { in: ['EARN', 'BONUS'] } })).toBe(15);
+    });
+
+    it('sums absolute values so mixed signs do not net off', () => {
+      // Stored SPEND amounts are inconsistently signed; the JS code took
+      // Math.abs per row. Summing raw would give -10 instead of 50.
+      expect(
+        store.sumSync('ledgerEntries', 'amount', { childId: 'c1', type: 'SPEND' }, { absolute: true }),
+      ).toBe(50);
+    });
+
+    it('returns 0 rather than null when nothing matches', () => {
+      expect(store.sumSync('ledgerEntries', 'amount', { childId: 'nobody' })).toBe(0);
+    });
+
+    it('ignores documents missing the field', () => {
+      store.createSync('ledgerEntries', { childId: 'c3' });
+      store.createSync('ledgerEntries', { childId: 'c3', amount: 7 });
+      expect(store.sumSync('ledgerEntries', 'amount', { childId: 'c3' })).toBe(7);
+    });
+  });
+
+  describe('not operator', () => {
+    it('matches documents where the field differs OR is absent', () => {
+      store.createSync('notifications', { familyId: 'f1', read: true }, 'n-read');
+      store.createSync('notifications', { familyId: 'f1', read: false }, 'n-unread');
+      store.createSync('notifications', { familyId: 'f1' }, 'n-legacy');
+
+      // Legacy rows predating the `read` field must still count as unread —
+      // that is what the in-memory `n.read !== true` filter did.
+      const rows = store.findManySync('notifications', { familyId: 'f1', read: { not: true } });
+      expect(rows.map((r) => r.id).sort()).toEqual(['n-legacy', 'n-unread']);
+      expect(store.countSync('notifications', { familyId: 'f1', read: { not: true } })).toBe(2);
+    });
+  });
+
+  describe('updateManySync', () => {
+    it('patches every match and reports the count', () => {
+      store.createSync('notifications', { familyId: 'f1', read: false }, 'a');
+      store.createSync('notifications', { familyId: 'f1' }, 'b');
+      store.createSync('notifications', { familyId: 'f2', read: false }, 'other-family');
+
+      const touched = store.updateManySync('notifications', { familyId: 'f1', read: { not: true } }, { read: true });
+
+      expect(touched).toBe(2);
+      expect(store.getSync('notifications', 'a').read).toBe(true);
+      expect(store.getSync('notifications', 'b').read).toBe(true);
+      expect(store.getSync('notifications', 'other-family').read).toBe(false);
+    });
+
+    it('leaves unrelated fields intact', () => {
+      store.createSync('notifications', { familyId: 'f1', title: 'hi', childId: 'c1' }, 'a');
+      store.updateManySync('notifications', { familyId: 'f1' }, { read: true });
+
+      const row = store.getSync('notifications', 'a');
+      expect(row.title).toBe('hi');
+      expect(row.childId).toBe('c1');
+      expect(row.read).toBe(true);
+    });
+
+    it('moves updatedAt forward', () => {
+      store.createSync('notifications', { familyId: 'f1' }, 'a');
+      const before = store.getSync('notifications', 'a').updatedAt;
+      store.updateManySync('notifications', { familyId: 'f1' }, { read: true });
+      expect(store.getSync('notifications', 'a').updatedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
     });
   });
 

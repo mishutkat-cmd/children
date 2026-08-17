@@ -212,6 +212,17 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      if (typeof condition === 'object' && (condition as any).not !== undefined) {
+        // `not` deliberately MATCHES documents where the field is absent.
+        // Firestore's `!=` excluded them, which is why the services filtered
+        // in memory instead (`n.read !== true` counts legacy notifications
+        // that predate the field). Pushing that filter into SQL has to keep
+        // the same answer, so NULL counts as "not equal".
+        clauses.push(`(${expr} IS NULL OR ${expr} != ?)`);
+        params.push(DocStore.toParam(field, (condition as any).not));
+        continue;
+      }
+
       if (typeof condition === 'object' && !(condition instanceof Date) && !Array.isArray(condition)) {
         const op = condition as Record<string, any>;
         // Range/membership operators, matching the old shim's vocabulary.
@@ -321,6 +332,34 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
     return row ? DocStore.decodeRow(row) : null;
   }
 
+  /**
+   * Sum a numeric field in SQL instead of loading the documents to add them up
+   * in JavaScript.
+   *
+   * This is the main thing Firestore could not do, and the reason several read
+   * paths pulled a child's entire ledger (hundreds of documents) on every
+   * dashboard load just to produce one number.
+   *
+   * `absolute` sums |value|. Needed for spend totals: the sign of a SPEND
+   * amount is inconsistent in stored data — some rows are positive, some
+   * negative — and the JavaScript code always took Math.abs per row, so
+   * summing raw values first would silently net them off against each other.
+   */
+  sumSync(
+    collection: string,
+    field: string,
+    where?: Record<string, any>,
+    options?: { absolute?: boolean },
+  ): number {
+    const expr = DocStore.fieldExpr(field);
+    const value = options?.absolute ? `ABS(${expr})` : expr;
+    const { sql, params } = DocStore.buildWhere(where);
+    let query = `SELECT COALESCE(SUM(${value}), 0) AS total FROM ${tableFor(collection)}`;
+    if (sql) query += ` WHERE ${sql}`;
+    const row = this.db.prepare(query).get(...params) as { total: number };
+    return row.total || 0;
+  }
+
   countSync(collection: string, where?: Record<string, any>): number {
     const { sql, params } = DocStore.buildWhere(where);
     let query = `SELECT COUNT(*) AS n FROM ${tableFor(collection)}`;
@@ -333,14 +372,29 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
   // Writes
   // ---------------------------------------------------------------------
 
-  createSync(collection: string, data: Record<string, any>, docId?: string): string {
+  createSync(
+    collection: string,
+    data: Record<string, any>,
+    docId?: string,
+    options?: { preserveTimestamps?: boolean },
+  ): string {
     const id = docId || data.id || crypto.randomUUID();
     const now = new Date().toISOString();
 
-    // createdAt/updatedAt are always server-assigned, exactly as the Firestore
-    // shim did with serverTimestamp() — callers cannot spoof them.
-    const { createdAt: _c, updatedAt: _u, id: _i, ...rest } = data;
-    const doc = { ...DocStore.encodeDoc(rest), createdAt: now, updatedAt: now };
+    // createdAt/updatedAt are server-assigned, exactly as the Firestore shim
+    // did with serverTimestamp() — application callers cannot spoof them.
+    //
+    // `preserveTimestamps` is the one exception, for importing existing
+    // documents whose real timestamps must survive. Without it an import
+    // silently restamps the entire dataset with the moment of the import,
+    // which destroys every createdAt-ordered list in the product.
+    const { createdAt, updatedAt, id: _i, ...rest } = data;
+    const keep = options?.preserveTimestamps === true;
+    const doc = {
+      ...DocStore.encodeDoc(rest),
+      createdAt: (keep && DocStore.toStorable('createdAt', createdAt)) || now,
+      updatedAt: (keep && DocStore.toStorable('updatedAt', updatedAt)) || now,
+    };
 
     this.db
       .prepare(`INSERT OR REPLACE INTO ${tableFor(collection)} (id, doc) VALUES (?, ?)`)
@@ -450,6 +504,28 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Apply the same patch to every matching document, in one statement.
+   * Replaces read-all-then-update-each loops. Returns the number of rows
+   * touched.
+   *
+   * The patch is merged into each document's JSON, so unrelated fields are
+   * preserved exactly as `updateSync` does.
+   */
+  updateManySync(collection: string, where: Record<string, any>, patch: Record<string, any>): number {
+    const table = tableFor(collection);
+    const encoded = DocStore.encodeDoc({ ...patch });
+    encoded.updatedAt = new Date().toISOString();
+
+    const { sql, params } = DocStore.buildWhere(where);
+    // json_patch merges the two objects server-side; no round-trip through
+    // JavaScript, and no chance of clobbering a concurrent write to another
+    // field of the same document.
+    let query = `UPDATE ${table} SET doc = json_patch(doc, ?)`;
+    if (sql) query += ` WHERE ${sql}`;
+    return this.db.prepare(query).run(JSON.stringify(encoded), ...params).changes;
+  }
+
+  /**
    * Bulk delete by predicate. Firestore had no such thing — callers looped
    * over paged reads and issued batched deletes — so this collapses those
    * loops into one statement. Returns the number of rows removed.
@@ -521,6 +597,23 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
 
   async deleteMany(collection: string, where?: Record<string, any>): Promise<number> {
     return this.deleteManySync(collection, where);
+  }
+
+  async updateMany(
+    collection: string,
+    where: Record<string, any>,
+    patch: Record<string, any>,
+  ): Promise<number> {
+    return this.updateManySync(collection, where, patch);
+  }
+
+  async sum(
+    collection: string,
+    field: string,
+    where?: Record<string, any>,
+    options?: { absolute?: boolean },
+  ): Promise<number> {
+    return this.sumSync(collection, field, where, options);
   }
 
   async get(collection: string, id: string): Promise<any | null> {
