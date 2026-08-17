@@ -8,6 +8,26 @@ import { dirname, isAbsolute, join } from 'path';
 import Database = require('better-sqlite3');
 import { COLLECTION_NAMES, DATE_FIELDS, buildSchemaSql, tableFor } from './schema';
 
+const isPlainObject = (value: any): boolean =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * Recursive merge, matching what Firestore's `set(..., { merge: true })` did
+ * at every level rather than only the first.
+ *
+ * The case that matters is `perChild: { [childId]: { enabled } }`: a one-level
+ * merge keeps the other children but replaces the edited child's whole object,
+ * so toggling their tracking silently reset their history retention to the
+ * family default. Arrays are replaced wholesale, as Firestore also did.
+ */
+function deepMerge(base: Record<string, any>, patch: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    out[key] = isPlainObject(value) && isPlainObject(base[key]) ? deepMerge(base[key], value) : value;
+  }
+  return out;
+}
+
 /**
  * Document store backed by a local SQLite file on the same host as the API.
  *
@@ -478,16 +498,7 @@ export class DocStore implements OnModuleInit, OnModuleDestroy {
       next = { ...patch, createdAt: patch.createdAt ?? now, updatedAt: now };
     } else if (options?.merge) {
       const current = JSON.parse(row.doc);
-      next = { ...current, ...patch };
-      if (options.mergeNested) {
-        for (const [key, value] of Object.entries(patch)) {
-          const existing = current[key];
-          const isPlainObject = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
-          if (isPlainObject(value) && isPlainObject(existing)) {
-            next[key] = { ...existing, ...value };
-          }
-        }
-      }
+      next = options.mergeNested ? deepMerge(current, patch) : { ...current, ...patch };
       next.createdAt = current.createdAt ?? now;
       next.updatedAt = now;
     } else {

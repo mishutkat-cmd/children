@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
-import { existsSync, chmodSync, unlinkSync } from 'fs';
+import { existsSync, chmodSync, unlinkSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -51,21 +51,23 @@ async function bootstrap() {
   // proof photos live under UPLOADS_PRIVATE_PATH and are served exclusively
   // by the authenticated FilesController.
   const uploadsDir = process.env.UPLOADS_PATH || join(process.cwd(), 'uploads');
-  if (existsSync(uploadsDir)) {
-    app.useStaticAssets(uploadsDir, {
-      prefix: '/uploads/',
-      // Upload names carry a timestamp and random suffix and are never
-      // rewritten, so they are safe to cache hard.
-      maxAge: '1y',
-      immutable: true,
-      index: false,
-      // Do not let a browser render user-uploaded content in our origin.
-      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
-    });
-    console.log('[Server] Serving public uploads from:', uploadsDir);
-  } else {
-    console.log('[Server] Public uploads directory not present yet:', uploadsDir);
-  }
+  // Create it rather than skipping when absent. Registering the handler
+  // conditionally meant a host that booted before the first upload served 404
+  // for every image until the next restart — and because the directory appears
+  // as soon as someone uploads, the symptom looks intermittent rather than
+  // like a startup problem.
+  mkdirSync(uploadsDir, { recursive: true });
+  app.useStaticAssets(uploadsDir, {
+    prefix: '/uploads/',
+    // Upload names carry a timestamp and random suffix and are never
+    // rewritten, so they are safe to cache hard.
+    maxAge: '1y',
+    immutable: true,
+    index: false,
+    // Do not let a browser render user-uploaded content in our origin.
+    setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+  });
+  console.log('[Server] Serving public uploads from:', uploadsDir);
 
   // SPA serving only if FRONTEND_ENABLED and build dir + index.html exist
   const frontendEnabled = process.env.FRONTEND_ENABLED === 'true' || process.env.FRONTEND_ENABLED === '1';

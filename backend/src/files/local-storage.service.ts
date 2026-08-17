@@ -91,6 +91,50 @@ export class LocalStorageService {
     return { url, path: target };
   }
 
+  /**
+   * Identify a stored file by its leading bytes, restricted to the image types
+   * the upload endpoint accepts.
+   *
+   * Deliberately not derived from the file extension: the extension comes from
+   * a client-supplied filename, and trusting it to pick a Content-Type would
+   * hand an attacker the ability to have their bytes served as any type they
+   * like. Returns null for anything that is not one of the four known types,
+   * which the caller turns into a 404.
+   */
+  async sniffContentType(objectPath: string): Promise<string | null> {
+    const folder = objectPath.split('/')[0];
+    const target = this.safeJoin(this.rootFor(folder), objectPath);
+    if (!target) return null;
+
+    let handle: fsp.FileHandle | undefined;
+    try {
+      handle = await fsp.open(target, 'r');
+      const buffer = Buffer.alloc(12);
+      const { bytesRead } = await handle.read(buffer, 0, 12, 0);
+      if (bytesRead < 12) return null;
+
+      if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+      if (
+        buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 &&
+        buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a
+      ) return 'image/png';
+      if (
+        buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38 &&
+        (buffer[4] === 0x37 || buffer[4] === 0x39) && buffer[5] === 0x61
+      ) return 'image/gif';
+      if (
+        buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+        buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+      ) return 'image/webp';
+
+      return null;
+    } catch {
+      return null;
+    } finally {
+      await handle?.close();
+    }
+  }
+
   /** Open a private object for streaming. Returns null when it does not exist. */
   openPrivate(objectPath: string): ReadStream | null {
     const folder = objectPath.split('/')[0];

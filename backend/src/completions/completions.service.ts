@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
+import { normalizePrivateFileUrl } from '../files/file-signing';
 import { LedgerService } from '../ledger/ledger.service';
 import { StreakService } from '../motivation/streak.service';
 import { ChallengesService } from '../motivation/challenges.service';
@@ -162,7 +163,13 @@ export class CompletionsService {
         childId: childProfileId,
         taskId: task.id,
         note: dto.note ?? null,
-        proofUrl: dto.proofUrl ?? null,
+        // Stored in canonical, unsigned form. The upload endpoint hands back a
+        // signed URL so the child can preview the photo, and the client posts
+        // that value straight back here — persisting it would store an expiry
+        // and a signature that go stale, and would stop the stored value from
+        // matching the file it names. Signatures are added per response by
+        // SignPrivateUrlsInterceptor, never written to the database.
+        proofUrl: normalizePrivateFileUrl(dto.proofUrl),
         status,
         performedAt,
         createdByUserId: createdByUserId ?? null, // null = родитель, userId = ребенок
@@ -283,27 +290,36 @@ export class CompletionsService {
     if (taskId) {
       where.taskId = taskId;
     }
-    
-    const completions = await this.db.findMany('completions', where, { performedAt: 'desc' });
-    
-    // Filter by date range if provided
-    let filtered = completions;
+    // The date range is part of the query now. Firestore could not combine a
+    // range with the equality filters, so this was fetched whole and then
+    // filtered in memory.
     if (from || to) {
-      filtered = completions.filter(c => {
-        const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt);
-        if (from && performedAt < from) return false;
-        if (to && performedAt > to) return false;
-        return true;
-      });
+      where.performedAt = {
+        ...(from && { gte: from }),
+        ...(to && { lte: to }),
+      };
     }
-    
-    // Enrich every completion with its task — in parallel.
-    return Promise.all(
-      filtered.map(async (completion) => ({
-        ...completion,
-        task: await this.db.findFirst('tasks', { id: completion.taskId }),
-      })),
-    );
+
+    const completions = await this.db.findMany('completions', where, { performedAt: 'desc' });
+
+    return this.withTasks(completions);
+  }
+
+  /**
+   * Attach each completion's task. One query for the whole set — this was a
+   * lookup per completion, ie ~320 queries for a child's full history.
+   */
+  private async withTasks(completions: any[]): Promise<any[]> {
+    if (completions.length === 0) return [];
+
+    const taskIds = [...new Set(completions.map((c) => c.taskId).filter(Boolean) as string[])];
+    const tasks = taskIds.length ? await this.db.findMany('tasks', { id: { in: taskIds } }) : [];
+    const taskById = new Map<string, any>(tasks.map((t: any) => [t.id, t]));
+
+    return completions.map((completion) => ({
+      ...completion,
+      task: taskById.get(completion.taskId) ?? null,
+    }));
   }
 
   async findPending(familyId: string) {
@@ -313,48 +329,46 @@ export class CompletionsService {
       { createdAt: 'desc' },
     );
 
-    // Enrich every pending completion in parallel; per-item lookups
-    // (task + childProfile + user) also run concurrently. Previously this
-    // was sequential for-of doing up to 4 round-trips per item, ie ~120
-    // sequential reads for 30 pending completions on the parent dashboard.
-    return Promise.all(
-      completions.map(async (completion) => {
-        try {
-          const [task, childProfile] = await Promise.all([
-            this.db.findFirst('tasks', { id: completion.taskId }),
-            this.resolveChildProfile(completion.childId),
-          ]);
-          const user = childProfile
-            ? await this.db.findFirst('users', { id: childProfile.userId, familyId })
-            : null;
-          const childData: any = {
-            ...childProfile,
-            childProfile,
-            user,
-            login: user?.login || null,
-            email: user?.email || null,
-            name: childProfile?.name || user?.login || null,
-          };
-          return { ...completion, task, child: childData };
-        } catch (error: any) {
-          console.error('[CompletionsService] Error processing completion:', error.message);
-          return null;
-        }
-      }),
-    ).then((rows) => rows.filter((r): r is NonNullable<typeof r> => r !== null));
+    if (completions.length === 0) return [];
+
+    // Enrichment is batched: tasks, profiles and users are each one query for
+    // the whole list. It used to be up to four lookups per pending completion.
+    const withTasks = await this.withTasks(completions);
+
+    // completions.childId holds either a childProfile.id or a userId depending
+    // on which call site wrote it — a historical inconsistency in the data, so
+    // both are looked up.
+    const childIds = [...new Set(completions.map((c) => c.childId).filter(Boolean) as string[])];
+    const [byId, byUserId] = await Promise.all([
+      childIds.length ? this.db.findMany('childProfiles', { id: { in: childIds } }) : [],
+      childIds.length ? this.db.findMany('childProfiles', { userId: { in: childIds } }) : [],
+    ]);
+
+    const profileByKey = new Map<string, any>();
+    for (const p of byUserId) profileByKey.set(p.userId, p);
+    for (const p of byId) profileByKey.set(p.id, p);
+
+    const userIds = [...new Set([...profileByKey.values()].map((p) => p.userId).filter(Boolean) as string[])];
+    const users = userIds.length ? await this.db.findMany('users', { id: { in: userIds }, familyId }) : [];
+    const userById = new Map<string, any>(users.map((u: any) => [u.id, u]));
+
+    return withTasks.map((completion: any) => {
+      const childProfile = profileByKey.get(completion.childId) ?? null;
+      const user = childProfile ? userById.get(childProfile.userId) ?? null : null;
+      return {
+        ...completion,
+        child: {
+          ...childProfile,
+          childProfile,
+          user,
+          login: user?.login || null,
+          email: user?.email || null,
+          name: childProfile?.name || user?.login || null,
+        },
+      };
+    });
   }
 
-  // completions.childId can hold either a childProfile.id or a userId
-  // depending on the call site — historical inconsistency. Resolve in one
-  // parallel probe instead of two sequential awaits.
-  private async resolveChildProfile(childId?: string) {
-    if (!childId) return null;
-    const [byId, byUserId] = await Promise.all([
-      this.db.findFirst('childProfiles', { id: childId }),
-      this.db.findFirst('childProfiles', { userId: childId }),
-    ]);
-    return byId || byUserId || null;
-  }
 
   async approve(id: string, familyId: string) {
     const completion = await this.db.findFirst('completions', { id, familyId });

@@ -315,6 +315,35 @@ describe('DocStore', () => {
       expect(settings.enabled).toBeUndefined();
     });
 
+    it('keeps the edited entry\'s other fields, not just the siblings', () => {
+      store.setSync('locationSettings', 'fam-1', {
+        perChild: {
+          'child-a': { enabled: true, historyDays: 3 },
+          'child-b': { enabled: true, historyDays: 30 },
+        },
+      });
+
+      // Toggling one flag for child A must not reset their retention: a
+      // one-level merge replaced the child's whole object and silently sent
+      // historyDays back to the family default.
+      store.setSync(
+        'locationSettings',
+        'fam-1',
+        { perChild: { 'child-a': { enabled: false } } },
+        { merge: true, mergeNested: true },
+      );
+
+      const perChild = store.getSync('locationSettings', 'fam-1').perChild;
+      expect(perChild['child-a']).toEqual({ enabled: false, historyDays: 3 });
+      expect(perChild['child-b']).toEqual({ enabled: true, historyDays: 30 });
+    });
+
+    it('replaces arrays wholesale rather than merging them', () => {
+      store.setSync('tasks', 't1', { daysOfWeek: [1, 2, 3] });
+      store.setSync('tasks', 't1', { daysOfWeek: [5] }, { merge: true, mergeNested: true });
+      expect(store.getSync('tasks', 't1').daysOfWeek).toEqual([5]);
+    });
+
     it('merges one level down without clobbering sibling keys', () => {
       store.setSync('locationSettings', 'fam-1', {
         perChild: { 'child-a': { enabled: true }, 'child-b': { enabled: true } },
