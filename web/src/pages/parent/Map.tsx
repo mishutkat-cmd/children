@@ -30,7 +30,7 @@ import {
   useChildrenLocations,
   useRequestLocationRefresh,
 } from '../../hooks/useChildrenLocations'
-import { formatAccuracy, formatAgo } from '../../utils/locationFormat'
+import { formatAccuracy, formatAgo, hasCoordinates } from '../../utils/locationFormat'
 import type { ChildLocationRow } from '../../types/api'
 
 /**
@@ -109,7 +109,7 @@ function MapController({
     hasFitted.current = true
 
     const points = rows
-      .filter((r) => r.location)
+      .filter((r) => hasCoordinates(r.location))
       .map((r) => [r.location!.lat, r.location!.lng] as [number, number])
     if (points.length === 0) return
 
@@ -136,18 +136,26 @@ export default function ParentMap() {
   const [showTrack, setShowTrack] = useState(false)
   const [focus, setFocus] = useState<{ childId: string; lat: number; lng: number } | null>(null)
 
-  const located = useMemo(() => rows.filter((r) => r.location), [rows])
+  // Наличия объекта location мало: сервер может вернуть точку без координат
+  // (документ создаётся и запросом «обновить сейчас»). Leaflet на таком падает
+  // с Invalid LatLng object, унося весь экран в ErrorBoundary.
+  const located = useMemo(
+    () => rows.filter((r) => hasCoordinates(r.location)),
+    [rows],
+  )
   const { data: history } = useChildLocationHistory(selectedId, showTrack && !!selectedId)
 
   const trackPositions = useMemo(() => {
     if (!showTrack || !history?.points?.length) return []
-    return history.points.map((p) => [p.lat, p.lng] as [number, number])
+    return history.points
+      .filter(hasCoordinates)
+      .map((p) => [p.lat, p.lng] as [number, number])
   }, [showTrack, history])
 
   const focusChild = (row: ChildLocationRow) => {
     setSelectedId(row.childId)
     setShowTrack(false)
-    if (row.location) {
+    if (hasCoordinates(row.location)) {
       // Новый объект каждый раз — иначе повторный клик по тому же ребёнку
       // не перезапустит эффект и карта не вернётся к нему.
       setFocus({ childId: row.childId, lat: row.location.lat, lng: row.location.lng })

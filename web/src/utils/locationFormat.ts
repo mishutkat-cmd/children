@@ -24,3 +24,16 @@ export const formatAccuracy = (meters: number | null | undefined, t: TFunc): str
   if (meters < 1000) return t('parent.map.accuracyMeters', { value: Math.round(meters) })
   return t('parent.map.accuracyKm', { value: (meters / 1000).toFixed(1) })
 }
+
+/**
+ * Годится ли точка для показа на карте.
+ *
+ * Объект location может прийти без координат: документ последней точки
+ * создаётся и родительским «обновить сейчас», до первого фикса от ребёнка.
+ * Leaflet на таком бросает Invalid LatLng object и роняет весь экран.
+ */
+export const hasCoordinates = <T extends { lat?: number | null; lng?: number | null }>(
+  point: T | null | undefined,
+): point is T & { lat: number; lng: number } =>
+  !!point && typeof point.lat === 'number' && Number.isFinite(point.lat) &&
+  typeof point.lng === 'number' && Number.isFinite(point.lng)

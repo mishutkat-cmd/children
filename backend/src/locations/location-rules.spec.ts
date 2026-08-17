@@ -1,4 +1,4 @@
-import { haversineMeters, sanitizePoints } from './location-rules';
+import { hasCoordinates, haversineMeters, sanitizePoints } from './location-rules';
 import type { LocationPointDto } from './dto/locations.dto';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
@@ -131,5 +131,26 @@ describe('sanitizePoints', () => {
     );
     expect(points).toHaveLength(2);
     expect(points.every((p) => p.lat < 56)).toBe(true);
+  });
+});
+
+describe('hasCoordinates', () => {
+  it('пропускает документ с нормальными координатами', () => {
+    expect(hasCoordinates({ lat: 55.75, lng: 37.61 })).toBe(true);
+    expect(hasCoordinates({ lat: 0, lng: 0 })).toBe(true);
+  });
+
+  it('отсекает запись, созданную запросом «обновить сейчас»', () => {
+    // Именно из-за неё карта падала: документ есть, координат в нём нет.
+    expect(hasCoordinates({ childId: 'c1', familyId: 'f1', refreshRequestedAt: new Date() })).toBe(false);
+  });
+
+  it('отсекает пустое, битое и нечисловое', () => {
+    expect(hasCoordinates(null)).toBe(false);
+    expect(hasCoordinates(undefined)).toBe(false);
+    expect(hasCoordinates({})).toBe(false);
+    expect(hasCoordinates({ lat: '55.75', lng: '37.61' })).toBe(false);
+    expect(hasCoordinates({ lat: NaN, lng: 37.61 })).toBe(false);
+    expect(hasCoordinates({ lat: 55.75 })).toBe(false);
   });
 });

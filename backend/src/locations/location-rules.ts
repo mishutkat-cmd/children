@@ -99,3 +99,21 @@ export function sanitizePoints(
 
   return { points, rejected };
 }
+
+/**
+ * Есть ли у записи пригодные к показу координаты.
+ *
+ * Документ последней точки создаётся не только приёмом координат: родительский
+ * «обновить сейчас» пишет туда флаг refreshRequestedAt ещё до того, как ребёнок
+ * прислал хоть один фикс. Без этой проверки наружу уезжает точка с lat/lng
+ * undefined, и карта на клиенте падает.
+ */
+export function hasCoordinates(doc: any): boolean {
+  return (
+    !!doc &&
+    typeof doc.lat === 'number' &&
+    Number.isFinite(doc.lat) &&
+    typeof doc.lng === 'number' &&
+    Number.isFinite(doc.lng)
+  );
+}

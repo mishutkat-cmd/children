@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { DocStore } from '../db/doc-store.service';
 import { DeviceTokenService, DeviceContext } from '../auth/device-token.service';
 import { getChildProfileId } from '../db/doc-helpers';
-import { sanitizePoints, type PreparedPoint } from './location-rules';
+import { hasCoordinates, sanitizePoints, type PreparedPoint } from './location-rules';
 import {
   IngestBatchDto,
   UpdateChildLocationSettingsDto,
@@ -191,7 +191,7 @@ export class LocationsService {
           login: user.login,
           avatarUrl: profile.avatarUrl || null,
           trackingEnabled: settings.enabled !== false && childCfg.enabled !== false,
-          location: doc ? this.toLocationResponse(doc) : null,
+          location: hasCoordinates(doc) ? this.toLocationResponse(doc) : null,
         };
       }),
     );
