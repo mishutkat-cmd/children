@@ -77,6 +77,67 @@ export const useCreateCompletionForChild = () => {
   })
 }
 
+// Списки, которые действительно меняются от подтверждения/отклонения.
+// Ими же инвалидируем после пакетного подтверждения.
+const COMPLETION_AFFECTED_KEYS = [
+  ['pending-completions'],
+  ['completions'],
+  ['children-statistics'],
+  ['tasks-statistics-today'],
+  ['child-analytics'],
+  ['completions-for-calendar'],
+  ['week-completions'],
+  ['child-badges'],
+  ['badges'],
+  ['challenges'],
+  ['child-summary'],
+  ['tasks'],
+  ['child-tasks-today'],
+  ['child-tasks-date'],
+  ['child-completions'],
+  ['children'],
+  ['notifications'],
+]
+
+const invalidateCompletionQueries = (queryClient: ReturnType<typeof useQueryClient>) => {
+  for (const queryKey of COMPLETION_AFFECTED_KEYS) {
+    queryClient.invalidateQueries({ queryKey })
+  }
+}
+
+// Карточка должна исчезать сразу по нажатию, а не после того, как сервер
+// ответит и вся статистика семьи перезапросится.
+const dropFromPending = (queryClient: ReturnType<typeof useQueryClient>, ids: string[]) => {
+  const previous = queryClient.getQueryData<Completion[]>(['pending-completions'])
+  if (previous) {
+    const removed = new Set(ids)
+    queryClient.setQueryData<Completion[]>(['pending-completions'], previous.filter(c => !removed.has(c.id)))
+  }
+  return previous
+}
+
+export const useApproveCompletionsBatch = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    // Один запрос на всю пачку вместо POST на каждое выполнение: раньше
+    // «одобрить все» ждало N ответов подряд и после каждого перезапрашивало
+    // статистику всей семьи.
+    mutationFn: async (ids: string[]) => {
+      const response = await api.post('/completions/parent/completions/approve-batch', { ids })
+      return response.data as { total: number; approved: string[]; failed: { id: string; reason: string }[] }
+    },
+    onMutate: async (ids: string[]) => {
+      await queryClient.cancelQueries({ queryKey: ['pending-completions'] })
+      return { previous: dropFromPending(queryClient, ids) }
+    },
+    onError: (_err, _ids, context: any) => {
+      if (context?.previous) queryClient.setQueryData(['pending-completions'], context.previous)
+    },
+    onSettled: () => invalidateCompletionQueries(queryClient),
+  })
+}
+
 export const useApproveCompletion = () => {
   const queryClient = useQueryClient()
   
@@ -85,33 +146,17 @@ export const useApproveCompletion = () => {
       const response = await api.post(`/completions/parent/completions/${id}/approve`)
       return response.data
     },
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ['pending-completions'] })
+      return { previous: dropFromPending(queryClient, [id]) }
+    },
+    onError: (_err, _id, context: any) => {
+      if (context?.previous) queryClient.setQueryData(['pending-completions'], context.previous)
+    },
     onSuccess: () => {
-      // Инвалидируем все связанные запросы — у родителя и у ребёнка должны обновиться независимо
-      queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['completions'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-      queryClient.invalidateQueries({ queryKey: ['child-analytics'] })
-      queryClient.invalidateQueries({ queryKey: ['completions-for-calendar'] })
-      queryClient.invalidateQueries({ queryKey: ['child-badges'] })
-      queryClient.invalidateQueries({ queryKey: ['badges'] })
-      queryClient.invalidateQueries({ queryKey: ['challenges'] })
-      queryClient.invalidateQueries({ queryKey: ['child-summary'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['child-tasks-today'] })
-      queryClient.invalidateQueries({ queryKey: ['child-tasks-date'] })
-      queryClient.invalidateQueries({ queryKey: ['child-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['children'] })
-      queryClient.invalidateQueries({ queryKey: ['notifications'] })
-      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
-      // Принудительный refetch данных ребёнка, чтобы статус «выполнено» сразу отобразился у ребёнка
-      setTimeout(() => {
-        queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-        queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-        queryClient.refetchQueries({ queryKey: ['child-summary'] })
-        queryClient.refetchQueries({ queryKey: ['child-tasks-date'] })
-        queryClient.refetchQueries({ queryKey: ['child-tasks-today'] })
-      }, 200)
+      // Мутация уже дождалась ответа сервера, данные записаны — второй волны
+      // refetch'ей через setTimeout больше нет, она только удваивала запросы.
+      invalidateCompletionQueries(queryClient)
     },
   })
 }
@@ -124,29 +169,15 @@ export const useRejectCompletion = () => {
       const response = await api.post(`/completions/parent/completions/${id}/reject`)
       return response.data
     },
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ['pending-completions'] })
+      return { previous: dropFromPending(queryClient, [id]) }
+    },
+    onError: (_err, _id, context: any) => {
+      if (context?.previous) queryClient.setQueryData(['pending-completions'], context.previous)
+    },
     onSuccess: () => {
-      // Инвалидируем все связанные запросы для полного обновления данных
-      queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['completions'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-      queryClient.invalidateQueries({ queryKey: ['child-analytics'] })
-      queryClient.invalidateQueries({ queryKey: ['completions-for-calendar'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['child-tasks-today'] })
-      queryClient.invalidateQueries({ queryKey: ['child-tasks-date'] }) // Инвалидируем задачи по датам
-      queryClient.invalidateQueries({ queryKey: ['child-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['children'] })
-      queryClient.invalidateQueries({ queryKey: ['notifications'] }) // Обновляем уведомления
-      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
-      
-      // Принудительно обновляем статистику
-      setTimeout(() => {
-        queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-        queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-        queryClient.refetchQueries({ queryKey: ['child-tasks-date'] })
-        queryClient.refetchQueries({ queryKey: ['child-tasks-today'] })
-      }, 300)
+      invalidateCompletionQueries(queryClient)
     },
   })
 }

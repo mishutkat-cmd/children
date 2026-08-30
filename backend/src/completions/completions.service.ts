@@ -514,9 +514,14 @@ export class CompletionsService {
       }
     }
 
-    // Проверяем и начисляем бейджи
-    const allCompletions = await this.db.findMany('completions', { childId: completion.childId, status: 'APPROVED' });
-    const totalCompletions = allCompletions.length;
+    // Проверяем и начисляем бейджи.
+    // Нужно только число — считаем в SQL. Раньше сюда загружалась вся история
+    // выполнений ребёнка (сотни документов) на каждое подтверждение, и при
+    // подтверждении «всех» это повторялось столько раз, сколько заданий в списке.
+    const totalCompletions = await this.db.count('completions', {
+      childId: completion.childId,
+      status: 'APPROVED',
+    });
     
     await this.badgesService.checkAndAwardBadges(completion.childId, familyId, {
       totalCompletions,
@@ -524,6 +529,36 @@ export class CompletionsService {
     });
 
     return updated;
+  }
+
+  /**
+   * Подтверждение пачкой. Клиент раньше слал по одному POST на каждое
+   * выполнение и после каждого перезапрашивал всю статистику семьи, поэтому
+   * «одобрить все» для десятка заданий превращалось в десятки round-trip'ов.
+   *
+   * Внутри всё равно последовательно: подтверждения одного ребёнка двигают его
+   * баланс, стрик и бейджи, и порядок тут важен. Но это одна транзакция сети
+   * вместо N, и общая для семьи работа (challenges, бейджи) греется кэшем
+   * SQLite, а не повторяется по сети.
+   *
+   * Ошибка на одном выполнении не отменяет остальные — возвращаем, что прошло,
+   * а что нет.
+   */
+  async approveMany(ids: string[], familyId: string) {
+    const unique = [...new Set(ids || [])].filter(Boolean);
+    const approved: string[] = [];
+    const failed: { id: string; reason: string }[] = [];
+
+    for (const id of unique) {
+      try {
+        await this.approve(id, familyId);
+        approved.push(id);
+      } catch (error: any) {
+        failed.push({ id, reason: error?.message || 'Unknown error' });
+      }
+    }
+
+    return { total: unique.length, approved, failed };
   }
 
   async reject(id: string, familyId: string) {

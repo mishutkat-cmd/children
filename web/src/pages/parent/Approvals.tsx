@@ -20,6 +20,7 @@ import {
   usePendingCompletions,
   usePendingExchanges,
   useApproveCompletion,
+  useApproveCompletionsBatch,
   useRejectCompletion,
   useApproveExchange,
   useRejectExchange,
@@ -78,6 +79,7 @@ export default function ParentApprovals() {
   const { data: pendingExchanges, isLoading: loadingExchanges } = usePendingExchanges()
 
   const approveCompletion = useApproveCompletion()
+  const approveCompletionsBatch = useApproveCompletionsBatch()
   const rejectCompletion = useRejectCompletion()
   const approveExchange = useApproveExchange()
   const rejectExchange = useRejectExchange()
@@ -104,15 +106,24 @@ export default function ParentApprovals() {
     if (!ok) return
 
     setBulkApproving(true)
-    const approveFn = isCompletionsTab
-      ? (id: string) => approveCompletion.mutateAsync(id)
-      : (id: string) => approveExchange.mutateAsync(id)
     let failures = 0
-    for (const id of ids) {
+    if (isCompletionsTab) {
+      // Одним запросом: раньше здесь шёл цикл с await на каждое задание, и
+      // после каждого ответа перезапрашивалась статистика всей семьи.
       try {
-        await approveFn(id)
+        const result = await approveCompletionsBatch.mutateAsync(ids)
+        failures = result?.failed?.length ?? 0
       } catch {
-        failures += 1
+        failures = ids.length
+      }
+    } else {
+      // У обменов пакетного эндпоинта нет — доставка списывает баланс по одному.
+      for (const id of ids) {
+        try {
+          await approveExchange.mutateAsync(id)
+        } catch {
+          failures += 1
+        }
       }
     }
     setBulkApproving(false)

@@ -130,6 +130,16 @@ export class CompletionsController {
     return this.completionsService.approve(id, user.familyId);
   }
 
+  @Post('parent/completions/approve-batch')
+  @UseGuards(RolesGuard)
+  @Roles('PARENT')
+  approveBatch(@User() user: RequestUser, @Body() dto: { ids: string[] }) {
+    if (!Array.isArray(dto?.ids) || dto.ids.length === 0) {
+      throw new BadRequestException('ids must be a non-empty array');
+    }
+    return this.completionsService.approveMany(dto.ids, user.familyId);
+  }
+
   @Post('parent/completions/:id/reject')
   @UseGuards(RolesGuard)
   @Roles('PARENT')
