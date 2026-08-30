@@ -603,9 +603,16 @@ export class TasksService {
       let totalAssignedTasks = 0;
 
       for (const task of tasks) {
-        const isAssignedAll = task.assignedTo === 'ALL';
+        // assignedTo is either 'ALL', a userId (that is what the parent form
+        // writes) or empty; taskAssignments rows carry childProfileId. A task
+        // pinned to one child used to match neither branch and silently
+        // dropped out of everyone's statistics.
+        const isAssignedAll = !task.assignedTo || task.assignedTo === 'ALL';
         const isAssignedToChild =
-          isAssignedAll || assignedSet.has(assignedKey(task.id, childProfileId));
+          isAssignedAll ||
+          assignedSet.has(assignedKey(task.id, childProfileId)) ||
+          task.assignedTo === child.id ||
+          (!!childProfileId && task.assignedTo === childProfileId);
         if (!isAssignedToChild) continue;
         totalAssignedTasks++;
 

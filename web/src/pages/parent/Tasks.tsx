@@ -51,6 +51,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import EditIcon from '@mui/icons-material/Edit'
 import ArchiveIcon from '@mui/icons-material/Archive'
+import PersonIcon from '@mui/icons-material/Person'
 import Layout from '../../components/Layout'
 import AnimatedCard from '../../components/AnimatedCard'
 import { ParentTaskCard } from '../../components/ParentTaskCard'
@@ -340,6 +341,35 @@ const isTaskCompletedForChild = (taskId: string, childStat: ChildStatWithComplet
     return false
   }
   return childStat.completedTasks.some((t: Task) => t.id === taskId)
+}
+
+// Кому назначено задание.
+// Источников назначения два: task.assignedTo ('ALL' или userId ребенка — так
+// пишет форма) и таблица taskAssignments (там лежит childProfileId — так
+// писал старый /assign). Проверяем обе формы id, чтобы задание не «прилипало»
+// к чужому ребенку.
+interface ChildRef {
+  childId: string
+  childProfileId?: string
+}
+
+const isTaskAssignedToChild = (task: Task, child?: ChildRef | null): boolean => {
+  if (!child) return false
+  if (!task.assignedTo || task.assignedTo === 'ALL') return true
+  const profileId = child.childProfileId || child.childId
+  const assignments = (task as any).taskAssignments
+  if (Array.isArray(assignments) && assignments.length > 0) {
+    return assignments.some((a: any) =>
+      a.childId === profileId ||
+      a.childId === child.childId ||
+      (a.child && (
+        a.child.id === profileId ||
+        a.child.id === child.childId ||
+        a.child.userId === child.childId
+      ))
+    )
+  }
+  return task.assignedTo === child.childId || task.assignedTo === profileId
 }
 
 // Функция для определения статуса выполнения задания (APPROVED, PENDING, NOT_COMPLETED)
@@ -957,24 +987,9 @@ export default function ParentTasks() {
           // Фильтруем задачи по выбранному ребенку
           let filteredTasks = tasks || []
           if (validTabIndex > 0 && selectedChildId && selectedChild) {
-            const childProfileId = (selectedChild as any).childProfileId || selectedChild.childId
-            filteredTasks = filteredTasks.filter((task: Task) => {
-              if (task.assignedTo === 'ALL') return true
-              const taskWithAssignments = task as any
-              if (taskWithAssignments.taskAssignments && Array.isArray(taskWithAssignments.taskAssignments)) {
-                return taskWithAssignments.taskAssignments.some((assignment: any) =>
-                  assignment.childId === childProfileId ||
-                  assignment.childId === selectedChild.childId ||
-                  (assignment.child && (
-                    assignment.child.id === childProfileId ||
-                    assignment.child.userId === selectedChild.childId ||
-                    assignment.child.id === selectedChild.childId
-                  ))
-                )
-              }
-              if (task.assignedTo === selectedChild.childId || task.assignedTo === childProfileId) return true
-              return false
-            })
+            filteredTasks = filteredTasks.filter((task: Task) =>
+              isTaskAssignedToChild(task, selectedChild as unknown as ChildRef)
+            )
           }
 
           const showAllChildrenStatus = safeTabIndex === 0
@@ -1031,12 +1046,15 @@ export default function ParentTasks() {
                       const isCompleted = childStat ? isTaskCompletedForChild(task.id, childStat) : false
                       const taskStatus = getTaskStatusForChild(task.id, selectedChildId || '', pendingCompletions)
                       const isPending = taskStatus === 'PENDING'
+                      const isPersonalTask = !!task.assignedTo && task.assignedTo !== 'ALL'
                       const childrenStatuses = showAllChildrenStatus && todayStatistics?.children
-                        ? todayStatistics.children.map((cs: any) => ({
-                            childName: cs.childName,
-                            isCompleted: isTaskCompletedForChild(task.id, cs),
-                            isPending: getTaskStatusForChild(task.id, cs.childId, pendingCompletions) === 'PENDING',
-                          }))
+                        ? todayStatistics.children
+                            .filter((cs: any) => isTaskAssignedToChild(task, cs))
+                            .map((cs: any) => ({
+                              childName: cs.childName,
+                              isCompleted: isTaskCompletedForChild(task.id, cs),
+                              isPending: getTaskStatusForChild(task.id, cs.childId, pendingCompletions) === 'PENDING',
+                            }))
                         : []
 
                       const statusColor = isCompleted ? '#34C759' : isPending ? '#FF9F0A' : 'transparent'
@@ -1127,11 +1145,29 @@ export default function ParentTasks() {
                             </Box>
                           </TableCell>
 
-                          {/* Статусы детей */}
+                          {/* Кому назначено + статус */}
                           {showAllChildrenStatus && todayStatistics?.children && (
                             <TableCell sx={{ py: 1.25 }}>
-                              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                                {childrenStatuses.map((cs: any) => (
+                              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                {isPersonalTask && (
+                                  <Tooltip title="Задание назначено не всем детям">
+                                    <Box sx={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 0.25,
+                                      px: 0.6, py: 0.2, borderRadius: 10, cursor: 'default',
+                                      fontSize: '0.68rem', fontWeight: 700,
+                                      textTransform: 'uppercase', letterSpacing: '0.04em',
+                                      background: colors.primary.main + '14',
+                                      color: colors.primary.main,
+                                      border: `1px dashed ${colors.primary.main}55`,
+                                    }}>
+                                      <PersonIcon sx={{ fontSize: '0.8rem' }} />
+                                      только
+                                    </Box>
+                                  </Tooltip>
+                                )}
+                                {childrenStatuses.length === 0 ? (
+                                  <Typography variant="caption" sx={{ color: '#C7C7CC' }}>—</Typography>
+                                ) : childrenStatuses.map((cs: any) => (
                                   <Tooltip key={cs.childName} title={`${cs.childName}: ${cs.isCompleted ? 'выполнено' : cs.isPending ? 'ожидает' : 'не выполнено'}`}>
                                     <Box sx={{
                                       display: 'inline-flex', alignItems: 'center', gap: 0.4,
@@ -1335,11 +1371,9 @@ export default function ParentTasks() {
                       ) : (
                         dayTasks.map((task: Task, i: number) => {
                           const assignedChildName = (() => {
-                            if (task.assignedTo === 'ALL') return 'Все'
-                            const c = (childrenStats || []).find((s: any) =>
-                              s.childId === task.assignedTo || (s as any).childProfileId === task.assignedTo
-                            )
-                            return c?.childName || ''
+                            if (!task.assignedTo || task.assignedTo === 'ALL') return 'Все'
+                            const assigned = (childrenStats || []).filter((s: any) => isTaskAssignedToChild(task, s))
+                            return assigned.map((c: any) => c.childName?.split(' ')[0]).filter(Boolean).join(', ')
                           })()
                           return (
                             <Box
@@ -1428,11 +1462,13 @@ export default function ParentTasks() {
                   })
 
                   const childrenStatuses = showAllChildrenStatus && todayStatistics?.children
-                    ? todayStatistics.children.map((childStat: any) => ({
-                        childName: childStat.childName,
-                        isCompleted: isTaskCompletedForChild(task.id, childStat),
-                        isPending: getTaskStatusForChild(task.id, childStat.childId, pendingCompletions) === 'PENDING',
-                      }))
+                    ? todayStatistics.children
+                        .filter((cs: any) => isTaskAssignedToChild(task, cs))
+                        .map((childStat: any) => ({
+                          childName: childStat.childName,
+                          isCompleted: isTaskCompletedForChild(task.id, childStat),
+                          isPending: getTaskStatusForChild(task.id, childStat.childId, pendingCompletions) === 'PENDING',
+                        }))
                     : []
 
                   return (
