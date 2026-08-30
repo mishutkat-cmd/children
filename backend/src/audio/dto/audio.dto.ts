@@ -19,4 +19,11 @@ export class CreateAudioRequestDto {
 export class SetConsentDto {
   @IsBoolean()
   enabled: boolean;
+
+  /** На сколько дней разрешить (по умолчанию 30). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  days?: number;
 }

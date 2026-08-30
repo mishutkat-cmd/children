@@ -46,7 +46,7 @@ export class AudioController {
   @Patch('consent')
   @Roles('CHILD')
   setConsent(@User() user: RequestUser, @Body() dto: SetConsentDto) {
-    return this.audioService.setConsent(user.userId, user.familyId, dto.enabled);
+    return this.audioService.setConsent(user.userId, user.familyId, dto.enabled, dto.days);
   }
 
     @Post('requests')

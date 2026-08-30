@@ -89,4 +89,21 @@ describe('AudioService — согласие и владение', () => {
     const req = await svc.createRequest('f1', 'parent1', 'childUser', 30);
     expect((req as any).autoConsent).toBe(false);
   });
+
+  it('согласие истекает — по умолчанию через 30 дней', async () => {
+    const res: any = await svc.setConsent('childUser', 'f1', true);
+    expect(res.enabled).toBe(true);
+    const days = (new Date(res.expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(Math.round(days)).toBe(30);
+  });
+
+  it('истёкшее согласие больше не действует', async () => {
+    await svc.setConsent('childUser', 'f1', true, 1);
+    // Прокручиваем срок в прошлое.
+    const doc = db.rows.get('audioConsent:p1');
+    doc.expiresAt = new Date(Date.now() - 1000);
+    const req = await svc.createRequest('f1', 'parent1', 'childUser', 30);
+    expect((req as any).autoConsent).toBe(false);
+  });
+
 });

@@ -11,6 +11,9 @@ const CONSENT_WINDOW_MS = 3 * 60 * 1000;
 /** Сколько хранится сама запись, потом её убирает retention-свип. */
 const AUDIO_RETENTION_DAYS = 7;
 export const DEFAULT_DURATION_SEC = 30;
+/** Стоячее согласие по умолчанию действует месяц, затем само истекает. */
+export const DEFAULT_CONSENT_DAYS = 30;
+const MAX_CONSENT_DAYS = 90;
 
 export type AudioStatus = 'PENDING' | 'DENIED' | 'READY' | 'EXPIRED';
 
@@ -119,27 +122,40 @@ export class AudioService {
    * а не функция безопасности. Даже при включённом согласии каждая запись
    * ребёнку видна (плашка и обратный отсчёт) и может быть отменена.
    */
-  async setConsent(userId: string, familyId: string, enabled: boolean) {
+  async setConsent(userId: string, familyId: string, enabled: boolean, days?: number) {
     const resolved = await getChildProfileId(this.db, userId, familyId);
     if (!resolved) throw new NotFoundException('Child profile not found');
+
+    // Согласие всегда с истечением — бессрочного «слушать когда угодно» быть
+    // не должно. По умолчанию месяц; ребёнок в любой момент выключает раньше.
+    const window = Math.min(Math.max(days ?? DEFAULT_CONSENT_DAYS, 1), MAX_CONSENT_DAYS);
+    const expiresAt = enabled ? new Date(Date.now() + window * 24 * 60 * 60 * 1000) : null;
+
     await this.db.set(
       CONSENT_COLLECTION,
       resolved.childProfileId,
-      { childId: resolved.childProfileId, familyId, autoConsent: enabled, updatedAt: new Date() },
+      { childId: resolved.childProfileId, familyId, autoConsent: enabled, expiresAt, updatedAt: new Date() },
       { merge: true },
     );
-    return { enabled };
+    return { enabled, expiresAt };
   }
 
   async getConsent(userId: string, familyId: string) {
     const resolved = await getChildProfileId(this.db, userId, familyId);
-    if (!resolved) return { enabled: false };
-    return { enabled: this.consentFor(resolved.childProfileId) };
+    if (!resolved) return { enabled: false, expiresAt: null };
+    const doc = this.db.getSync(CONSENT_COLLECTION, resolved.childProfileId);
+    return {
+      enabled: this.consentFor(resolved.childProfileId),
+      expiresAt: doc?.expiresAt ?? null,
+    };
   }
 
   private consentFor(childId: string): boolean {
     const doc = this.db.getSync(CONSENT_COLLECTION, childId);
-    return doc?.autoConsent === true;
+    if (doc?.autoConsent !== true) return false;
+    // Истёкшее согласие больше не действует — снова спросят разрешение.
+    if (doc.expiresAt && new Date(doc.expiresAt).getTime() < Date.now()) return false;
+    return true;
   }
 
   // ── Общее ───────────────────────────────────────────────────
