@@ -35,7 +35,6 @@ import TodayIcon from '@mui/icons-material/Today'
 import { motion } from 'framer-motion'
 import Layout from '../../components/Layout'
 import { ChildOverviewCard } from '../../components/ChildOverviewCard'
-import { ChildStatsCard } from '../../components/ChildStatsCard'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import GroupAddIcon from '@mui/icons-material/GroupAdd'
 import { colors } from '../../theme'
@@ -43,7 +42,6 @@ import {
   useChildrenStatistics,
   usePendingCompletions,
   usePendingExchanges,
-  useTodayStatistics,
   useApproveCompletion,
   useRejectCompletion,
   useChildBadges,
@@ -88,7 +86,8 @@ export default function ParentHome() {
 
   const { data: pendingCompletions } = usePendingCompletions()
   const { data: pendingExchanges } = usePendingExchanges()
-  const { data: todayStatistics } = useTodayStatistics()
+  // useTodayStatistics больше не нужен: его единственный потребитель —
+  // удалённая секция «Управление заданиями». Один запрос меньше.
 
   const needsApprovalCount = (pendingCompletions?.length || 0) + (pendingExchanges?.length || 0)
   const hasPendingApprovals = needsApprovalCount > 0
@@ -1236,68 +1235,10 @@ export default function ParentHome() {
         )}
         </Box>
 
-        {/* Управление заданиями - статистика за сегодня - Инновационный дизайн */}
-        {safeSelectedChildIndex >= 0 && todayStatistics && todayStatistics.children && todayStatistics.children.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-          >
-            <Box sx={{ mb: 2 }}>
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4, duration: 0.4 }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                  <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #34C759 0%, #28A745 100%)' }} />
-                  <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                    Управление заданиями
-                  </Typography>
-                </Box>
-              </motion.div>
-              <Grid container spacing={2}>
-                {(() => {
-                  let childrenToShow = todayStatistics.children || []
-                  // Показываем только статистику выбранного ребенка
-                  if (safeSelectedChildIndex >= 0 && selectedChildId && selectedChild) {
-                    childrenToShow = childrenToShow.filter((childStat) => {
-                      return childStat.childId === selectedChild.childId || 
-                             (childStat as any).childProfileId === (selectedChild as any).childProfileId ||
-                             childStat.childId === selectedChildId
-                    })
-                  }
-                  return childrenToShow.map((childStat) => {
-                    // Находим полную статистику из childrenStats
-                    const fullStats = childrenStats?.find((s: any) => s.childId === childStat.childId)
-                    const pendingCount = pendingCompletions?.filter((c: Completion) => 
-                      c.child?.id === childStat.childId || c.childId === childStat.childId
-                    ).length || 0
-                    
-                    return (
-                      <Grid item xs={12} sm={6} md={4} key={childStat.childId}>
-                        <ChildStatsCard
-                          childName={childStat.childName || 'Ребенок'}
-                          pointsBalance={fullStats?.currentBalance || 0}
-                          todayPointsBalance={childStat.pointsEarned || 0}
-                          totalPointsEarned={fullStats?.totalPointsEarned || 0}
-                          totalPointsSpent={fullStats?.totalPointsSpent || 0}
-                          pendingCompletions={pendingCount}
-                          onClick={() => {
-                            const index = childrenStats?.findIndex((s: any) => s.childId === childStat.childId)
-                            if (index !== undefined && index >= 0) {
-                              setSelectedChildIndex(index)
-                            }
-                          }}
-                        />
-                      </Grid>
-                    )
-                  })
-                })()}
-              </Grid>
-            </Box>
-          </motion.div>
-        )}
+        {/* «Управление заданиями» удалено: под этим заголовком рисовалась
+            большая карточка с балансом и заработано/потрачено — те же самые
+            цифры, что уже стоят в обзорной карточке ребёнка выше, и никакого
+            управления заданиями в ней не было. */}
 
 
         {/* Бейджи выбранного ребенка */}
@@ -1314,53 +1255,51 @@ export default function ParentHome() {
                   Бейджи · {selectedChild.childName}
                 </Typography>
               </Box>
-              <Grid container spacing={2}>
+              {/* Ряд компактных значков вместо карточек с рамками: у бейджа
+                  всего три поля, а карточка занимала под них 230 px высоты. */}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.25 }}>
                 {childBadges.map((childBadge: any) => (
-                  <Grid item xs={6} sm={4} md={3} key={childBadge.id}>
-                    <Card sx={{ height: '100%', textAlign: 'center' }}>
-                      <CardContent sx={{ py: 2 }}>
-                        {childBadge.badge?.imageUrl ? (
-                          <Box
-                            component="img" loading="lazy" decoding="async"
-                            src={childBadge.badge.imageUrl}
-                            alt={childBadge.badge.title}
-                            sx={{
-                              width: 80,
-                              height: 80,
-                              borderRadius: 2,
-                              objectFit: 'cover',
-                              mb: 1,
-                              mx: 'auto',
-                            }}
-                          />
-                        ) : (
-                          <Typography variant="h2" sx={{ mb: 1 }}>
-                            {childBadge.badge?.icon || '🏆'}
-                          </Typography>
-                        )}
-                        <Typography 
-                          variant="body2" 
-                          sx={{ 
-                            fontWeight: 600,
-                            fontSize: '0.85rem',
-                          }}
-                        >
+                  <Tooltip
+                    key={childBadge.id}
+                    arrow
+                    title={childBadge.earnedAt
+                      ? `${childBadge.badge?.title || 'Бейдж'} · ${new Date(childBadge.earnedAt).toLocaleDateString('ru-RU')}`
+                      : (childBadge.badge?.title || 'Бейдж')}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex', alignItems: 'center', gap: 0.75,
+                        px: 1, py: 0.6, borderRadius: 2,
+                        border: '1px solid rgba(0,0,0,0.08)', bgcolor: '#fff',
+                        maxWidth: 210, minWidth: 0,
+                      }}
+                    >
+                      {childBadge.badge?.imageUrl ? (
+                        <Box
+                          component="img" loading="lazy" decoding="async"
+                          src={childBadge.badge.imageUrl}
+                          alt={childBadge.badge.title}
+                          sx={{ width: 32, height: 32, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }}
+                        />
+                      ) : (
+                        <Box sx={{ fontSize: '1.4rem', lineHeight: 1, flexShrink: 0 }}>
+                          {childBadge.badge?.icon || '🏆'}
+                        </Box>
+                      )}
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography sx={{ fontWeight: 600, fontSize: '0.78rem', lineHeight: 1.2 }} noWrap>
                           {childBadge.badge?.title || 'Бейдж'}
                         </Typography>
                         {childBadge.earnedAt && (
-                          <Typography 
-                            variant="caption" 
-                            color="text.secondary"
-                            sx={{ fontSize: '0.7rem' }}
-                          >
+                          <Typography sx={{ fontSize: '0.66rem', color: colors.text.secondary }}>
                             {new Date(childBadge.earnedAt).toLocaleDateString('ru-RU')}
                           </Typography>
                         )}
-                      </CardContent>
-                    </Card>
-                  </Grid>
+                      </Box>
+                    </Box>
+                  </Tooltip>
                 ))}
-              </Grid>
+              </Box>
             </Box>
           </motion.div>
         )}
@@ -1386,35 +1325,22 @@ export default function ParentHome() {
           return (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
               <Box sx={{ mb: 4 }}>
-                <Typography variant="h5" fontWeight={700} sx={{ mb: 2, color: colors.text.primary }}>
-                  💰 Заработано денег
-                </Typography>
-                <Grid container spacing={2}>
-                  {/* Per-child cards */}
-                  {(childrenStats as any[]).map((stat: any) => (
-                    <Grid item xs={6} sm={4} md={3} key={stat.childId}>
-                      <Card sx={{ textAlign: 'center', py: 1 }}>
-                        <CardContent sx={{ py: '12px !important' }}>
-                          <Typography variant="body2" color="text.secondary">{stat.childName}</Typography>
-                          <Typography variant="h6" fontWeight={700} color="success.main">
-                            {((stat.totalMoneyEarnedCents || 0) / 100).toFixed(2)} грн
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                  {/* Total */}
-                  <Grid item xs={6} sm={4} md={3}>
-                    <Card sx={{ textAlign: 'center', py: 1, bgcolor: 'success.50', border: '1px solid', borderColor: 'success.200' }}>
-                      <CardContent sx={{ py: '12px !important' }}>
-                        <Typography variant="body2" color="text.secondary">Итого</Typography>
-                        <Typography variant="h6" fontWeight={700} color="success.main">
-                          {(totalAll / 100).toFixed(2)} грн
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
+                {/* Заголовок несёт итог. Карточка на каждого ребёнка отсюда
+                    убрана: та же сумма уже стоит в его обзорной карточке
+                    вверху страницы, а нового здесь только общий итог. */}
+                <Box sx={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 1.5, mb: 1.5 }}>
+                  <Typography sx={{ fontWeight: 800, fontSize: '1.125rem', color: colors.text.primary, letterSpacing: '-0.02em' }}>
+                    💰 Заработано денег
+                  </Typography>
+                  <Typography sx={{ fontWeight: 800, fontSize: '1.125rem', color: colors.success.main }}>
+                    {(totalAll / 100).toFixed(0)} грн
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.78rem', color: colors.text.secondary }}>
+                    {(childrenStats as any[])
+                      .map((stat: any) => `${stat.childName} ${((stat.totalMoneyEarnedCents || 0) / 100).toFixed(0)}`)
+                      .join(' · ')} грн
+                  </Typography>
+                </Box>
 
                 {/* Monthly bar chart */}
                 {months.length > 0 && (
