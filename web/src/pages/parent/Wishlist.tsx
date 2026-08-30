@@ -65,6 +65,21 @@ interface WishlistItem {
   showOnDashboard?: boolean
 }
 
+// «1 бажання / 2 бажання / 5 бажань» — украинская форма множественного,
+// иначе в заголовке ребёнка висело «1 бажань».
+function pluralWishes(n: number) {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'бажання'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'бажання'
+  return 'бажань'
+}
+
+// Цена хранится в баллах; на экране везде гривны по текущему курсу.
+function pointsToUah(points: number, rate: number) {
+  return Math.round((points || 0) / Math.max(1, rate))
+}
+
 function isFav(item: WishlistItem) {
   return item.isFavorite === true ||
     (typeof item.isFavorite === 'string' && item.isFavorite === 'true') ||
@@ -90,6 +105,7 @@ export default function ParentWishlist() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [editingItem, setEditingItem] = useState<WishlistItem | null>(null)
+  const [itemToDelete, setItemToDelete] = useState<WishlistItem | null>(null)
   const [imageViewerOpen, setImageViewerOpen] = useState(false)
   const [viewingImageUrl, setViewingImageUrl] = useState<string>('')
 
@@ -230,8 +246,8 @@ export default function ParentWishlist() {
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) { alert('Пожалуйста, выберите изображение'); return }
-    if (file.size > 5 * 1024 * 1024) { alert('Размер файла не должен превышать 5MB'); return }
+    if (!file.type.startsWith('image/')) { alert('Будь ласка, виберіть зображення'); return }
+    if (file.size > 5 * 1024 * 1024) { alert('Розмір файлу не має перевищувати 5 МБ'); return }
     setFormData(prev => ({ ...prev, imageFile: file, imageUrl: '' }))
     setUploading(true)
     const reader = new FileReader()
@@ -327,8 +343,11 @@ export default function ParentWishlist() {
     return { child, childName, childProfileId, items }
   })
 
+  const filtersActive = yearFilter !== 'all' || statusFilter !== 'all'
   const allFilteredItems = childGroups.flatMap(g => g.items)
-  const totalCost = allFilteredItems.reduce((s, i) => s + (i.rewardGoal?.costPoints || 0), 0)
+  // Карточки показывают цену в гривнах, а сводка складывала «сырые» баллы и
+  // подписывала их ₴ — суммы не сходились с тем, что видно на карточках.
+  const totalCostUah = allFilteredItems.reduce((sum, i) => sum + pointsToUah(i.rewardGoal?.costPoints || 0, conversionRate), 0)
   const completedCount = allFilteredItems.filter(i => i.status === 'COMPLETED').length
   const pendingCount = allFilteredItems.filter(i => i.status !== 'COMPLETED').length
 
@@ -348,75 +367,104 @@ export default function ParentWishlist() {
     <Layout>
       <Box>
         {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <FavoriteIcon sx={{ color: colors.error.main, fontSize: '2rem' }} />
-          <Typography variant="h3" component="h1" sx={{ fontWeight: 700, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-            Список бажань
+        <Box sx={{ mb: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 0.5 }}>
+            <FavoriteIcon sx={{ color: colors.error.main, fontSize: { xs: '1.5rem', sm: '2rem' } }} />
+            <Typography
+              variant="h3"
+              component="h1"
+              sx={{ fontWeight: 800, fontSize: { xs: '1.5rem', sm: '2rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}
+            >
+              Список бажань
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Бажання кожної дитини з цінами та фотографіями
           </Typography>
         </Box>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-          Бажання кожної дитини з цінами та фотографіями
-        </Typography>
 
-        {/* Filters + Stats row */}
-        <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>РІК</InputLabel>
-            <Select value={yearFilter} label="РІК" onChange={(e: SelectChangeEvent<number | 'all'>) => setYearFilter(e.target.value as number | 'all')}>
+        {/* Сводка. Раньше четыре числа стояли в одной flex-строке с фильтрами и
+            на узком экране разъезжались; теперь это сетка плиток 2×2 / 4×1. */}
+        <Grid container spacing={1.5} sx={{ mb: 2 }}>
+          {[
+            { label: 'Всього', value: `${allFilteredItems.length}`, color: colors.primary.main },
+            { label: 'Виконано', value: `${completedCount}`, color: '#34C759' },
+            { label: 'Очікують', value: `${pendingCount}`, color: '#FF9F0A' },
+            { label: 'Загальна вартість', value: `${totalCostUah} ₴`, color: colors.error.main },
+          ].map((stat) => (
+            <Grid item xs={6} md={3} key={stat.label}>
+              <Box
+                sx={{
+                  height: '100%',
+                  p: { xs: 1.25, sm: 1.75 },
+                  borderRadius: 3,
+                  background: `${stat.color}0F`,
+                  border: `1px solid ${stat.color}26`,
+                }}
+              >
+                <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.25rem', sm: '1.5rem' }, lineHeight: 1.15, color: stat.color }}>
+                  {stat.value}
+                </Typography>
+                <Typography variant="caption" sx={{ color: colors.text.secondary, fontWeight: 600 }}>
+                  {stat.label}
+                </Typography>
+              </Box>
+            </Grid>
+          ))}
+        </Grid>
+
+        {/* Filters */}
+        <Box sx={{ display: 'flex', gap: 1.5, mb: 3, flexWrap: 'wrap' }}>
+          <FormControl size="small" sx={{ minWidth: 140, flex: { xs: 1, sm: '0 0 auto' } }}>
+            <InputLabel>Рік</InputLabel>
+            <Select
+              value={yearFilter}
+              label="Рік"
+              onChange={(e: SelectChangeEvent<number | 'all'>) => setYearFilter(e.target.value as number | 'all')}
+              sx={{ borderRadius: 2 }}
+            >
               <MenuItem value="all">Всі</MenuItem>
               {availableYears.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>СТАТУС</InputLabel>
-            <Select value={statusFilter} label="СТАТУС" onChange={(e: SelectChangeEvent<'all' | 'PENDING' | 'COMPLETED'>) => setStatusFilter(e.target.value as any)}>
+          <FormControl size="small" sx={{ minWidth: 140, flex: { xs: 1, sm: '0 0 auto' } }}>
+            <InputLabel>Статус</InputLabel>
+            <Select
+              value={statusFilter}
+              label="Статус"
+              onChange={(e: SelectChangeEvent<'all' | 'PENDING' | 'COMPLETED'>) => setStatusFilter(e.target.value as any)}
+              sx={{ borderRadius: 2 }}
+            >
               <MenuItem value="all">Всі</MenuItem>
               <MenuItem value="PENDING">Очікують</MenuItem>
               <MenuItem value="COMPLETED">Виконано</MenuItem>
             </Select>
           </FormControl>
-          <Box sx={{ flex: 1 }} />
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" fontWeight={700} color="primary.main">{allFilteredItems.length}</Typography>
-              <Typography variant="caption" color="text.secondary">Всього</Typography>
-            </Box>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" fontWeight={700} color="success.main">{completedCount}</Typography>
-              <Typography variant="caption" color="text.secondary">Виконано</Typography>
-            </Box>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" fontWeight={700} color="warning.main">{pendingCount}</Typography>
-              <Typography variant="caption" color="text.secondary">Очікують</Typography>
-            </Box>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" fontWeight={700} color="error.main">{totalCost} ₴</Typography>
-              <Typography variant="caption" color="text.secondary">Загальна вартість</Typography>
-            </Box>
-          </Box>
         </Box>
 
         {/* Child sections */}
         {childGroups.map(({ child, childName, childProfileId, items }, groupIdx) => (
           <Box key={child.id} sx={{ mb: 5 }}>
-            {/* Section header */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-              <Box sx={{ width: 4, height: 28, borderRadius: 2, background: `hsl(${(groupIdx * 137) % 360}, 70%, 50%)` }} />
+            {/* Section header. На телефоне имя, счётчик и кнопка больше не
+                сжимаются в одну нечитаемую строку: кнопка уходит на всю ширину. */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ width: 4, height: 36, borderRadius: 2, background: `hsl(${(groupIdx * 137) % 360}, 70%, 50%)` }} />
               <Avatar
                 src={child.avatarUrl}
-                sx={{ width: 36, height: 36, bgcolor: `hsl(${(groupIdx * 137) % 360}, 60%, 55%)`, fontSize: '0.875rem', fontWeight: 700 }}
+                sx={{ width: 40, height: 40, bgcolor: `hsl(${(groupIdx * 137) % 360}, 60%, 55%)`, fontSize: '1rem', fontWeight: 700 }}
               >
                 {childName[0]}
               </Avatar>
-              <Typography variant="h5" fontWeight={700} color="text.primary">
-                {childName}
-              </Typography>
-              <Chip
-                label={`${items.length} бажань`}
-                size="small"
-                sx={{ fontWeight: 500, bgcolor: 'grey.100' }}
-              />
-              <Box sx={{ flex: 1 }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.2, color: colors.text.primary }}>
+                  {childName}
+                </Typography>
+                <Typography variant="caption" sx={{ color: colors.text.secondary, fontWeight: 600 }}>
+                  {items.length} {pluralWishes(items.length)}
+                  {items.length > 0 && ` · ${items.reduce((sum, i) => sum + pointsToUah(i.rewardGoal?.costPoints || 0, conversionRate), 0)} ₴`}
+                </Typography>
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 8 }} />
               <Button
                 variant="contained"
                 size="small"
@@ -426,6 +474,8 @@ export default function ParentWishlist() {
                   borderRadius: 2,
                   fontWeight: 600,
                   px: 2,
+                  textTransform: 'none',
+                  width: { xs: '100%', sm: 'auto' },
                   background: colors.primary.main,
                   '&:hover': { background: colors.primary.dark },
                 }}
@@ -435,6 +485,8 @@ export default function ParentWishlist() {
             </Box>
 
             {items.length === 0 ? (
+              // Пустой блок под фильтром — не «первое бажання», а «ничего не
+              // нашлось»: предлагать добавить при активном фильтре сбивало.
               <Box
                 sx={{
                   border: '2px dashed',
@@ -442,132 +494,147 @@ export default function ParentWishlist() {
                   borderRadius: 3,
                   py: 4,
                   textAlign: 'center',
-                  cursor: 'pointer',
+                  cursor: filtersActive ? 'default' : 'pointer',
                   transition: 'border-color 0.2s',
-                  '&:hover': { borderColor: 'primary.main' },
+                  '&:hover': { borderColor: filtersActive ? 'divider' : 'primary.main' },
                 }}
-                onClick={() => handleAddWish(child.id)}
+                onClick={filtersActive ? undefined : () => handleAddWish(child.id)}
               >
-                <AddIcon sx={{ fontSize: 32, color: 'text.disabled', mb: 1 }} />
+                {!filtersActive && <AddIcon sx={{ fontSize: 32, color: 'text.disabled', mb: 1 }} />}
                 <Typography color="text.secondary" variant="body2">
-                  Додайте перше бажання для {childName}
+                  {filtersActive
+                    ? `Немає бажань за обраними фільтрами`
+                    : `Додайте перше бажання для ${childName}`}
                 </Typography>
               </Box>
             ) : (
               <Grid container spacing={2}>
-                {items.map((item) => (
-                  <Grid item xs={12} sm={6} md={4} key={item.id}>
-                    <AnimatedCard hover>
-                      <Box sx={{ position: 'relative' }}>
-                        {item.rewardGoal?.imageUrl && (
-                          <Box
-                            component="img" loading="lazy" decoding="async"
-                            src={item.rewardGoal.imageUrl}
-                            alt={item.rewardGoal.title}
-                            onClick={() => { setViewingImageUrl(item.rewardGoal!.imageUrl!); setImageViewerOpen(true) }}
-                            sx={{
-                              width: '100%',
-                              height: 180,
-                              objectFit: 'cover',
-                              borderRadius: 2,
-                              mb: 1.5,
-                              border: `1.5px solid ${colors.primary.main}`,
-                              cursor: 'pointer',
-                              transition: 'transform 0.2s',
-                              '&:hover': { transform: 'scale(1.02)' },
-                            }}
-                            onError={(e: any) => { e.target.style.display = 'none' }}
-                          />
-                        )}
+                {items.map((item) => {
+                  const costPoints = item.rewardGoal?.costPoints || 0
+                  const priceUah = pointsToUah(costPoints, conversionRate)
+                  const isDone = item.status === 'COMPLETED'
+                  const imageUrl = item.rewardGoal?.imageUrl
 
-                        {/* Title + actions */}
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
-                          <Typography variant="body1" fontWeight={700} sx={{ flex: 1, mr: 1 }}>
-                            {item.rewardGoal?.title || 'Без назви'}
-                          </Typography>
-                          <Box sx={{ display: 'flex', gap: 0.25 }}>
-                            <IconButton
-                              size="small"
-                              onClick={() => toggleFavoriteMutation.mutate({ id: item.id, isFavorite: !isFav(item) })}
-                              disabled={toggleFavoriteMutation.isPending}
-                              sx={{ color: isFav(item) ? '#FFD700' : 'inherit', '&:hover': { color: '#FFD700', bgcolor: '#FFD70015' } }}
-                            >
-                              {isFav(item) ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
-                            </IconButton>
-                            <IconButton size="small" color="primary" onClick={() => handleEditWish(item)}>
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              color={item.status === 'COMPLETED' ? 'success' : 'default'}
-                              onClick={() => updateStatusMutation.mutate({ id: item.id, status: item.status === 'COMPLETED' ? 'PENDING' : 'COMPLETED' })}
-                              disabled={updateStatusMutation.isPending}
-                            >
-                              <CheckCircleIcon fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => deleteMutation.mutate(item.id)}
-                              disabled={deleteMutation.isPending}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                        </Box>
+                  /* Прогресс «Зібрано / Ціна».
+                     Источники:
+                       • currentBalance ребёнка (баллы → ₴ по курсу) — деньги,
+                         которые ещё «на руках» и могут пойти на цель;
+                       • item.moneySpent — уже физически выплачено за эту цель
+                         прошлыми exchange-доставками (ExchangesService.deliverExchange).
+                     Backend в /children/:id/summary считает то же самое
+                     (children.service.ts:256). */
+                  const balancePoints = childProfileId ? (childBalancePointsById[childProfileId] || 0) : 0
+                  const alreadyPaidUah = Math.round(((item as any).moneySpent || 0) / 100)
+                  const accumulatedUah = Math.min(pointsToUah(balancePoints, conversionRate) + alreadyPaidUah, priceUah)
+                  const pct = priceUah > 0 ? Math.min(100, Math.round((accumulatedUah / priceUah) * 100)) : 0
 
-                        {/* Price + status */}
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
-                          <Typography variant="h6" fontWeight={700} color="primary.main">
-                            {((item.rewardGoal?.costPoints || 0) / Math.max(1, conversionRate)).toFixed(0)} ₴
-                          </Typography>
-                          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                            {item.year && (
-                              <Chip label={item.year} size="small" variant="outlined" sx={{ fontSize: '0.7rem', height: 20 }} />
-                            )}
-                            {isFav(item) && (
-                              <Chip label="⭐ Пріоритет" size="small" sx={{ bgcolor: '#FFF9C4', fontSize: '0.7rem', height: 20 }} />
-                            )}
-                            <Chip
-                              label={item.status === 'COMPLETED' ? 'Виконано' : 'Очікує'}
-                              color={item.status === 'COMPLETED' ? 'success' : 'default'}
-                              size="small"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
+                  return (
+                  <Grid item xs={12} sm={6} md={4} lg={3} key={item.id}>
+                    <AnimatedCard hover sx={{ borderRadius: 3, border: `1px solid ${isDone ? '#34C75955' : '#EDEDF0'}` }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                        {/* Медиа во всю ширину карточки и одной высоты у всех:
+                            раньше карточка без фото была вдвое ниже соседней,
+                            и ряд «прыгал». Без фото — мягкая заливка с сердцем. */}
+                        <Box
+                          onClick={imageUrl ? () => { setViewingImageUrl(imageUrl); setImageViewerOpen(true) } : undefined}
+                          sx={{
+                            position: 'relative',
+                            mx: { xs: -2, sm: -3 },
+                            mt: { xs: -2, sm: -3 },
+                            mb: 1.5,
+                            height: 170,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            overflow: 'hidden',
+                            cursor: imageUrl ? 'zoom-in' : 'default',
+                            background: `linear-gradient(135deg, ${colors.primary.main}14 0%, ${colors.error.main}14 100%)`,
+                          }}
+                        >
+                          {imageUrl ? (
+                            <Box
+                              component="img" loading="lazy" decoding="async"
+                              src={imageUrl}
+                              alt={item.rewardGoal?.title || 'Бажання'}
+                              sx={{
+                                width: '100%', height: '100%', objectFit: 'cover',
+                                opacity: isDone ? 0.75 : 1,
+                                transition: 'transform 0.25s',
+                                '&:hover': { transform: 'scale(1.03)' },
+                              }}
+                              onError={(e: any) => { e.target.style.display = 'none' }}
                             />
-                          </Box>
+                          ) : (
+                            <FavoriteIcon sx={{ fontSize: 44, color: `${colors.error.main}44` }} />
+                          )}
+
+                          {/* Пріоритет — поверх фото. В ряду из четырёх иконок
+                              рядом с названием он отжимал текст в две строки. */}
+                          <Tooltip title={isFav(item) ? 'Прибрати пріоритет' : 'Зробити пріоритетним'}>
+                            <span style={{ position: 'absolute', top: 8, left: 8, display: 'inline-flex' }}>
+                              <IconButton
+                                size="small"
+                                onClick={(e) => { e.stopPropagation(); toggleFavoriteMutation.mutate({ id: item.id, isFavorite: !isFav(item) }) }}
+                                disabled={toggleFavoriteMutation.isPending}
+                                sx={{
+                                  bgcolor: 'rgba(255,255,255,0.92)',
+                                  color: isFav(item) ? '#F5A623' : '#8E8E93',
+                                  boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+                                  '&:hover': { bgcolor: '#fff', color: '#F5A623' },
+                                }}
+                              >
+                                {isFav(item) ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+
+                          <Chip
+                            label={isDone ? 'Виконано' : 'Очікує'}
+                            size="small"
+                            sx={{
+                              position: 'absolute', top: 8, right: 8,
+                              height: 22, fontSize: '0.7rem', fontWeight: 700,
+                              bgcolor: isDone ? '#34C759' : 'rgba(255,255,255,0.92)',
+                              color: isDone ? '#fff' : '#636366',
+                            }}
+                          />
                         </Box>
 
-                        {/* Прогресс «Собрано / Цена».
-                            Источники:
-                              • currentBalance ребёнка (баллы → ₴ по курсу) —
-                                деньги, которые ещё «на руках» и могут пойти на цель;
-                              • item.moneySpent — уже физически выплачено за эту
-                                цель прошлыми exchange-доставками
-                                (backend ExchangesService.deliverExchange).
-                            Backend в /children/:id/summary считает то же самое
-                            (children.service.ts:256). */}
-                        {item.status !== 'COMPLETED' && (() => {
-                          const costPoints = item.rewardGoal?.costPoints || 0
-                          const priceCents = Math.round((costPoints / Math.max(1, conversionRate)) * 100)
-                          // Берём баланс ребёнка-владельца текущей группы.
-                          const balancePoints = childProfileId ? (childBalancePointsById[childProfileId] || 0) : 0
-                          const liveBalanceCents = Math.round((balancePoints / Math.max(1, conversionRate)) * 100)
-                          const alreadyPaidCents = (item as any).moneySpent || 0
-                          const accumulated = Math.min(liveBalanceCents + alreadyPaidCents, priceCents)
-                          const pct = priceCents > 0 ? Math.min(100, Math.round(accumulated / priceCents * 100)) : 0
-                          const accUah = (accumulated / 100).toFixed(0)
-                          const priceUah = (priceCents / 100).toFixed(0)
-                          return (
-                            <Box sx={{ mt: 1.5 }}>
+                        {/* Название в две строки: длинное больше не растягивает карточку */}
+                        <Typography
+                          title={item.rewardGoal?.title || ''}
+                          sx={{
+                            fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.35,
+                            color: colors.text.primary,
+                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden', minHeight: '2.7em',
+                          }}
+                        >
+                          {item.rewardGoal?.title || 'Без назви'}
+                        </Typography>
+
+                        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, mt: 0.75 }}>
+                          <Typography sx={{ fontWeight: 800, fontSize: '1.25rem', color: colors.primary.main }}>
+                            {priceUah} ₴
+                          </Typography>
+                          {item.year && (
+                            <Chip label={item.year} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                          )}
+                        </Box>
+
+                        <Box sx={{ mt: 1.5 }}>
+                          {isDone ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#34C759' }}>
+                              <CheckCircleIcon sx={{ fontSize: '1rem' }} />
+                              <Typography variant="caption" sx={{ fontWeight: 700 }}>Бажання виконано</Typography>
+                            </Box>
+                          ) : (
+                            <>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                <Typography variant="caption" color="text.secondary">
-                                  💰 Собрано
+                                <Typography variant="caption" color="text.secondary">💰 Зібрано</Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 700 }} color={pct >= 100 ? 'success.main' : 'text.primary'}>
+                                  {accumulatedUah} / {priceUah} ₴ ({pct}%)
                                 </Typography>
-                                <Tooltip title={`${accUah} ₴ из ${priceUah} ₴`}>
-                                  <Typography variant="caption" fontWeight={700} color={pct >= 100 ? 'success.main' : 'text.primary'}>
-                                    {accUah} / {priceUah} ₴ ({pct}%)
-                                  </Typography>
-                                </Tooltip>
                               </Box>
                               <LinearProgress
                                 variant="determinate"
@@ -582,13 +649,49 @@ export default function ParentWishlist() {
                                   },
                                 }}
                               />
-                            </Box>
-                          )
-                        })()}
+                            </>
+                          )}
+                        </Box>
+
+                        {/* Действия прижаты к низу — во всех карточках ряда на одной линии */}
+                        <Box sx={{ flex: 1 }} />
+                        <Divider sx={{ my: 1.5, mx: { xs: -2, sm: -3 } }} />
+                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
+                          <Tooltip title="Редагувати">
+                            <IconButton size="small" onClick={() => handleEditWish(item)} sx={{ color: colors.primary.main, bgcolor: `${colors.primary.main}10`, borderRadius: 1.5, '&:hover': { bgcolor: `${colors.primary.main}22` } }}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={isDone ? 'Повернути в очікування' : 'Позначити виконаним'}>
+                            <span style={{ display: 'inline-flex' }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => updateStatusMutation.mutate({ id: item.id, status: isDone ? 'PENDING' : 'COMPLETED' })}
+                                disabled={updateStatusMutation.isPending}
+                                sx={{ color: isDone ? '#34C759' : '#8E8E93', bgcolor: isDone ? '#34C75918' : '#F2F2F7', borderRadius: 1.5, '&:hover': { bgcolor: '#34C75922', color: '#34C759' } }}
+                              >
+                                <CheckCircleIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Видалити">
+                            <span style={{ display: 'inline-flex' }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => setItemToDelete(item)}
+                                disabled={deleteMutation.isPending}
+                                sx={{ color: '#FF3B30', bgcolor: '#FF3B3010', borderRadius: 1.5, '&:hover': { bgcolor: '#FF3B3022' } }}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Box>
                       </Box>
                     </AnimatedCard>
                   </Grid>
-                ))}
+                  )
+                })}
               </Grid>
             )}
 
@@ -603,9 +706,18 @@ export default function ParentWishlist() {
         )}
 
         {/* Add/Edit Dialog */}
-        <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3, overflow: 'hidden' } }}>
-          <Box sx={{ background: 'linear-gradient(135deg, #7B2CBF 0%, #9D4EDD 100%)', color: 'white', p: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography variant="h5" fontWeight={700}>
+        <Dialog
+          open={dialogOpen}
+          onClose={handleCloseDialog}
+          maxWidth="sm"
+          fullWidth
+          // На телефоне форма занимала середину экрана с полями по краям —
+          // как на странице заданий, разворачиваем её на весь экран.
+          fullScreen={typeof window !== 'undefined' && window.innerWidth < 600}
+          PaperProps={{ sx: { borderRadius: { xs: 0, sm: 3 }, overflow: 'hidden' } }}
+        >
+          <Box sx={{ background: 'linear-gradient(135deg, #7B2CBF 0%, #9D4EDD 100%)', color: 'white', p: { xs: 2, sm: 3 }, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 1 }}>
+            <Typography variant="h5" sx={{ fontWeight: 700, fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
               {editingItem ? 'Редагувати бажання' : 'Нове бажання'}
             </Typography>
             <IconButton size="small" onClick={handleCloseDialog} sx={{ color: 'white' }}>
@@ -711,6 +823,31 @@ export default function ParentWishlist() {
               sx={{ borderRadius: 2, fontWeight: 600, px: 3, background: colors.primary.main }}
             >
               {isSubmitting ? <CircularProgress size={20} color="inherit" /> : editingItem ? 'Зберегти' : 'Додати'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Удаление подтверждаем: раньше промах по корзине стирал бажання без вопросов */}
+        <Dialog open={!!itemToDelete} onClose={() => setItemToDelete(null)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+          <DialogContent sx={{ pt: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Видалити бажання?</Typography>
+            <Typography variant="body2" color="text.secondary">
+              «{itemToDelete?.rewardGoal?.title || 'Без назви'}» буде видалено зі списку. Цю дію не можна скасувати.
+            </Typography>
+          </DialogContent>
+          <DialogActions sx={{ p: 3, pt: 0, gap: 1 }}>
+            <Button onClick={() => setItemToDelete(null)} variant="outlined" sx={{ borderRadius: 2 }}>Скасувати</Button>
+            <Button
+              onClick={() => {
+                if (itemToDelete) deleteMutation.mutate(itemToDelete.id)
+                setItemToDelete(null)
+              }}
+              variant="contained"
+              color="error"
+              disabled={deleteMutation.isPending}
+              sx={{ borderRadius: 2, fontWeight: 600 }}
+            >
+              Видалити
             </Button>
           </DialogActions>
         </Dialog>
