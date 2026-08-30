@@ -27,7 +27,6 @@ import {
 } from '@mui/material'
 import CancelIcon from '@mui/icons-material/Cancel'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
 import AddCircleIcon from '@mui/icons-material/AddCircle'
@@ -35,14 +34,9 @@ import RemoveCircleIcon from '@mui/icons-material/RemoveCircle'
 import TodayIcon from '@mui/icons-material/Today'
 import { motion } from 'framer-motion'
 import Layout from '../../components/Layout'
-import ActivityCalendar from '../../components/ActivityCalendar'
-import ChildSwitcher from '../../components/ChildSwitcher'
-import AnimatedStatisticsChart from '../../components/AnimatedStatisticsChart'
+import { ChildOverviewCard } from '../../components/ChildOverviewCard'
 import { ChildStatsCard } from '../../components/ChildStatsCard'
-import { MetricCard } from '../../components/MetricCard'
-import { PriorityGoalCard } from '../../components/PriorityGoalCard'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import AcUnitIcon from '@mui/icons-material/AcUnit'
 import GroupAddIcon from '@mui/icons-material/GroupAdd'
 import { colors } from '../../theme'
 import {
@@ -53,11 +47,8 @@ import {
   useApproveCompletion,
   useRejectCompletion,
   useChildBadges,
-  useChildSummary,
 } from '../../hooks'
-import { calculateSatietyPercent, getSatietyColor } from '../../utils/satiety'
 import { formatDateForAPI, isToday, formatDateForDisplay } from '../../utils/dateUtils'
-import { convertPointsToCents, calculateProgress } from '../../utils/calculationUtils'
 import type { Completion } from '../../types/api'
 import { api } from '../../lib/api'
 
@@ -148,27 +139,7 @@ export default function ParentHome() {
   // Все хуки должны вызываться в одном и том же порядке всегда
   // ВАЖНО: Хуки вызываются ВСЕГДА, даже если selectedChildId undefined
   const { data: childBadges } = useChildBadges(selectedChildId)
-  const { data: childSummary } = useChildSummary(selectedChildId || '')
 
-  // Курс конвертации (баллы → деньги) из настроек семьи.
-  // Используется во всех расчётах прогресса целей.
-  const { data: motivationSettings } = useQuery({
-    queryKey: ['motivation-settings'],
-    queryFn: async () => {
-      try {
-        const response = await api.get('/motivation/settings')
-        return response.data
-      } catch {
-        return { conversionRate: 10 }
-      }
-    },
-    staleTime: 5 * 60 * 1000,
-  })
-  const conversionRate = (() => {
-    const raw = motivationSettings?.conversionRate
-    const num = typeof raw === 'string' ? parseFloat(raw) : raw
-    return num && num > 0 ? num : 10
-  })()
 
   // Челленджи для главной страницы
   const { data: challengesData } = useQuery({
@@ -209,39 +180,6 @@ export default function ParentHome() {
     staleTime: 30 * 1000,
   })
 
-  // Получаем wishlist для выбранного ребенка
-  const { data: wishlistItems } = useQuery({
-    queryKey: ['wishlist', 'parent', selectedChildId],
-    queryFn: async () => {
-      if (!selectedChildId) return []
-      try {
-        const response = await api.get(`/wishlist/parent/wishlist?childId=${selectedChildId}`)
-        const items = response.data || []
-        // Логируем для отладки в development
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[Home] Fetched wishlist items:', items.map((item: any) => ({
-            id: item.id,
-            title: item.rewardGoal?.title,
-            isFavorite: item.isFavorite,
-            hasRewardGoal: !!item.rewardGoal
-          })))
-        }
-        return items
-      } catch (error: any) {
-        // Логируем только в development
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Failed to fetch wishlist:', error)
-        }
-        // Возвращаем пустой массив вместо ошибки
-        return []
-      }
-    },
-    enabled: !!selectedChildId,
-    retry: 1,
-    staleTime: 5 * 1000, // Уменьшаем staleTime для более частого обновления (5 секунд)
-    refetchOnWindowFocus: true, // Обновляем при фокусе окна
-    refetchOnMount: true, // Обновляем при монтировании
-  })
 
   const addBonusMutation = useMutation({
     mutationFn: async ({
@@ -308,129 +246,8 @@ export default function ParentHome() {
     },
   })
 
-  // Находим избранное желание
-  const favoriteWish = useMemo(() => {
-    try {
-      if (!wishlistItems || wishlistItems.length === 0) return null
-      
-      // Ищем избранное желание - проверяем разные форматы isFavorite
-      const found = wishlistItems.find((item: any) => {
-        if (!item || !item.rewardGoal) return false // Пропускаем элементы без rewardGoal
-        const isFavorite = item.isFavorite
-        return isFavorite === true || 
-               isFavorite === 'true' || 
-               isFavorite === 1 ||
-               isFavorite === '1' ||
-               String(isFavorite).toLowerCase() === 'true'
-      })
-      
-      // Логируем для отладки в development
-      if (process.env.NODE_ENV === 'development') {
-        if (wishlistItems.length > 0) {
-          console.log('[Home] Wishlist items:', wishlistItems.map((item: any) => ({
-            id: item.id,
-            title: item.rewardGoal?.title,
-            isFavorite: item.isFavorite,
-            isFavoriteType: typeof item.isFavorite,
-            hasRewardGoal: !!item.rewardGoal
-          })))
-        }
-        if (found) {
-          console.log('[Home] ✅ Found favorite wish:', {
-            id: found.id,
-            title: found.rewardGoal?.title,
-            isFavorite: found.isFavorite
-          })
-        } else {
-          console.log('[Home] ⚠️ No favorite wish found')
-        }
-      }
-      
-      return found || null
-    } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('[Home] Error finding favorite wish:', error)
-      }
-      return null
-    }
-  }, [wishlistItems])
 
-  // Вычисляем прогресс для избранного желания
-  const favoriteWishProgress = useMemo(() => {
-    try {
-      // Всегда возвращаем объект прогресса, даже если данных нет
-      if (!favoriteWish || !favoriteWish.rewardGoal) {
-        return {
-          current: 0,
-          target: 0,
-          percentage: 0,
-          availableMoneyCents: 0,
-          moneySpentOnThis: 0,
-          remainingCents: 0,
-          progressPercent: 0,
-        }
-      }
-      
-      // Используем курс из настроек семьи, как и бэкенд для goalProgress.
-      const costPoints = favoriteWish.rewardGoal.costPoints || 0
-      const costMoneyCents = convertPointsToCents(costPoints, conversionRate)
 
-      // Текущий баланс ребёнка (в баллах) → доступные деньги.
-      const currentBalance = selectedChild?.currentBalance || 0
-      const availableMoneyCents = convertPointsToCents(currentBalance, conversionRate)
-
-      // Уже физически выплаченные деньги именно за эту цель растут в
-      // wishlist.moneySpent (см. ExchangesService.deliverExchange).
-      // Их нужно прибавлять к накопленным баллам — иначе после первой
-      // доставки прогресс просядет, хотя цель ближе.
-      const alreadyPaidCents = (favoriteWish as any)?.moneySpent || 0
-      const moneySpentOnThis = Math.min(availableMoneyCents + alreadyPaidCents, costMoneyCents)
-      const remainingCents = Math.max(0, costMoneyCents - moneySpentOnThis)
-      
-      const progressPercent = calculateProgress(moneySpentOnThis, costMoneyCents)
-
-      return {
-        current: moneySpentOnThis,
-        target: costMoneyCents,
-        percentage: progressPercent,
-        availableMoneyCents,
-        moneySpentOnThis,
-        remainingCents,
-        progressPercent,
-      }
-    } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('[Home] Error calculating favorite wish progress:', error)
-      }
-      // Возвращаем дефолтный прогресс при ошибке
-      return {
-        current: 0,
-        target: 0,
-        percentage: 0,
-        availableMoneyCents: 0,
-        moneySpentOnThis: 0,
-        remainingCents: 0,
-        progressPercent: 0,
-      }
-    }
-  }, [favoriteWish, selectedChild, conversionRate])
-
-  // Безопасный объект цели для избранного желания (всегда объект или null) — для рендера без доступа к вложенным полям
-  const favoriteWishGoalSafe = useMemo(() => {
-    try {
-      if (!favoriteWish?.rewardGoal || !selectedChild) return null
-      const rg = favoriteWish.rewardGoal
-      return {
-        id: rg.id ?? '',
-        title: rg.title ?? 'Желание',
-        description: rg.description,
-        imageUrl: rg.imageUrl,
-        costPoints: Number(rg.costPoints) || 0,
-      }
-    } catch {
-      return null
-    }
-  }, [favoriteWish, selectedChild])
 
   const approveCompletion = useApproveCompletion()
   const rejectCompletion = useRejectCompletion()
@@ -560,22 +377,6 @@ export default function ParentHome() {
     setSelectedDate(new Date())
   }, [])
 
-  // Обработчик изменения выбранного ребенка (мемоизирован)
-  const handleChildChange = useCallback((newIndex: number) => {
-    // Гарантируем, что индекс всегда валидный
-    if (normalizedChildrenStats.length > 0) {
-      const safeIndex = Math.max(0, Math.min(newIndex, normalizedChildrenStats.length - 1))
-      setSelectedChildIndex(safeIndex)
-    } else {
-      setSelectedChildIndex(0)
-    }
-  }, [normalizedChildrenStats.length])
-
-  // Вычисляем сытость ДО условных возвратов (это обычные вычисления, не хуки)
-  const saturationPercent = selectedChild
-    ? calculateSatietyPercent(selectedChild.todayPointsBalance ?? 0)
-    : 0
-  const saturationColor = getSatietyColor(saturationPercent)
 
   // Условный возврат ПОСЛЕ ВСЕХ хуков (useMemo, useCallback)
   // ВАЖНО: Проверяем isLoading и normalizedChildrenStats (а не childrenStats напрямую)
@@ -823,38 +624,58 @@ export default function ParentHome() {
           </Box>
         </motion.div>
 
-        {/* Список всех детей */}
+        {/* Дети — все сразу, каждый в своей карточке.
+            Раньше здесь было шесть секций подряд (график баллов, аналитика,
+            цель, ударный режим и сытость, календарь активности) — и все они
+            показывали ОДНОГО ребёнка, выбранного вкладкой. Чтобы посмотреть
+            второго, приходилось листать два экрана и переключать вкладку.
+            Те же цифры теперь лежат в карточке, поэтому вся семья видна
+            одновременно и умещается на первом экране. */}
         {childrenStats && childrenStats.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, duration: 0.5 }}
-            style={{ marginBottom: '32px' }}
+            style={{ marginBottom: '24px' }}
           >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-              <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #007AFF 0%, #5856D6 100%)' }} />
-              <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+              <Box sx={{ width: 4, height: 20, borderRadius: 2, background: 'linear-gradient(180deg, #007AFF 0%, #5856D6 100%)' }} />
+              <Typography sx={{ fontWeight: 800, fontSize: '1.125rem', color: colors.text.primary, letterSpacing: '-0.02em' }}>
                 Дети
               </Typography>
+              <Typography sx={{ fontSize: '0.75rem', color: colors.text.secondary }}>
+                нажмите на карточку, чтобы раскрыть детали ниже
+              </Typography>
             </Box>
-            <Grid container spacing={3}>
+            <Grid container spacing={2}>
               {childrenStats.map((childStat: any, index: number) => {
-                const pendingCount = pendingCompletions?.filter((c: Completion) => 
+                const pendingCount = pendingCompletions?.filter((c: Completion) =>
                   c.child?.id === childStat.childId || c.childId === childStat.childId
                 ).length || 0
-                
+
                 return (
-                  <Grid item xs={12} sm={6} md={4} key={childStat.childId}>
-                    <ChildStatsCard
+                  <Grid item xs={12} md={6} xl={4} key={childStat.childId}>
+                    <ChildOverviewCard
+                      childId={childStat.childId}
                       childName={childStat.childName || 'Ребенок'}
-                      pointsBalance={childStat.currentBalance || 0}
+                      currentBalance={childStat.currentBalance || 0}
                       todayPointsBalance={childStat.todayPointsBalance || 0}
                       totalPointsEarned={childStat.totalPointsEarned || 0}
                       totalPointsSpent={childStat.totalPointsSpent || 0}
-                      pendingCompletions={pendingCount}
-                      onClick={() => {
-                        setSelectedChildIndex(index)
-                      }}
+                      completedTasksCount={childStat.completedTasksCount || 0}
+                      maxStreak={childStat.maxStreak || 0}
+                      totalMoneyEarned={childStat.totalMoneyEarned || 0}
+                      pendingCount={pendingCount}
+                      index={index}
+                      selected={safeSelectedChildIndex === index}
+                      date={selectedDate}
+                      onSelect={() => setSelectedChildIndex(index)}
+                      onBonus={() => setBonusDialog((prev) => ({
+                        ...prev, open: true, mode: 'bonus', childId: childStat.childId, amount: '', reason: '',
+                      }))}
+                      onPenalty={() => setBonusDialog((prev) => ({
+                        ...prev, open: true, mode: 'penalty', childId: childStat.childId, amount: '', reason: '',
+                      }))}
                     />
                   </Grid>
                 )
@@ -863,468 +684,81 @@ export default function ParentHome() {
           </motion.div>
         )}
 
-        <ChildSwitcher 
-          value={Math.max(0, safeSelectedChildIndex)} 
-          onChange={handleChildChange} 
-          hideAllChildren={true}
-          childrenStats={normalizedChildrenStats}
-          isLoading={isLoading}
-        />
-
-        {normalizedChildrenStats.length > 0 && (
-          <Box sx={{ mt: 1, mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Button
-              variant="outlined"
-              color="primary"
-              startIcon={<AddCircleIcon />}
-              onClick={() => setBonusDialog((prev) => ({
-                ...prev,
-                open: true,
-                mode: 'bonus',
-                childId: selectedChildId || normalizedChildrenStats[0]?.childId || '',
-                amount: '',
-                reason: '',
-              }))}
-              sx={{ fontWeight: 600 }}
-            >
-              Начислить баллы
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<RemoveCircleIcon />}
-              onClick={() => setBonusDialog((prev) => ({
-                ...prev,
-                open: true,
-                mode: 'penalty',
-                childId: selectedChildId || normalizedChildrenStats[0]?.childId || '',
-                amount: '',
-                reason: '',
-              }))}
-              sx={{ fontWeight: 600 }}
-            >
-              Штрафовать
-            </Button>
-          </Box>
-        )}
-
-        {/* Статистика по баллам и деньгам - АНИМИРОВАННЫЙ ГРАФИК */}
-        {selectedChild && safeSelectedChildIndex >= 0 && (
-          <Box sx={{ mb: 4 }}>
-            <AnimatedStatisticsChart
-              data={{
-                totalPointsEarned: selectedChild.totalPointsEarned || 0,
-                totalPointsSpent: selectedChild.totalPointsSpent || 0,
-                currentBalance: selectedChild.currentBalance || 0,
-                moneyEarned: selectedChild.moneyEarned || 0,
-                childName: selectedChild.childName || 'Ребенок',
-              }}
-            />
-          </Box>
-        )}
-
-        {/* Аналитика для выбранного ребенка - ПЕРЕМЕЩЕНА ВВЕРХ */}
+        {/* Детали выбранного ребёнка: то, что не имеет смысла дублировать в
+            каждой карточке. Компактной строкой вместо двух полноразмерных
+            блоков. */}
         {selectedChild && safeSelectedChildIndex >= 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ delay: 0.15, duration: 0.4 }}
+            style={{ marginBottom: '24px' }}
           >
-            <Box sx={{ mb: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #5856D6 0%, #AF52DE 100%)' }} />
-                <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                  Аналитика · {selectedChild.childName}
-                </Typography>
-              </Box>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <MetricCard
-                    title="Всего выполнено"
-                    value={analyticsData.totalCompletions}
-                    unit=""
-                    current={analyticsData.totalCompletions}
-                    target={1000}
-                    icon="✅"
-                    color="#667EEA"
-                    description="За все время"
-                    gradient={['#667EEA', '#764BA2']}
-                    showProgress={false}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <MetricCard
-                    title="За неделю"
-                    value={analyticsData.weeklyCompletions}
-                    unit=""
-                    current={analyticsData.weeklyCompletions}
-                    target={50}
-                    icon="📅"
-                    color="#764BA2"
-                    description="Последние 7 дней"
-                    gradient={['#764BA2', '#9D7DC0']}
-                    showProgress={false}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <MetricCard
-                    title="За месяц"
-                    value={analyticsData.monthlyCompletions}
-                    unit=""
-                    current={analyticsData.monthlyCompletions}
-                    target={200}
-                    icon="📆"
-                    color="#48BB78"
-                    description="Последние 30 дней"
-                    gradient={['#48BB78', '#38B081']}
-                    showProgress={false}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <MetricCard
-                    title="Streak"
-                    value={(() => {
-                      const streakState = selectedChild?.streakState as { currentStreak?: number } | { currentStreak?: number }[] | undefined
-                      if (Array.isArray(streakState)) {
-                        return Math.max(...streakState.map((s: any) => s.currentStreak || 0), 0)
-                      }
-                      return (streakState as { currentStreak?: number })?.currentStreak || 0
-                    })()}
-                    unit="дн"
-                    current={(() => {
-                      const streakState = selectedChild?.streakState as { currentStreak?: number } | { currentStreak?: number }[] | undefined
-                      if (Array.isArray(streakState)) {
-                        return Math.max(...streakState.map((s: any) => s.currentStreak || 0), 0)
-                      }
-                      return (streakState as { currentStreak?: number })?.currentStreak || 0
-                    })()}
-                    target={30}
-                    icon="🔥"
-                    color="#ED8936"
-                    description="Дней подряд"
-                    gradient={['#ED8936', '#DD6B20']}
-                    showProgress={false}
-                  />
-                </Grid>
-                {analyticsData.topTasks && analyticsData.topTasks.length > 0 && (
-                  <Grid item xs={12}>
-                    <Card variant="outlined">
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ fontWeight: 700 }}>
-                          Топ заданий
-                        </Typography>
-                        {analyticsData.topTasks.map((task: any, index: number) => (
-                          <Box key={task.title} sx={{ mb: 2 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                              <Typography variant="body2">
-                                {index + 1}. {task.title}
-                              </Typography>
-                              <Typography variant="body2" fontWeight="bold">
-                                {task.count} раз
-                              </Typography>
-                            </Box>
-                            <LinearProgress
-                              variant="determinate"
-                              value={(task.count / analyticsData.topTasks[0].count) * 100}
-                              sx={{ height: 6, borderRadius: 3 }}
-                            />
+            <Card variant="outlined" sx={{ border: '1.5px solid #E5E5EA', borderRadius: '12px', boxShadow: 'none' }}>
+              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={8}>
+                    <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', color: colors.text.secondary, mb: 1 }}>
+                      ТОП ЗАДАНИЙ · {selectedChild.childName}
+                    </Typography>
+                    {analyticsData.topTasks.length > 0 ? (
+                      analyticsData.topTasks.slice(0, 5).map((task: any, i: number) => (
+                        <Box key={i} sx={{ mb: 0.75 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+                            <Typography sx={{ fontSize: '0.75rem', minWidth: 0 }} noWrap>
+                              {i + 1}. {task.title}
+                            </Typography>
+                            <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              {task.count} раз
+                            </Typography>
                           </Box>
-                        ))}
-                      </CardContent>
-                    </Card>
+                          <LinearProgress
+                            variant="determinate"
+                            value={(task.count / analyticsData.topTasks[0].count) * 100}
+                            sx={{ height: 4, borderRadius: 2, mt: 0.25 }}
+                          />
+                        </Box>
+                      ))
+                    ) : (
+                      <Typography sx={{ fontSize: '0.8rem', color: colors.text.secondary }}>Пока нет выполненных заданий</Typography>
+                    )}
                   </Grid>
-                )}
-              </Grid>
-            </Box>
-          </motion.div>
-        )}
-
-        {/* Приоритетная цель выбранного ребенка */}
-        {selectedChild && childSummary?.activeGoal && childSummary?.goalProgress && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.05 }}
-            style={{ marginBottom: '32px' }}
-          >
-            <PriorityGoalCard
-              goal={childSummary.activeGoal}
-              progress={childSummary.goalProgress || { current: 0, target: 0, percentage: 0 }}
-              conversionRate={conversionRate}
-            />
-          </motion.div>
-        )}
-
-        {/* Избранное желание — показываем только если это не та же цель, что уже в блоке «Приоритетная цель» выше */}
-        {selectedChild && favoriteWishGoalSafe && favoriteWishProgress && childSummary?.activeGoal?.id !== favoriteWishGoalSafe.id && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            style={{ marginBottom: '32px' }}
-          >
-            <Box sx={{ mb: 2 }}>
-              <Typography
-                variant="h4"
-                component="h2"
-                sx={{
-                  mb: 2,
-                  fontWeight: 700,
-                  color: colors.text.primary,
-                  letterSpacing: '-0.02em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                }}
-              >
-                ⭐ Избранное желание
-              </Typography>
-            </Box>
-            <PriorityGoalCard goal={favoriteWishGoalSafe} progress={favoriteWishProgress} conversionRate={conversionRate} />
-          </motion.div>
-        )}
-
-        {/* Блок с карточками: Ударный режим, Сытость, Календарь */}
-        {selectedChild && childrenStats && childrenStats.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-          >
-            <Box sx={{ mb: 2 }}>
-              <Grid container spacing={2}>
-                {/* Ударный режим */}
-                <Grid item xs={12} sm={6}>
-                  <MetricCard
-                    title="Ударный режим"
-                    value={(() => {
-                      const streakState = selectedChild?.streakState as { currentStreak?: number } | { currentStreak?: number }[] | undefined
-                      if (Array.isArray(streakState)) {
-                        return Math.max(...streakState.map((s: any) => s.currentStreak || 0), 0)
-                      }
-                      return (streakState as { currentStreak?: number })?.currentStreak || (selectedChild as any).streak || (selectedChild as any).maxStreak || 0
-                    })()}
-                    unit="дн"
-                    current={(() => {
-                      const streakState = selectedChild?.streakState as { currentStreak?: number } | { currentStreak?: number }[] | undefined
-                      if (Array.isArray(streakState)) {
-                        return Math.max(...streakState.map((s: any) => s.currentStreak || 0), 0)
-                      }
-                      return (streakState as { currentStreak?: number })?.currentStreak || (selectedChild as any).streak || (selectedChild as any).maxStreak || 0
-                    })()}
-                    target={30}
-                    icon="🔥"
-                    color="#ED8936"
-                    description="Дней подряд"
-                    gradient={['#ED8936', '#DD6B20']}
-                    showProgress={false}
-                  />
-                </Grid>
-
-                {/* Сытость */}
-                <Grid item xs={12} sm={6}>
-                  <MetricCard
-                    title="Сытость"
-                    value={saturationPercent}
-                    unit="%"
-                    current={selectedChild.todayPointsBalance ?? 0}
-                    target={50}
-                    icon="🍽️"
-                    color={saturationColor}
-                    description="Успешность сегодня"
-                    gradient={['#48BB78', '#38B081']}
-                    showProgress={true}
-                  />
-                </Grid>
-
-              </Grid>
-            </Box>
-          </motion.div>
-        )}
-
-        {/* Объединенная полоска: Календарь активности, Дни занятий, Заморозки */}
-        {selectedChild && childrenStats && childrenStats.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-          >
-            <Box sx={{ mb: 2 }}>
-              <Grid container spacing={0}>
-                <Grid item xs={12}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      border: '1.5px solid #E5E5EA',
-                      borderRadius: '12px',
-                      boxShadow: 'none',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <CardContent sx={{ p: 0 }}>
-                      <Grid container spacing={0} sx={{ minHeight: { xs: 'auto', md: '280px' } }}>
-                        {/* Календарь активности */}
-                        <Grid item xs={12} md={4} sx={{ 
-                          borderRight: { md: '1px solid rgba(0,0,0,0.08)' },
-                          borderBottom: { xs: '1px solid rgba(0,0,0,0.08)', md: 'none' },
-                          display: 'flex',
-                          flexDirection: 'column',
-                          height: '100%',
-                        }}>
-                          <Box sx={{ p: { xs: 1, sm: 1.25 }, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                            <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.75, color: colors.text.primary, fontSize: '0.8rem', textAlign: 'center' }}>
-                              📅 Активность
-                            </Typography>
-                            <Box sx={{ 
-                              flex: 1,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}>
-                              <ActivityCalendar
-                                completions={completions?.filter((c: any) => c.status === 'APPROVED') || []}
-                                year={selectedDate.getFullYear()}
-                                month={selectedDate.getMonth()}
-                              />
-                            </Box>
+                  <Grid item xs={12} md={4}>
+                    <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', color: colors.text.secondary, mb: 1 }}>
+                      ЗА ПЕРИОД
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+                      <Box>
+                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ЗА НЕДЕЛЮ</Typography>
+                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800 }}>{analyticsData.weeklyCompletions}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ЗА МЕСЯЦ</Typography>
+                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800 }}>{analyticsData.monthlyCompletions}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ДНЕЙ ЗАНЯТИЙ</Typography>
+                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800, color: colors.success.main }}>
+                          {calculatedStats?.daysWithActivity || 0}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ЗАМОРОЗКИ</Typography>
+                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800, color: colors.primary.main }}>
+                          {calculatedStats?.freezeDaysUsed || 0}
+                          <Box component="span" sx={{ fontSize: '0.7rem', fontWeight: 600, color: colors.text.secondary }}>
+                            {' '}из {calculatedStats?.freezeDaysAvailable || 4}
                           </Box>
-                        </Grid>
-
-                        {/* Дни занятий */}
-                        <Grid item xs={6} md={4} sx={{ 
-                          borderRight: '1px solid rgba(0,0,0,0.08)',
-                          background: 'linear-gradient(135deg, rgba(52,199,89,0.05) 0%, transparent 100%)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'center',
-                          minHeight: { xs: '200px', md: '280px' },
-                        }}>
-                          <Box sx={{ textAlign: 'center', py: 2, px: 1.5, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 1.5 }}>
-                              <motion.div
-                                animate={{ scale: [1, 1.1, 1] }}
-                                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                              >
-                                <CheckCircleIcon sx={{ color: colors.success.main, fontSize: { xs: 22, sm: 26 }, filter: 'drop-shadow(0 2px 10px rgba(52,199,89,0.4))' }} />
-                              </motion.div>
-                              <Tooltip title="Количество уникальных дней, когда было выполнено хотя бы одно задание">
-                                <IconButton size="small" sx={{ p: 0.25 }}>
-                                  <HelpOutlineIcon fontSize="small" sx={{ fontSize: '0.7rem', color: colors.text.secondary }} />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                            <motion.div
-                              key={selectedChild.childId}
-                              initial={{ scale: 0.5 }}
-                              animate={{ scale: 1 }}
-                              transition={{ type: 'spring', stiffness: 200 }}
-                            >
-                              <Typography
-                                variant="h1"
-                                sx={{
-                                  fontWeight: 900,
-                                  background: `linear-gradient(135deg, ${colors.success.main} 0%, ${colors.success.dark} 100%)`,
-                                  WebkitBackgroundClip: 'text',
-                                  WebkitTextFillColor: 'transparent',
-                                  backgroundClip: 'text',
-                                  mb: 0.5,
-                                  letterSpacing: '-0.03em',
-                                  fontSize: { xs: '2.25rem', sm: '2.75rem', md: '3rem' },
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {calculatedStats?.daysWithActivity || 0}
-                              </Typography>
-                            </motion.div>
-                            <Typography 
-                              variant="body2" 
-                              sx={{ 
-                                color: colors.text.secondary,
-                                textTransform: 'uppercase',
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                letterSpacing: '0.05em',
-                                mt: 0.5,
-                              }}
-                            >
-                              Дней занятий
-                            </Typography>
-                          </Box>
-                        </Grid>
-
-                        {/* Заморозки */}
-                        <Grid item xs={6} md={4} sx={{ 
-                          background: 'linear-gradient(135deg, rgba(90,200,250,0.05) 0%, transparent 100%)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'center',
-                          minHeight: { xs: '200px', md: '280px' },
-                        }}>
-                          <Box sx={{ textAlign: 'center', py: 2, px: 1.5, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 1.5 }}>
-                              <motion.div
-                                animate={{ rotate: [0, 10, -10, 0] }}
-                                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                              >
-                                <AcUnitIcon sx={{ color: colors.info.main, fontSize: { xs: 22, sm: 26 }, filter: 'drop-shadow(0 2px 10px rgba(90,200,250,0.4))' }} />
-                              </motion.div>
-                              <Tooltip title="Количество использованных заморозок в текущем месяце. Доступно 4 заморозки в месяц">
-                                <IconButton size="small" sx={{ p: 0.25 }}>
-                                  <HelpOutlineIcon fontSize="small" sx={{ fontSize: '0.7rem', color: colors.text.secondary }} />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                            <Typography
-                              variant="h1"
-                              sx={{
-                                fontWeight: 900,
-                                background: `linear-gradient(135deg, ${colors.info.main} 0%, ${colors.info.dark} 100%)`,
-                                WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                backgroundClip: 'text',
-                                mb: 0.5,
-                                letterSpacing: '-0.03em',
-                                fontSize: { xs: '2.25rem', sm: '2.75rem', md: '3rem' },
-                                lineHeight: 1,
-                              }}
-                            >
-                              {calculatedStats?.freezeDaysUsed || 0}
-                            </Typography>
-                            <Typography 
-                              variant="body2" 
-                              sx={{ 
-                                color: colors.text.secondary,
-                                textTransform: 'uppercase',
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                letterSpacing: '0.05em',
-                                mt: 0.5,
-                              }}
-                            >
-                              Заморозок
-                            </Typography>
-                            <Typography 
-                              variant="caption" 
-                              sx={{ 
-                                color: colors.text.secondary,
-                                fontSize: '0.65rem',
-                                mt: 0.25,
-                                fontWeight: 600,
-                                display: 'block',
-                              }}
-                            >
-                              из {calculatedStats?.freezeDaysAvailable || 4}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                      </Grid>
-                    </CardContent>
-                  </Card>
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
                 </Grid>
-              </Grid>
-            </Box>
+              </CardContent>
+            </Card>
           </motion.div>
         )}
+
 
         {/* Задания, ожидающие одобрения - Инновационный дизайн */}
         {pendingCompletions && pendingCompletions.length > 0 && (
@@ -1354,7 +788,7 @@ export default function ParentHome() {
               <Grid container spacing={2}>
                 {pendingCompletions
                   .map((completion: Completion, index: number) => (
-                  <Grid item xs={12} sm={6} key={completion.id}>
+                  <Grid item xs={12} sm={6} lg={4} key={completion.id}>
                     <motion.div
                       initial={{ opacity: 0, y: 20, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1373,23 +807,23 @@ export default function ParentHome() {
                           '&:hover': { borderColor: colors.primary.main },
                         }}
                       >
-                        <CardContent sx={{ p: 3 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                          <Box sx={{ flex: 1 }}>
-                            <Typography 
-                              variant="h6" 
-                              sx={{ 
+                        <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography
+                              sx={{
                                 fontWeight: 700,
+                                fontSize: '0.8rem',
                                 color: colors.primary.main,
-                                mb: 0.5,
                               }}
                             >
                               {(completion.child as any)?.name || completion.child?.childProfile?.name || completion.child?.login || (completion.child as any)?.user?.login || 'Ребенок'}
                             </Typography>
-                            <Typography 
-                              variant="body1" 
-                              sx={{ 
+                            <Typography
+                              sx={{
                                 fontWeight: 600,
+                                fontSize: '0.9rem',
+                                lineHeight: 1.25,
                                 color: colors.text.primary,
                               }}
                             >
@@ -1421,7 +855,7 @@ export default function ParentHome() {
                               alt="Доказательство"
                               sx={{
                                 maxWidth: '100%',
-                                maxHeight: 200,
+                                maxHeight: 110,
                                 borderRadius: 1,
                                 border: `1px solid ${colors.background.light}`,
                               }}
@@ -1432,7 +866,7 @@ export default function ParentHome() {
                           </Box>
                         )}
                         
-                        <Box sx={{ display: 'flex', gap: 1.5, mt: 2 }}>
+                        <Box sx={{ display: 'flex', gap: 1, mt: 1.25 }}>
                           <Button
                             variant="contained"
                             color="success"
@@ -1445,15 +879,8 @@ export default function ParentHome() {
                               })
                             }}
                             disabled={approvingId === completion.id || rejectingId === completion.id}
-                            sx={{
-                              flex: 1,
-                              fontWeight: 600,
-                              transition: 'all 0.2s',
-                              '&:hover:not(:disabled)': {
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 4px 12px rgba(52, 199, 89, 0.3)',
-                              },
-                            }}
+                            size="small"
+                            sx={{ flex: 1, fontWeight: 700, fontSize: '0.78rem', py: 0.6, textTransform: 'none' }}
                           >
                             {approvingId === completion.id ? 'Одобрение...' : 'Одобрить'}
                           </Button>
@@ -1493,6 +920,10 @@ export default function ParentHome() {
           </motion.div>
         )}
 
+        {/* Штрафы и бонусы стоят рядом, а не друг под другом: это два
+            коротких списка одного рода, и на широком экране они занимали
+            два экрана прокрутки вместо одного. */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2, alignItems: 'start' }}>
         {/* Штрафы */}
         {penalties && penalties.length > 0 && (
           <motion.div
@@ -1803,6 +1234,7 @@ export default function ParentHome() {
             </Box>
           </motion.div>
         )}
+        </Box>
 
         {/* Управление заданиями - статистика за сегодня - Инновационный дизайн */}
         {safeSelectedChildIndex >= 0 && todayStatistics && todayStatistics.children && todayStatistics.children.length > 0 && (
