@@ -53,8 +53,7 @@ export class AudioController {
   @Roles('PARENT')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  create(@User() user: RequestUser, @Body() dto: { childId: string } & CreateAudioRequestDto) {
-    if (!dto?.childId) throw new BadRequestException('childId is required');
+  create(@User() user: RequestUser, @Body() dto: CreateAudioRequestDto) {
     return this.audioService.createRequest(
       user.familyId,
       user.userId,
