@@ -173,14 +173,13 @@ export const PriorityGoalCard = React.memo(function PriorityGoalCard({ goal, pro
                 />
               </Box>
 
-              {/* Строка: Осталось · Цель */}
+              {/* The goal itself. "Осталось" used to be repeated here with the
+                  same numbers as the pill directly below, so the card showed
+                  one figure twice and the target only in passing. */}
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
                 <Typography variant="body2" sx={{ color: colors.text.secondary }}>
-                  Осталось <Box component="span" sx={{ fontWeight: 700, color: colors.text.primary }}>{remainingMoney} ₴</Box>
-                  <Box component="span" sx={{ color: colors.text.secondary, fontWeight: 500 }}> · {remainingPoints} ⭐</Box>
-                </Typography>
-                <Typography variant="body2" sx={{ color: colors.text.secondary }}>
-                  Цель <Box component="span" sx={{ fontWeight: 600, color: colors.primary.main }}>{costMoney} ₴</Box>
+                  Цель <Box component="span" sx={{ fontWeight: 700, color: colors.primary.main }}>{costMoney} ₴</Box>
+                  <Box component="span" sx={{ color: colors.text.secondary, fontWeight: 500 }}> · {costPoints} ⭐</Box>
                 </Typography>
               </Box>
 
@@ -218,7 +217,7 @@ export const PriorityGoalCard = React.memo(function PriorityGoalCard({ goal, pro
                 </Box>
               </Box>
 
-              {availableMoneyCents > 0 && (
+              {availableMoneyCents > 0 && availableMoneyCents !== spentMoneyCents && (
                 <Typography variant="caption" sx={{ color: colors.text.secondary }}>
                   Доступно <Box component="span" sx={{ fontWeight: 600, color: colors.primary.main }}>{availableMoney} ₴</Box>
                   <Box component="span" sx={{ color: colors.text.secondary }}> ({Math.round(availableMoneyCents / 100 * conversionRate)} ⭐)</Box>
