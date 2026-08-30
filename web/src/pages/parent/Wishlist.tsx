@@ -99,6 +99,7 @@ export default function ParentWishlist() {
     imageFile: null as File | null,
     imageUrl: '',
     completed: false,
+    collectedUah: 0,
   })
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -106,6 +107,8 @@ export default function ParentWishlist() {
   const [error, setError] = useState('')
   const [editingItem, setEditingItem] = useState<WishlistItem | null>(null)
   const [itemToDelete, setItemToDelete] = useState<WishlistItem | null>(null)
+  // Правка «скільки вже зібрано» прямо с карточки: сумма в ₴, как её видит родитель.
+  const [collectedEdit, setCollectedEdit] = useState<{ item: WishlistItem; value: string } | null>(null)
   const [imageViewerOpen, setImageViewerOpen] = useState(false)
   const [viewingImageUrl, setViewingImageUrl] = useState<string>('')
 
@@ -130,19 +133,6 @@ export default function ParentWishlist() {
     const num = typeof raw === 'string' ? parseFloat(raw) : raw
     return num && num > 0 ? num : 10
   }, [motivationSettings])
-
-  // Текущий баланс ребёнка (в баллах) по childProfileId.
-  // childrenStats отдаёт по childId (= user.id), приводим к childProfileId.
-  const childBalancePointsById = React.useMemo(() => {
-    const map: Record<string, number> = {}
-    for (const c of children || []) {
-      const profileId = (c as any).childProfile?.id
-      if (!profileId) continue
-      const stat = (childrenStats || []).find((s: any) => s.childId === c.id)
-      map[profileId] = stat?.currentBalance || 0
-    }
-    return map
-  }, [children, childrenStats])
 
   const { data: wishlistItems, isLoading } = useQuery<WishlistItem[]>({
     queryKey: ['wishlist', 'parent', 'all'],
@@ -169,7 +159,7 @@ export default function ParentWishlist() {
   })
 
   const updateWishlistItemMutation = useMutation({
-    mutationFn: (data: { id: string; status?: 'PENDING' | 'COMPLETED'; year?: number; isFavorite?: boolean }) => {
+    mutationFn: (data: { id: string; status?: 'PENDING' | 'COMPLETED'; year?: number; isFavorite?: boolean; moneySpent?: number }) => {
       const { id, ...body } = data
       return api.patch(`/wishlist/parent/wishlist/${id}`, body)
     },
@@ -177,6 +167,17 @@ export default function ParentWishlist() {
       invalidate()
       setEditingItem(null)
       handleCloseDialog()
+    },
+  })
+
+  // moneySpent хранится в копейках и уже накапливается доставками exchange —
+  // здесь родитель поправляет ту же величину вручную.
+  const updateCollectedMutation = useMutation({
+    mutationFn: (data: { id: string; moneySpentCents: number }) =>
+      api.patch(`/wishlist/parent/wishlist/${data.id}`, { moneySpent: data.moneySpentCents }),
+    onSuccess: () => {
+      invalidate()
+      setCollectedEdit(null)
     },
   })
 
@@ -212,7 +213,7 @@ export default function ParentWishlist() {
 
   const handleAddWish = (childId: string) => {
     setDialogChildId(childId)
-    setFormData({ title: '', price: 0, year: new Date().getFullYear(), imageFile: null, imageUrl: '', completed: false })
+    setFormData({ title: '', price: 0, year: new Date().getFullYear(), imageFile: null, imageUrl: '', completed: false, collectedUah: 0 })
     setImagePreview(null)
     setError('')
     setEditingItem(null)
@@ -222,7 +223,7 @@ export default function ParentWishlist() {
   const handleCloseDialog = () => {
     setDialogOpen(false)
     setEditingItem(null)
-    setFormData({ title: '', price: 0, year: new Date().getFullYear(), imageFile: null, imageUrl: '', completed: false })
+    setFormData({ title: '', price: 0, year: new Date().getFullYear(), imageFile: null, imageUrl: '', completed: false, collectedUah: 0 })
     setImagePreview(null)
     setError('')
     setDialogChildId('')
@@ -237,6 +238,7 @@ export default function ParentWishlist() {
       imageFile: null,
       imageUrl: item.rewardGoal?.imageUrl || '',
       completed: item.status === 'COMPLETED',
+      collectedUah: Math.round(((item as any).moneySpent || 0) / 100),
     })
     setImagePreview(item.rewardGoal?.imageUrl || null)
     setDialogChildId(item.child?.id || '')
@@ -294,6 +296,7 @@ export default function ParentWishlist() {
           id: editingItem.id,
           status: formData.completed ? 'COMPLETED' : 'PENDING',
           year: formData.year,
+          moneySpent: Math.max(0, Math.round((formData.collectedUah || 0) * 100)),
         })
         setSaving(false)
         handleCloseDialog()
@@ -330,7 +333,6 @@ export default function ParentWishlist() {
   // Group wishlist items by child
   const childGroups = (children || []).map((child: any) => {
     const childName = child.childProfile?.name || child.login || 'Дитина'
-    const childProfileId = child.childProfile?.id || null
     const items = (wishlistItems || []).filter(item => {
       if (item.child?.id !== child.id && (item as any).childUserId !== child.id) {
         const itemName = item.child?.name || item.child?.login
@@ -340,7 +342,11 @@ export default function ParentWishlist() {
       if (statusFilter !== 'all' && item.status !== statusFilter) return false
       return true
     })
-    return { child, childName, childProfileId, items }
+    const balanceUah = pointsToUah(
+      ((childrenStats || []).find((st: any) => st.childId === child.id)?.currentBalance) || 0,
+      conversionRate,
+    )
+    return { child, childName, items, balanceUah }
   })
 
   const filtersActive = yearFilter !== 'all' || statusFilter !== 'all'
@@ -443,7 +449,7 @@ export default function ParentWishlist() {
         </Box>
 
         {/* Child sections */}
-        {childGroups.map(({ child, childName, childProfileId, items }, groupIdx) => (
+        {childGroups.map(({ child, childName, items, balanceUah }, groupIdx) => (
           <Box key={child.id} sx={{ mb: 5 }}>
             {/* Section header. На телефоне имя, счётчик и кнопка больше не
                 сжимаются в одну нечитаемую строку: кнопка уходит на всю ширину. */}
@@ -462,6 +468,8 @@ export default function ParentWishlist() {
                 <Typography variant="caption" sx={{ color: colors.text.secondary, fontWeight: 600 }}>
                   {items.length} {pluralWishes(items.length)}
                   {items.length > 0 && ` · ${items.reduce((sum, i) => sum + pointsToUah(i.rewardGoal?.costPoints || 0, conversionRate), 0)} ₴`}
+                  {' · '}
+                  <Box component="span" sx={{ color: colors.primary.main }}>на балансі {balanceUah} ₴</Box>
                 </Typography>
               </Box>
               <Box sx={{ flex: 1, minWidth: 8 }} />
@@ -515,18 +523,15 @@ export default function ParentWishlist() {
                   const isDone = item.status === 'COMPLETED'
                   const imageUrl = item.rewardGoal?.imageUrl
 
-                  /* Прогресс «Зібрано / Ціна».
-                     Источники:
-                       • currentBalance ребёнка (баллы → ₴ по курсу) — деньги,
-                         которые ещё «на руках» и могут пойти на цель;
-                       • item.moneySpent — уже физически выплачено за эту цель
-                         прошлыми exchange-доставками (ExchangesService.deliverExchange).
-                     Backend в /children/:id/summary считает то же самое
-                     (children.service.ts:256). */
-                  const balancePoints = childProfileId ? (childBalancePointsById[childProfileId] || 0) : 0
-                  const alreadyPaidUah = Math.round(((item as any).moneySpent || 0) / 100)
-                  const accumulatedUah = Math.min(pointsToUah(balancePoints, conversionRate) + alreadyPaidUah, priceUah)
-                  const pct = priceUah > 0 ? Math.min(100, Math.round((accumulatedUah / priceUah) * 100)) : 0
+                  /* «Зібрано» — это item.moneySpent (копейки), накопленное
+                     именно под это бажання: доставками exchange
+                     (ExchangesService.deliverExchange) и ручной правкой родителя.
+                     Раньше сюда подмешивался текущий баланс ребёнка, поэтому одна
+                     и та же сумма показывалась у всех бажань сразу и «зібрано»
+                     прыгало при любой трате. Баланс теперь один раз в заголовке
+                     ребёнка. */
+                  const collectedUah = Math.round(((item as any).moneySpent || 0) / 100)
+                  const pct = priceUah > 0 ? Math.min(100, Math.round((collectedUah / priceUah) * 100)) : 0
 
                   return (
                   <Grid item xs={12} sm={6} md={4} lg={3} key={item.id}>
@@ -548,7 +553,9 @@ export default function ParentWishlist() {
                             justifyContent: 'center',
                             overflow: 'hidden',
                             cursor: imageUrl ? 'zoom-in' : 'default',
-                            background: `linear-gradient(135deg, ${colors.primary.main}14 0%, ${colors.error.main}14 100%)`,
+                            background: imageUrl
+                              ? '#F7F7F9'
+                              : `linear-gradient(135deg, ${colors.primary.main}14 0%, ${colors.error.main}14 100%)`,
                           }}
                         >
                           {imageUrl ? (
@@ -557,7 +564,10 @@ export default function ParentWishlist() {
                               src={imageUrl}
                               alt={item.rewardGoal?.title || 'Бажання'}
                               sx={{
-                                width: '100%', height: '100%', objectFit: 'cover',
+                                width: '100%', height: '100%',
+                                // contain, а не cover: фото товара обычно шире
+                                // карточки, и обрезка съедала половину предмета.
+                                objectFit: 'contain',
                                 opacity: isDone ? 0.75 : 1,
                                 transition: 'transform 0.25s',
                                 '&:hover': { transform: 'scale(1.03)' },
@@ -630,10 +640,21 @@ export default function ParentWishlist() {
                             </Box>
                           ) : (
                             <>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                <Typography variant="caption" color="text.secondary">💰 Зібрано</Typography>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, gap: 0.5 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                                  <Typography variant="caption" color="text.secondary">💰 Зібрано</Typography>
+                                  <Tooltip title="Змінити зібрану суму">
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => setCollectedEdit({ item, value: String(collectedUah) })}
+                                      sx={{ p: 0.25, color: colors.text.secondary, '&:hover': { color: colors.primary.main } }}
+                                    >
+                                      <EditIcon sx={{ fontSize: '0.85rem' }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
                                 <Typography variant="caption" sx={{ fontWeight: 700 }} color={pct >= 100 ? 'success.main' : 'text.primary'}>
-                                  {accumulatedUah} / {priceUah} ₴ ({pct}%)
+                                  {collectedUah} / {priceUah} ₴ ({pct}%)
                                 </Typography>
                               </Box>
                               <LinearProgress
@@ -781,6 +802,20 @@ export default function ParentWishlist() {
                 </Select>
               </FormControl>
 
+              {editingItem && (
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Вже зібрано (₴)"
+                  helperText="Скільки вже відкладено на це бажання"
+                  value={formData.collectedUah}
+                  onChange={(e) => setFormData({ ...formData, collectedUah: parseFloat(e.target.value) || 0 })}
+                  InputProps={{ startAdornment: <InputAdornment position="start">₴</InputAdornment> }}
+                  inputProps={{ min: 0 }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                />
+              )}
+
               <FormControlLabel
                 control={<Checkbox checked={formData.completed} onChange={(e) => setFormData({ ...formData, completed: e.target.checked })} />}
                 label="Вже виконано"
@@ -823,6 +858,43 @@ export default function ParentWishlist() {
               sx={{ borderRadius: 2, fontWeight: 600, px: 3, background: colors.primary.main }}
             >
               {isSubmitting ? <CircularProgress size={20} color="inherit" /> : editingItem ? 'Зберегти' : 'Додати'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Скільки вже зібрано — правится с карточки */}
+        <Dialog open={!!collectedEdit} onClose={() => setCollectedEdit(null)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+          <DialogContent sx={{ pt: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>Скільки вже зібрано</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              «{collectedEdit?.item.rewardGoal?.title || 'Без назви'}» — ціна{' '}
+              {pointsToUah(collectedEdit?.item.rewardGoal?.costPoints || 0, conversionRate)} ₴
+            </Typography>
+            <TextField
+              autoFocus
+              fullWidth
+              type="number"
+              label="Зібрано (₴)"
+              value={collectedEdit?.value ?? ''}
+              onChange={(e) => setCollectedEdit(prev => prev ? { ...prev, value: e.target.value } : prev)}
+              InputProps={{ startAdornment: <InputAdornment position="start">₴</InputAdornment> }}
+              inputProps={{ min: 0 }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+            />
+          </DialogContent>
+          <DialogActions sx={{ p: 3, pt: 0, gap: 1 }}>
+            <Button onClick={() => setCollectedEdit(null)} variant="outlined" sx={{ borderRadius: 2 }}>Скасувати</Button>
+            <Button
+              onClick={() => {
+                if (!collectedEdit) return
+                const uah = Math.max(0, parseFloat(collectedEdit.value) || 0)
+                updateCollectedMutation.mutate({ id: collectedEdit.item.id, moneySpentCents: Math.round(uah * 100) })
+              }}
+              variant="contained"
+              disabled={updateCollectedMutation.isPending}
+              sx={{ borderRadius: 2, fontWeight: 600, background: colors.primary.main }}
+            >
+              {updateCollectedMutation.isPending ? <CircularProgress size={20} color="inherit" /> : 'Зберегти'}
             </Button>
           </DialogActions>
         </Dialog>

@@ -1,4 +1,4 @@
-import { IsUUID, IsArray, IsInt, ValidateNested, IsOptional, IsEnum, IsString, IsBoolean } from 'class-validator';
+import { IsUUID, IsArray, IsInt, ValidateNested, IsOptional, IsEnum, IsString, IsBoolean, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AddToWishlistDto {
@@ -37,8 +37,9 @@ export class UpdateWishlistItemDto {
   year?: number;
 
   @IsInt()
+  @Min(0) // сумма накоплений на цель; отрицательной она быть не может
   @IsOptional()
-  moneySpent?: number; // Потраченные деньги в центах
+  moneySpent?: number; // Накопленные на цель деньги в копейках
 
   @IsOptional()
   isPurchased?: boolean; // Отметка о покупке
