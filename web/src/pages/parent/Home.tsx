@@ -7,12 +7,7 @@ import {
   Button,
   CircularProgress,
   Box,
-  LinearProgress,
-  Card,
-  CardContent,
-  Chip,
   IconButton,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -25,8 +20,6 @@ import {
   ToggleButtonGroup,
   ToggleButton,
 } from '@mui/material'
-import CancelIcon from '@mui/icons-material/Cancel'
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
 import AddCircleIcon from '@mui/icons-material/AddCircle'
@@ -35,8 +28,6 @@ import TodayIcon from '@mui/icons-material/Today'
 import { motion } from 'framer-motion'
 import Layout from '../../components/Layout'
 import { ChildOverviewCard } from '../../components/ChildOverviewCard'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import GroupAddIcon from '@mui/icons-material/GroupAdd'
 import { colors } from '../../theme'
 import {
   useChildrenStatistics,
@@ -44,10 +35,8 @@ import {
   usePendingExchanges,
   useApproveCompletion,
   useRejectCompletion,
-  useChildBadges,
 } from '../../hooks'
 import { formatDateForAPI, isToday, formatDateForDisplay } from '../../utils/dateUtils'
-import type { Completion } from '../../types/api'
 import { api } from '../../lib/api'
 
 export default function ParentHome() {
@@ -134,10 +123,6 @@ export default function ParentHome() {
       navigate(location.pathname, { replace: true, state: {} })
     }
   }, [location.state, location.pathname, navigate, openBonusDialogWithChild])
-
-  // Все хуки должны вызываться в одном и том же порядке всегда
-  // ВАЖНО: Хуки вызываются ВСЕГДА, даже если selectedChildId undefined
-  const { data: childBadges } = useChildBadges(selectedChildId)
 
 
   // Челленджи для главной страницы
@@ -253,101 +238,56 @@ export default function ParentHome() {
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
 
-  // Получаем completions один раз для всех целей (календарь, аналитика, расчеты)
-  const { data: completions } = useQuery({
-    queryKey: ['completions-for-calendar', selectedChildId],
-    queryFn: async () => {
-      if (!selectedChildId) return []
-      try {
-        const response = await api.get(`/completions/parent/completions/${selectedChildId}`)
-        return response.data || []
-      } catch (error: any) {
-        // Логируем только в development
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Failed to fetch completions:', error)
-        }
-        // Возвращаем пустой массив вместо ошибки
-        return []
-      }
-    },
-    enabled: !!selectedChildId,
-    staleTime: 30 * 1000, // Данные свежие 30 секунд
-    retry: 1, // Повторяем только 1 раз при ошибке
-  })
 
   // Вычисляем аналитику на основе уже загруженных completions
-  const analyticsData = useMemo(() => {
-    const approvedCompletions = (completions || []).filter((c: any) => c.status === 'APPROVED')
-    
-    // Статистика за последние 7 дней
-    const sevenDaysAgo = new Date()
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-    
-    const recentCompletions = approvedCompletions.filter((c: any) => {
-      const date = new Date(c.performedAt)
-      return date >= sevenDaysAgo
-    })
-    
-    // Статистика за последние 30 дней
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-    
-    const monthlyCompletions = approvedCompletions.filter((c: any) => {
-      const date = new Date(c.performedAt)
-      return date >= thirtyDaysAgo
-    })
-    
-    // Топ заданий
-    const taskCounts: Record<string, number> = {}
-    approvedCompletions.forEach((c: any) => {
-      if (c.task) {
-        const taskTitle = c.task.title
-        taskCounts[taskTitle] = (taskCounts[taskTitle] || 0) + 1
-      }
-    })
-    
-    const topTasks = Object.entries(taskCounts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([title, count]) => ({ title, count }))
-    
-    return {
-      totalCompletions: approvedCompletions.length,
-      weeklyCompletions: recentCompletions.length,
-      monthlyCompletions: monthlyCompletions.length,
-      topTasks,
+  /**
+   * Challenges grouped by child, with each child's own progress resolved.
+   *
+   * The challenges section used to compute this for whichever child was
+   * selected; the cards need it for every child, so it is done once here
+   * rather than inside each card.
+   */
+  const challengesForChildren = useMemo(() => {
+    const byChild = new Map<string, any[]>()
+    if (!challengesData || !childrenStats) return byChild
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    for (const child of childrenStats as any[]) {
+      const rows = (challengesData as any[])
+        .filter((ch) => {
+          const parts = typeof ch.participantsJson === 'string'
+            ? JSON.parse(ch.participantsJson)
+            : ch.participantsJson || []
+          // An empty participant list means the challenge is for everyone.
+          return parts.length === 0 || parts.includes(child.childId) || parts.includes(child.childProfileId)
+        })
+        .map((ch) => {
+          const endDate = ch.endDate?.toDate ? ch.endDate.toDate() : new Date(ch.endDate)
+          const stat = ch.childrenStats?.find(
+            (s: any) => s.childId === child.childId || s.childId === child.childProfileId,
+          )
+          const isCompleted = stat?.isCompleted || false
+          const isFailed = endDate < today && !isCompleted
+          return {
+            id: ch.id,
+            title: ch.title,
+            progress: stat?.progress || null,
+            isCompleted,
+            isFailed,
+            isActive: !isCompleted && !isFailed,
+          }
+        })
+      byChild.set(child.childId, rows)
     }
-  }, [completions])
+    return byChild
+  }, [challengesData, childrenStats])
+
 
   // Используем утилиту для форматирования даты
   const dateKey = useMemo(() => formatDateForAPI(selectedDate), [selectedDate])
 
-  // Расчет дополнительных показателей (мемоизировано для производительности)
-  const calculatedStats = useMemo(() => {
-    if (!selectedChild || !completions) return null
-    
-    const approvedCompletions = completions.filter((c: any) => c.status === 'APPROVED')
-    
-    // Дни занятий - количество уникальных дней с выполнением заданий
-    const uniqueDays = new Set<string>()
-    approvedCompletions.forEach((c: any) => {
-      const date = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt)
-      const dateStr = formatDateForAPI(date)
-      uniqueDays.add(dateStr)
-    })
-    const daysWithActivity = uniqueDays.size
-
-    // Заморозки - 4 дня в месяц, считаем использованные в текущем месяце
-    // TODO: Нужно добавить логику отслеживания использованных заморозок
-    const freezeDaysUsed = 0 // TODO: Реализовать отслеживание заморозок
-    const freezeDaysAvailable = 4
-
-    return {
-      daysWithActivity,
-      freezeDaysUsed,
-      freezeDaysAvailable,
-    }
-  }, [selectedChild, completions])
 
   // КРИТИЧНО: ВСЕ ХУКИ (useMemo, useCallback) ДОЛЖНЫ БЫТЬ ДО УСЛОВНЫХ ВОЗВРАТОВ!
   // Используем утилиту для проверки "сегодня"
@@ -648,9 +588,27 @@ export default function ParentHome() {
             </Box>
             <Grid container spacing={2}>
               {childrenStats.map((childStat: any, index: number) => {
-                const pendingCount = pendingCompletions?.filter((c: Completion) =>
-                  c.child?.id === childStat.childId || c.childId === childStat.childId
-                ).length || 0
+                // Everything family-wide is fetched once by the page and sliced
+                // per child here, so a card never issues a request the page has
+                // already made.
+                // A child is addressed by two different ids depending on which
+                // table you came from: completions store the childProfile id,
+                // ledger entries store the user id, and enriched rows carry
+                // both. Matching on one of them silently produced empty lists —
+                // which is why the pending badge always read zero.
+                const childIds = new Set(
+                  [childStat.childId, childStat.childProfileId].filter(Boolean),
+                )
+                const belongsToChild = (row: any) =>
+                  childIds.has(row?.childId) ||
+                  childIds.has(row?.childProfileId) ||
+                  childIds.has(row?.child?.id) ||
+                  childIds.has(row?.child?.user?.id) ||
+                  childIds.has(row?.child?.userId)
+                const pendingForChild = (pendingCompletions || []).filter(belongsToChild)
+                const penaltiesForChild = (penalties || []).filter(belongsToChild)
+                const bonusesForChild = (bonuses || []).filter(belongsToChild)
+                const challengesForChild = challengesForChildren.get(childStat.childId) || []
 
                 return (
                   <Grid item xs={12} md={6} xl={4} key={childStat.childId}>
@@ -664,11 +622,35 @@ export default function ParentHome() {
                       completedTasksCount={childStat.completedTasksCount || 0}
                       maxStreak={childStat.maxStreak || 0}
                       totalMoneyEarned={childStat.totalMoneyEarned || 0}
-                      pendingCount={pendingCount}
                       index={index}
                       selected={safeSelectedChildIndex === index}
                       date={selectedDate}
+                      pending={pendingForChild}
+                      penalties={penaltiesForChild}
+                      bonuses={bonusesForChild}
+                      challenges={challengesForChild}
+                      approvingId={approvingId}
+                      rejectingId={rejectingId}
+                      deletingLedger={deletePenaltyMutation.isPending || deleteBonusMutation.isPending}
                       onSelect={() => setSelectedChildIndex(index)}
+                      onApprove={(id: string) => {
+                        setApprovingId(id)
+                        approveCompletion.mutate(id, {
+                          onSuccess: () => setApprovingId(null),
+                          onError: () => setApprovingId(null),
+                        })
+                      }}
+                      onReject={(id: string) => {
+                        setRejectingId(id)
+                        rejectCompletion.mutate(id, {
+                          onSuccess: () => setRejectingId(null),
+                          onError: () => setRejectingId(null),
+                        })
+                      }}
+                      onDeleteLedgerEntry={(id: string, kind: 'penalty' | 'bonus') => {
+                        if (kind === 'penalty') deletePenaltyMutation.mutate(id)
+                        else deleteBonusMutation.mutate(id)
+                      }}
                       onBonus={() => setBonusDialog((prev) => ({
                         ...prev, open: true, mode: 'bonus', childId: childStat.childId, amount: '', reason: '',
                       }))}
@@ -683,557 +665,9 @@ export default function ParentHome() {
           </motion.div>
         )}
 
-        {/* Детали выбранного ребёнка: то, что не имеет смысла дублировать в
-            каждой карточке. Компактной строкой вместо двух полноразмерных
-            блоков. */}
-        {selectedChild && safeSelectedChildIndex >= 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15, duration: 0.4 }}
-            style={{ marginBottom: '24px' }}
-          >
-            <Card variant="outlined" sx={{ border: '1.5px solid #E5E5EA', borderRadius: '12px', boxShadow: 'none' }}>
-              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={8}>
-                    <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', color: colors.text.secondary, mb: 1 }}>
-                      ТОП ЗАДАНИЙ · {selectedChild.childName}
-                    </Typography>
-                    {analyticsData.topTasks.length > 0 ? (
-                      analyticsData.topTasks.slice(0, 5).map((task: any, i: number) => (
-                        <Box key={i} sx={{ mb: 0.75 }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
-                            <Typography sx={{ fontSize: '0.75rem', minWidth: 0 }} noWrap>
-                              {i + 1}. {task.title}
-                            </Typography>
-                            <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                              {task.count} раз
-                            </Typography>
-                          </Box>
-                          <LinearProgress
-                            variant="determinate"
-                            value={(task.count / analyticsData.topTasks[0].count) * 100}
-                            sx={{ height: 4, borderRadius: 2, mt: 0.25 }}
-                          />
-                        </Box>
-                      ))
-                    ) : (
-                      <Typography sx={{ fontSize: '0.8rem', color: colors.text.secondary }}>Пока нет выполненных заданий</Typography>
-                    )}
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', color: colors.text.secondary, mb: 1 }}>
-                      ЗА ПЕРИОД
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-                      <Box>
-                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ЗА НЕДЕЛЮ</Typography>
-                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800 }}>{analyticsData.weeklyCompletions}</Typography>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ЗА МЕСЯЦ</Typography>
-                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800 }}>{analyticsData.monthlyCompletions}</Typography>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ДНЕЙ ЗАНЯТИЙ</Typography>
-                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800, color: colors.success.main }}>
-                          {calculatedStats?.daysWithActivity || 0}
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, fontWeight: 600 }}>ЗАМОРОЗКИ</Typography>
-                        <Typography sx={{ fontSize: '1.05rem', fontWeight: 800, color: colors.primary.main }}>
-                          {calculatedStats?.freezeDaysUsed || 0}
-                          <Box component="span" sx={{ fontSize: '0.7rem', fontWeight: 600, color: colors.text.secondary }}>
-                            {' '}из {calculatedStats?.freezeDaysAvailable || 4}
-                          </Box>
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
 
 
-        {/* Задания, ожидающие одобрения - Инновационный дизайн */}
-        {pendingCompletions && pendingCompletions.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-          >
-            <Box sx={{ mb: 2 }}>
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3, duration: 0.4 }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                  <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #FF9500 0%, #FF6B00 100%)' }} />
-                  <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                    Задания для проверки
-                  </Typography>
-                  <Chip
-                    label={pendingCompletions.length}
-                    size="small"
-                    sx={{ bgcolor: '#FF9500', color: 'white', fontWeight: 700, fontSize: '0.8125rem' }}
-                  />
-                </Box>
-              </motion.div>
-              <Grid container spacing={2}>
-                {pendingCompletions
-                  .map((completion: Completion, index: number) => (
-                  <Grid item xs={12} sm={6} lg={4} key={completion.id}>
-                    <motion.div
-                      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ delay: 0.4 + index * 0.1, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                      whileHover={{ scale: 1.02, y: -4 }}
-                      style={{ height: '100%' }}
-                    >
-                      <Card
-                        variant="outlined"
-                        sx={{
-                          height: '100%',
-                          borderRadius: '12px',
-                          border: `1.5px solid #E5E5EA`,
-                          boxShadow: 'none',
-                          transition: 'border-color 0.2s ease',
-                          '&:hover': { borderColor: colors.primary.main },
-                        }}
-                      >
-                        <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography
-                              sx={{
-                                fontWeight: 700,
-                                fontSize: '0.8rem',
-                                color: colors.primary.main,
-                              }}
-                            >
-                              {(completion.child as any)?.name || completion.child?.childProfile?.name || completion.child?.login || (completion.child as any)?.user?.login || 'Ребенок'}
-                            </Typography>
-                            <Typography
-                              sx={{
-                                fontWeight: 600,
-                                fontSize: '0.9rem',
-                                lineHeight: 1.25,
-                                color: colors.text.primary,
-                              }}
-                            >
-                              {completion.task?.icon || '📝'} {completion.task?.title || 'Задание'}
-                            </Typography>
-                          </Box>
-                          <Chip 
-                            label={`${completion.task?.points || 0} ⭐`} 
-                            color="primary"
-                            size="small"
-                            sx={{ fontWeight: 700 }}
-                          />
-                        </Box>
-                        
-                        {completion.note && (
-                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontStyle: 'italic' }}>
-                            💬 {completion.note}
-                          </Typography>
-                        )}
-                        
-                        {completion.proofUrl && (
-                          <Box sx={{ mb: 2 }}>
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                              📷 Доказательство:
-                            </Typography>
-                            <Box
-                              component="img" loading="lazy" decoding="async"
-                              src={completion.proofUrl}
-                              alt="Доказательство"
-                              sx={{
-                                maxWidth: '100%',
-                                maxHeight: 110,
-                                borderRadius: 1,
-                                border: `1px solid ${colors.background.light}`,
-                              }}
-                              onError={(e: any) => {
-                                e.target.style.display = 'none'
-                              }}
-                            />
-                          </Box>
-                        )}
-                        
-                        <Box sx={{ display: 'flex', gap: 1, mt: 1.25 }}>
-                          <Button
-                            variant="contained"
-                            color="success"
-                            startIcon={<CheckCircleIcon />}
-                            onClick={() => {
-                              setApprovingId(completion.id)
-                              approveCompletion.mutate(completion.id, {
-                                onSuccess: () => setApprovingId(null),
-                                onError: () => setApprovingId(null),
-                              })
-                            }}
-                            disabled={approvingId === completion.id || rejectingId === completion.id}
-                            size="small"
-                            sx={{ flex: 1, fontWeight: 700, fontSize: '0.78rem', py: 0.6, textTransform: 'none' }}
-                          >
-                            {approvingId === completion.id ? 'Одобрение...' : 'Одобрить'}
-                          </Button>
-                          <Button
-                            variant="outlined"
-                            color="error"
-                            startIcon={<CancelIcon />}
-                            onClick={() => {
-                              setRejectingId(completion.id)
-                              rejectCompletion.mutate(completion.id, {
-                                onSuccess: () => setRejectingId(null),
-                                onError: () => setRejectingId(null),
-                              })
-                            }}
-                            disabled={approvingId === completion.id || rejectingId === completion.id}
-                            sx={{
-                              flex: 1,
-                              fontWeight: 600,
-                              borderWidth: 1.5,
-                              transition: 'all 0.2s',
-                              '&:hover:not(:disabled)': {
-                                transform: 'translateY(-2px)',
-                                borderWidth: 1.5,
-                              },
-                            }}
-                          >
-                            {rejectingId === completion.id ? 'Отклонение...' : 'Отклонить'}
-                          </Button>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                    </motion.div>
-                  </Grid>
-                ))}
-              </Grid>
-            </Box>
-          </motion.div>
-        )}
 
-        {/* Штрафы и бонусы стоят рядом, а не друг под другом: это два
-            коротких списка одного рода, и на широком экране они занимали
-            два экрана прокрутки вместо одного. */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2, alignItems: 'start' }}>
-        {/* Штрафы */}
-        {penalties && penalties.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.25 }}
-          >
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #FF3B30 0%, #C70000 100%)' }} />
-                <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                  Штрафы
-                </Typography>
-                <Chip
-                  label={penalties.length}
-                  size="small"
-                  sx={{ bgcolor: '#FF3B30', color: 'white', fontWeight: 700, fontSize: '0.8125rem' }}
-                />
-                {(() => {
-                  const total = penalties.reduce((s, p: any) => s + (p.amount || 0), 0)
-                  return (
-                    <Chip
-                      label={`−${total} ⭐ всего`}
-                      size="small"
-                      sx={{ bgcolor: '#FFEBEB', color: '#C70000', fontWeight: 700, fontSize: '0.8125rem' }}
-                    />
-                  )
-                })()}
-              </Box>
-
-              {/* Per-child summary chips */}
-              {(() => {
-                const byChild: Record<string, { name: string; total: number; count: number }> = {}
-                for (const p of penalties as any[]) {
-                  const key = p.childId || p.childName
-                  if (!byChild[key]) byChild[key] = { name: p.childName || 'Ребёнок', total: 0, count: 0 }
-                  byChild[key].total += p.amount || 0
-                  byChild[key].count++
-                }
-                const groups = Object.values(byChild)
-                return groups.length > 0 && (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                    {groups.map((g, i) => (
-                      <Box
-                        key={i}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1,
-                          px: 1.5,
-                          py: 0.75,
-                          borderRadius: '12px',
-                          bgcolor: '#FFF5F5',
-                          border: '1px solid #FFD0D0',
-                        }}
-                      >
-                        <Typography sx={{ fontWeight: 700, color: '#C70000', fontSize: '0.875rem' }}>
-                          {g.name}
-                        </Typography>
-                        <Typography sx={{ fontWeight: 800, color: '#C70000', fontSize: '0.875rem' }}>
-                          −{g.total} ⭐
-                        </Typography>
-                        <Typography sx={{ color: '#C70000', fontSize: '0.75rem', opacity: 0.7 }}>
-                          ({g.count})
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                )
-              })()}
-
-              {/* Recent penalties list */}
-              <Card variant="outlined" sx={{ borderRadius: '12px', borderColor: '#FFD0D0' }}>
-                <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-                  {(penalties as any[]).slice(0, 8).map((p, idx, arr) => {
-                    const date = p.createdAt?.toDate
-                      ? p.createdAt.toDate()
-                      : p.createdAt?._seconds
-                        ? new Date(p.createdAt._seconds * 1000)
-                        : p.createdAt
-                          ? new Date(p.createdAt)
-                          : null
-                    const dateStr = date
-                      ? date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) +
-                        ' ' +
-                        date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-                      : ''
-                    const refLabel = p.refType === 'DECAY'
-                      ? 'Угасание'
-                      : p.refType === 'MANUAL'
-                        ? 'Вручную'
-                        : p.refType || ''
-                    return (
-                      <Box
-                        key={p.id}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1.5,
-                          px: 2,
-                          py: 1.5,
-                          borderBottom: idx < arr.length - 1 ? '1px solid #FFEBEB' : 'none',
-                        }}
-                      >
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
-                            <Typography sx={{ fontWeight: 700, color: colors.text.primary, fontSize: '0.9375rem' }}>
-                              {p.childName}
-                            </Typography>
-                            <Chip label={refLabel} size="small" sx={{ height: 18, fontSize: '0.6875rem', bgcolor: 'grey.100' }} />
-                          </Box>
-                          {p.reason && (
-                            <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {p.reason}
-                            </Typography>
-                          )}
-                        </Box>
-                        <Typography sx={{ fontSize: '0.75rem', color: 'text.disabled', whiteSpace: 'nowrap' }}>
-                          {dateStr}
-                        </Typography>
-                        <Typography sx={{ fontWeight: 800, color: '#C70000', fontSize: '1rem', minWidth: 70, textAlign: 'right' }}>
-                          −{p.amount} ⭐
-                        </Typography>
-                        <Tooltip title="Удалить штраф (вернуть баллы)">
-                          <span>
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                if (window.confirm(`Удалить штраф −${p.amount} ⭐ для ${p.childName}? Баллы будут возвращены.`)) {
-                                  deletePenaltyMutation.mutate(p.id)
-                                }
-                              }}
-                              disabled={deletePenaltyMutation.isPending}
-                              sx={{
-                                color: '#C70000',
-                                '&:hover': { bgcolor: '#FFEBEB' },
-                              }}
-                            >
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                    )
-                  })}
-                  {penalties.length > 8 && (
-                    <Box sx={{ px: 2, py: 1, bgcolor: '#FFF5F5', textAlign: 'center' }}>
-                      <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                        Показано 8 из {penalties.length}
-                      </Typography>
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            </Box>
-          </motion.div>
-        )}
-
-        {/* Бонусы */}
-        {bonuses && bonuses.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.27 }}
-          >
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #34C759 0%, #1B8B3A 100%)' }} />
-                <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                  Бонусы
-                </Typography>
-                <Chip
-                  label={bonuses.length}
-                  size="small"
-                  sx={{ bgcolor: '#34C759', color: 'white', fontWeight: 700, fontSize: '0.8125rem' }}
-                />
-                {(() => {
-                  const total = bonuses.reduce((s, b: any) => s + (b.amount || 0), 0)
-                  return (
-                    <Chip
-                      label={`+${total} ⭐ всего`}
-                      size="small"
-                      sx={{ bgcolor: '#E8F5E9', color: '#1B8B3A', fontWeight: 700, fontSize: '0.8125rem' }}
-                    />
-                  )
-                })()}
-              </Box>
-
-              {/* Per-child summary chips */}
-              {(() => {
-                const byChild: Record<string, { name: string; total: number; count: number }> = {}
-                for (const b of bonuses as any[]) {
-                  const key = b.childId || b.childName
-                  if (!byChild[key]) byChild[key] = { name: b.childName || 'Ребёнок', total: 0, count: 0 }
-                  byChild[key].total += b.amount || 0
-                  byChild[key].count++
-                }
-                const groups = Object.values(byChild)
-                return groups.length > 0 && (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                    {groups.map((g, i) => (
-                      <Box
-                        key={i}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1,
-                          px: 1.5,
-                          py: 0.75,
-                          borderRadius: '12px',
-                          bgcolor: '#F1FBF3',
-                          border: '1px solid #BFE6C7',
-                        }}
-                      >
-                        <Typography sx={{ fontWeight: 700, color: '#1B8B3A', fontSize: '0.875rem' }}>
-                          {g.name}
-                        </Typography>
-                        <Typography sx={{ fontWeight: 800, color: '#1B8B3A', fontSize: '0.875rem' }}>
-                          +{g.total} ⭐
-                        </Typography>
-                        <Typography sx={{ color: '#1B8B3A', fontSize: '0.75rem', opacity: 0.7 }}>
-                          ({g.count})
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                )
-              })()}
-
-              {/* Recent bonuses list */}
-              <Card variant="outlined" sx={{ borderRadius: '12px', borderColor: '#BFE6C7' }}>
-                <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-                  {(bonuses as any[]).slice(0, 8).map((b, idx, arr) => {
-                    const date = b.createdAt?.toDate
-                      ? b.createdAt.toDate()
-                      : b.createdAt?._seconds
-                        ? new Date(b.createdAt._seconds * 1000)
-                        : b.createdAt
-                          ? new Date(b.createdAt)
-                          : null
-                    const dateStr = date
-                      ? date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) +
-                        ' ' +
-                        date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-                      : ''
-                    return (
-                      <Box
-                        key={b.id}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1.5,
-                          px: 2,
-                          py: 1.5,
-                          borderBottom: idx < arr.length - 1 ? '1px solid #E5F5E8' : 'none',
-                        }}
-                      >
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
-                            <Typography sx={{ fontWeight: 700, color: colors.text.primary, fontSize: '0.9375rem' }}>
-                              {b.childName}
-                            </Typography>
-                            <Chip label="Вручную" size="small" sx={{ height: 18, fontSize: '0.6875rem', bgcolor: 'grey.100' }} />
-                          </Box>
-                          {b.reason && (
-                            <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {b.reason}
-                            </Typography>
-                          )}
-                        </Box>
-                        <Typography sx={{ fontSize: '0.75rem', color: 'text.disabled', whiteSpace: 'nowrap' }}>
-                          {dateStr}
-                        </Typography>
-                        <Typography sx={{ fontWeight: 800, color: '#1B8B3A', fontSize: '1rem', minWidth: 70, textAlign: 'right' }}>
-                          +{b.amount} ⭐
-                        </Typography>
-                        <Tooltip title="Удалить бонус (списать баллы)">
-                          <span>
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                if (window.confirm(`Удалить бонус +${b.amount} ⭐ для ${b.childName}? Баллы будут списаны.`)) {
-                                  deleteBonusMutation.mutate(b.id)
-                                }
-                              }}
-                              disabled={deleteBonusMutation.isPending}
-                              sx={{
-                                color: '#1B8B3A',
-                                '&:hover': { bgcolor: '#E8F5E9' },
-                              }}
-                            >
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                    )
-                  })}
-                  {bonuses.length > 8 && (
-                    <Box sx={{ px: 2, py: 1, bgcolor: '#F1FBF3', textAlign: 'center' }}>
-                      <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                        Показано 8 из {bonuses.length}
-                      </Typography>
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            </Box>
-          </motion.div>
-        )}
-        </Box>
 
         {/* «Управление заданиями» удалено: под этим заголовком рисовалась
             большая карточка с балансом и заработано/потрачено — те же самые
@@ -1241,69 +675,11 @@ export default function ParentHome() {
             управления заданиями в ней не было. */}
 
 
-        {/* Бейджи выбранного ребенка */}
-        {selectedChild && safeSelectedChildIndex >= 0 && childBadges && childBadges.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <Box sx={{ mb: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #F59E0B 0%, #EF7C00 100%)' }} />
-                <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                  Бейджи · {selectedChild.childName}
-                </Typography>
-              </Box>
-              {/* Ряд компактных значков вместо карточек с рамками: у бейджа
-                  всего три поля, а карточка занимала под них 230 px высоты. */}
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.25 }}>
-                {childBadges.map((childBadge: any) => (
-                  <Tooltip
-                    key={childBadge.id}
-                    arrow
-                    title={childBadge.earnedAt
-                      ? `${childBadge.badge?.title || 'Бейдж'} · ${new Date(childBadge.earnedAt).toLocaleDateString('ru-RU')}`
-                      : (childBadge.badge?.title || 'Бейдж')}
-                  >
-                    <Box
-                      sx={{
-                        display: 'flex', alignItems: 'center', gap: 0.75,
-                        px: 1, py: 0.6, borderRadius: 2,
-                        border: '1px solid rgba(0,0,0,0.08)', bgcolor: '#fff',
-                        maxWidth: 210, minWidth: 0,
-                      }}
-                    >
-                      {childBadge.badge?.imageUrl ? (
-                        <Box
-                          component="img" loading="lazy" decoding="async"
-                          src={childBadge.badge.imageUrl}
-                          alt={childBadge.badge.title}
-                          sx={{ width: 32, height: 32, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }}
-                        />
-                      ) : (
-                        <Box sx={{ fontSize: '1.4rem', lineHeight: 1, flexShrink: 0 }}>
-                          {childBadge.badge?.icon || '🏆'}
-                        </Box>
-                      )}
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 600, fontSize: '0.78rem', lineHeight: 1.2 }} noWrap>
-                          {childBadge.badge?.title || 'Бейдж'}
-                        </Typography>
-                        {childBadge.earnedAt && (
-                          <Typography sx={{ fontSize: '0.66rem', color: colors.text.secondary }}>
-                            {new Date(childBadge.earnedAt).toLocaleDateString('ru-RU')}
-                          </Typography>
-                        )}
-                      </Box>
-                    </Box>
-                  </Tooltip>
-                ))}
-              </Box>
-            </Box>
-          </motion.div>
-        )}
 
+        {/* Топ заданий, одобрения, ручные баллы, бейджи и челленджи больше
+            не живут отдельными секциями: всё это относится к конкретному
+            ребёнку и переехало внутрь его карточки выше. Здесь остаётся
+            только то, что действительно общее для семьи. */}
         {/* ── ЗАРАБОТАНО ДЕНЕГ ──────────────────────────────────────── */}
         {childrenStats && childrenStats.some((s: any) => (s.totalMoneyEarnedCents || 0) > 0) && (() => {
           // Monthly breakdown from conversion history
@@ -1379,192 +755,6 @@ export default function ParentHome() {
           )
         })()}
 
-        {/* ── ЧЕЛЛЕНДЖИ ──────────────────────────────────────────────── */}
-        {challengesData && challengesData.length > 0 && (() => {
-          const today = new Date()
-          today.setHours(0, 0, 0, 0)
-
-          const processed = (challengesData as any[]).map((ch) => {
-            const endDate = ch.endDate?.toDate ? ch.endDate.toDate() : new Date(ch.endDate)
-            const startDate = ch.startDate?.toDate ? ch.startDate.toDate() : new Date(ch.startDate)
-            const rule = typeof ch.ruleJson === 'string' ? JSON.parse(ch.ruleJson) : ch.ruleJson || {}
-            const reward = typeof ch.rewardJson === 'string' ? JSON.parse(ch.rewardJson) : ch.rewardJson || {}
-
-            // Прогресс выбранного ребёнка (если выбран)
-            const childStat = selectedChildId
-              ? ch.childrenStats?.find((s: any) => s.childId === selectedChildId || s.childId === selectedChild?.childId)
-              : null
-            const progress = childStat?.progress || null
-            const isCompleted = childStat?.isCompleted || false
-            const isPast = endDate < today
-            const isFailed = isPast && !isCompleted
-
-            return { ...ch, endDate, startDate, rule, reward, childStat, progress, isCompleted, isFailed, isActive: !isCompleted && !isFailed }
-          })
-
-          // Если выбран конкретный ребёнок — фильтруем
-          const toShow = selectedChildId
-            ? processed.filter((ch) => {
-                const parts = typeof ch.participantsJson === 'string' ? JSON.parse(ch.participantsJson) : ch.participantsJson || []
-                return parts.length === 0 || parts.includes(selectedChildId)
-              })
-            : processed
-
-          const completed = toShow.filter((ch) => ch.isCompleted)
-          const active = toShow.filter((ch) => ch.isActive)
-          const failed = toShow.filter((ch) => ch.isFailed)
-
-          if (toShow.length === 0) return null
-
-          const ruleLabel = (rule: any) =>
-            rule.type === 'DAILY_TASK' ? `${rule.minDays} дней`
-            : rule.type === 'TOTAL_TASKS' ? `${rule.minCompletions} раз`
-            : rule.type === 'STREAK' ? `${rule.minDays} дней подряд`
-            : rule.type === 'CONSECUTIVE' ? `${rule.minConsecutive} дней без пропуска`
-            : rule.type === 'TASK_POINTS' ? `${rule.minPoints} баллов`
-            : ''
-
-          const ChallengeCard = ({ ch, variant }: { ch: any; variant: 'completed' | 'active' | 'failed' }) => {
-            const progressPct = ch.progress ? Math.min(100, Math.round((ch.progress.current / ch.progress.target) * 100)) : 0
-            const borderColor = variant === 'completed' ? '#34C759' : variant === 'failed' ? '#FF3B30' : colors.primary.main
-            const bgColor = variant === 'completed' ? '#34C75908' : variant === 'failed' ? '#FF3B3008' : '#fff'
-
-            return (
-              <Card sx={{ borderRadius: 2.5, border: `1.5px solid ${borderColor}20`, background: bgColor, overflow: 'hidden', height: '100%' }}>
-                {ch.imageUrl && (
-                  <Box component="img" loading="lazy" decoding="async" src={ch.imageUrl} alt={ch.title}
-                    sx={{ width: '100%', height: 90, objectFit: 'cover', display: 'block' }} />
-                )}
-                <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 0.75 }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: '0.875rem', color: colors.text.primary, lineHeight: 1.3, flex: 1 }}>
-                      {variant === 'completed' ? '✅ ' : variant === 'failed' ? '❌ ' : '⏳ '}{ch.title}
-                    </Typography>
-                    {ch.reward.type === 'POINTS' && (
-                      <Chip label={`+${ch.reward.value} ⭐`} size="small"
-                        sx={{ fontSize: '0.7rem', height: 20, ml: 0.5, flexShrink: 0,
-                          background: variant === 'completed' ? '#34C75920' : '#FF9F0A18',
-                          color: variant === 'completed' ? '#34C759' : '#FF9F0A', fontWeight: 700 }} />
-                    )}
-                  </Box>
-                  <Typography variant="caption" sx={{ color: colors.text.secondary, display: 'block', mb: 0.75 }}>
-                    {ruleLabel(ch.rule)} · {ch.endDate.toLocaleDateString('ru-RU')}
-                  </Typography>
-                  {ch.progress && (
-                    <>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                        <Typography variant="caption" sx={{ color: colors.text.secondary, fontSize: '0.7rem' }}>
-                          {ch.progress.current} / {ch.progress.target}
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: borderColor, fontSize: '0.7rem', fontWeight: 700 }}>
-                          {progressPct}%
-                        </Typography>
-                      </Box>
-                      <LinearProgress variant="determinate" value={progressPct}
-                        sx={{ height: 5, borderRadius: 3,
-                          backgroundColor: borderColor + '20',
-                          '& .MuiLinearProgress-bar': { backgroundColor: borderColor, borderRadius: 3 } }} />
-                    </>
-                  )}
-                  {/* Статистика всех детей если ребёнок не выбран */}
-                  {!selectedChildId && ch.childrenStats && ch.childrenStats.length > 0 && (
-                    <Box sx={{ mt: 0.75, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                      {ch.childrenStats.map((cs: any) => (
-                        <Box key={cs.childId} sx={{
-                          display: 'inline-flex', alignItems: 'center', gap: 0.4,
-                          px: 0.75, py: 0.2, borderRadius: 10, fontSize: '0.68rem', fontWeight: 600,
-                          background: cs.isCompleted ? '#34C75918' : '#F2F2F7',
-                          color: cs.isCompleted ? '#34C759' : colors.text.secondary,
-                          border: `1px solid ${cs.isCompleted ? '#34C75940' : '#E5E5EA'}`,
-                        }}>
-                          <Box sx={{ width: 5, height: 5, borderRadius: '50%', background: cs.isCompleted ? '#34C759' : '#C7C7CC' }} />
-                          {cs.childName?.split(' ')[0]}
-                        </Box>
-                      ))}
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            )
-          }
-
-          return (
-            <motion.div key="challenges-section" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }}>
-              <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                  <Box sx={{ width: 4, height: 24, borderRadius: 2, background: 'linear-gradient(180deg, #FF9F0A 0%, #FF6B00 100%)' }} />
-                  <Typography sx={{ fontWeight: 800, fontSize: { xs: '1.125rem', sm: '1.25rem' }, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-                    Челленджи{selectedChild ? ` · ${selectedChild.childName}` : ''}
-                  </Typography>
-                </Box>
-
-                {/* В процессе */}
-                {active.length > 0 && (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: colors.primary.main, textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.72rem', mb: 1, display: 'block' }}>
-                      ⏳ В процессе · {active.length}
-                    </Typography>
-                    <Grid container spacing={1.5}>
-                      {active.map((ch) => (
-                        <Grid item xs={12} sm={6} md={4} key={ch.id}>
-                          <ChallengeCard ch={ch} variant="active" />
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
-                )}
-
-                {/* Выполненные */}
-                {completed.length > 0 && (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#34C759', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.72rem', mb: 1, display: 'block' }}>
-                      ✅ Выполнены · {completed.length}
-                    </Typography>
-                    <Grid container spacing={1.5}>
-                      {completed.map((ch) => (
-                        <Grid item xs={12} sm={6} md={4} key={ch.id}>
-                          <ChallengeCard ch={ch} variant="completed" />
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
-                )}
-
-                {/* Провалены */}
-                {failed.length > 0 && (
-                  <Box sx={{ mb: 1 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#FF3B30', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.72rem', mb: 1, display: 'block' }}>
-                      ❌ Провалены · {failed.length}
-                    </Typography>
-                    <Grid container spacing={1.5}>
-                      {failed.map((ch) => (
-                        <Grid item xs={12} sm={6} md={4} key={ch.id}>
-                          <ChallengeCard ch={ch} variant="failed" />
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
-                )}
-              </Box>
-            </motion.div>
-          )
-        })()}
-
-        {childrenStats && childrenStats.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <Typography variant="h4" sx={{ mb: 2, color: colors.text.primary, fontWeight: 600 }}>
-              Дети еще не добавлены
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<GroupAddIcon />}
-              onClick={() => navigate('/parent/children')}
-              sx={{ mt: 2, fontWeight: 600 }}
-            >
-              Добавить ребенка
-            </Button>
-          </Box>
-        ) : null}
 
         {/* Диалог с описанием показателей */}
         <Dialog open={helpDialog.open} onClose={() => setHelpDialog({ open: false, title: '', description: '' })}>
