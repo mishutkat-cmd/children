@@ -23,22 +23,20 @@ export class WishlistService {
 
     const wishlistItems = await this.db.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' });
 
-    const result = [];
-    for (const item of wishlistItems) {
-      const reward = await this.db.findFirst('rewards', { id: item.rewardId });
-      result.push({
-        ...item,
-        rewardGoal: reward,
-        child: {
-          id: childId,
-          name: childProfile.name || user?.login,
-          login: user?.login,
-          email: user?.email,
-        },
-      });
-    }
+    // Награды одним запросом на весь список — раньше был findFirst на каждое
+    // бажання, и список из двадцати стоил двадцати чтений.
+    const rewardById = await this.rewardsByIds(wishlistItems.map((i: any) => i.rewardId));
 
-    return result;
+    return wishlistItems.map((item: any) => ({
+      ...item,
+      rewardGoal: rewardById.get(item.rewardId) ?? null,
+      child: {
+        id: childId,
+        name: childProfile.name || user?.login,
+        login: user?.login,
+        email: user?.email,
+      },
+    }));
   }
 
   async add(childId: string, dto: AddToWishlistDto) {
@@ -155,34 +153,60 @@ export class WishlistService {
     return this.findAll(childId);
   }
 
+  /** Награды для списка бажань: один запрос вместо findFirst на каждое. */
+  private async rewardsByIds(ids: (string | undefined)[]) {
+    const rewardIds = [...new Set(ids.filter(Boolean))] as string[];
+    const rewards = rewardIds.length
+      ? await this.db.findMany('rewards', { id: { in: rewardIds } })
+      : [];
+    return new Map<string, any>(rewards.map((r: any) => [r.id, r]));
+  }
+
   async findAllForFamily(familyId: string) {
-    // Получаем всех детей семьи
+    // Профили, бажання и награды — по одному запросу на всю семью. Раньше на
+    // каждого ребёнка шло два запроса, плюс ещё один на каждое бажання за
+    // наградой: для двоих детей с двумя десятками бажань это ~45 чтений.
     const children = await this.db.findMany('users', { familyId, role: 'CHILD' });
-    
-    const result = [];
-    for (const child of children) {
-      const childProfiles = await this.db.findMany('childProfiles', { userId: child.id });
-      if (childProfiles.length === 0) continue;
-      
-      const childProfileId = childProfiles[0].id;
-      const wishlistItems = await this.db.findMany('wishlist', { childId: childProfileId }, { priority: 'asc' });
-      
-      for (const item of wishlistItems) {
-        const reward = await this.db.findFirst('rewards', { id: item.rewardId });
-        result.push({
-          ...item,
-          rewardGoal: reward,
-          child: {
-            id: child.id,
-            name: childProfiles[0].name || child.login,
-            login: child.login,
-            email: child.email,
-          },
-        });
-      }
+    if (children.length === 0) return [];
+
+    const profiles = await this.db.findMany('childProfiles', {
+      userId: { in: children.map((c: any) => c.id) },
+    });
+    if (profiles.length === 0) return [];
+
+    const profileByUserId = new Map<string, any>();
+    for (const profile of profiles) {
+      // Один профиль на ребёнка; при дубле берём первый, как делал старый код.
+      if (!profileByUserId.has(profile.userId)) profileByUserId.set(profile.userId, profile);
     }
-    
-    return result;
+
+    const items = await this.db.findMany(
+      'wishlist',
+      { childId: { in: profiles.map((p: any) => p.id) } },
+      { priority: 'asc' },
+    );
+    if (items.length === 0) return [];
+
+    const rewardById = await this.rewardsByIds(items.map((i: any) => i.rewardId));
+    const childByProfileId = new Map<string, any>();
+    for (const child of children) {
+      const profile = profileByUserId.get(child.id);
+      if (!profile) continue;
+      childByProfileId.set(profile.id, {
+        id: child.id,
+        name: profile.name || child.login,
+        login: child.login,
+        email: child.email,
+      });
+    }
+
+    return items
+      .filter((item: any) => childByProfileId.has(item.childId))
+      .map((item: any) => ({
+        ...item,
+        rewardGoal: rewardById.get(item.rewardId) ?? null,
+        child: childByProfileId.get(item.childId),
+      }));
   }
 
   async update(wishlistId: string, familyId: string, dto: UpdateWishlistItemDto) {

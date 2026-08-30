@@ -62,37 +62,33 @@ export class TasksService {
         }
       }
       
-      // Enrich tasks with their assignments — and each assignment with its
-      // child profile — fully in parallel. Previously this was a nested
-      // sequential for-of, taking O(tasks × assignments) round-trips.
-      const result = await Promise.all(
-        filteredTasks.map(async (task) => {
-          try {
-            const assignments = await this.db.findMany('taskAssignments', { taskId: task.id });
-            const assignmentsWithChildren = await Promise.all(
-              assignments.map(async (assignment) => {
-                try {
-                  const childProfile = await this.db.findFirst('childProfiles', { id: assignment.childId });
-                  return { ...assignment, child: childProfile };
-                } catch (error: any) {
-                  if (process.env.NODE_ENV === 'development') {
-                    console.error('[TasksService] Error loading child profile for assignment:', error.message);
-                  }
-                  return { ...assignment, child: null };
-                }
-              }),
-            );
-            return { ...task, taskAssignments: assignmentsWithChildren };
-          } catch (error: any) {
-            if (process.env.NODE_ENV === 'development') {
-              console.error('[TasksService] Error processing task:', error.message);
-            }
-            return { ...task, taskAssignments: [] };
-          }
-        }),
-      );
+      // Enrich tasks with their assignments, and each assignment with its
+      // child profile, in two queries for the whole list. Doing it per task
+      // (one assignments query each, then one profile query per assignment)
+      // cost 1 + 2N reads for a list the parent page refetches after every
+      // approval, completion and edit.
+      const taskIds = filteredTasks.map((t: any) => t.id);
+      const assignments = taskIds.length
+        ? await this.db.findMany('taskAssignments', { taskId: { in: taskIds } })
+        : [];
 
-      return result;
+      const profileIds = [...new Set(assignments.map((a: any) => a.childId).filter(Boolean))] as string[];
+      const profiles = profileIds.length
+        ? await this.db.findMany('childProfiles', { id: { in: profileIds } })
+        : [];
+      const profileById = new Map<string, any>(profiles.map((p: any) => [p.id, p]));
+
+      const assignmentsByTask = new Map<string, any[]>();
+      for (const assignment of assignments) {
+        const list = assignmentsByTask.get(assignment.taskId) ?? [];
+        list.push({ ...assignment, child: profileById.get(assignment.childId) ?? null });
+        assignmentsByTask.set(assignment.taskId, list);
+      }
+
+      return filteredTasks.map((task: any) => ({
+        ...task,
+        taskAssignments: assignmentsByTask.get(task.id) ?? [],
+      }));
     } catch (error: any) {
       // Всегда логируем ошибки
       console.error('[TasksService] Error in findAll:', error.message);
