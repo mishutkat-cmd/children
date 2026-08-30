@@ -356,10 +356,15 @@ export class TasksService {
 
     if (todayOnly) {
       // Today's view is naturally bounded — one query, one day.
+      //
+      // Every status, not just APPROVED: a task the child has just sent for
+      // approval has a PENDING completion, and both clients decide what to
+      // draw from `c.status`. Filtering to APPROVED here meant the card came
+      // back looking untouched right after the child tapped "Выполнить" —
+      // the same data the date endpoint below has always returned in full.
       const where: any = {
         childId: childProfileId,
         taskId: { in: taskIds },
-        status: 'APPROVED',
         performedAt: { gte: today, lt: tomorrow },
       };
       const todays = taskIds.length ? await this.db.findMany('completions', where) : [];
@@ -407,24 +412,24 @@ export class TasksService {
       );
     }
 
-    // Filter by frequency for today
+    // Filter by frequency for today.
+    //
+    // A finished DAILY task used to be dropped from the list once it had an
+    // APPROVED completion. From the child's side the card simply vanished —
+    // no "Готово", nothing to show for the work — and the day's total shrank
+    // as tasks were approved, so "сделано 2 из 5" could never be counted.
+    // Both clients already render a completed card, so the day now returns
+    // everything that belongs to it, exactly like the date endpoint below.
     if (todayOnly) {
       const dayOfWeek = today.getDay();
       return tasksWithCompletions.filter((task) => {
-        if (task.frequency === 'DAILY') {
-          return task.completions.length === 0 || 
-                 task.completions.every((c) => c.status !== 'APPROVED');
-        }
-        if (task.frequency === 'WEEKLY') {
-          return true; // Can be done once per week
-        }
         if (task.frequency === 'CUSTOM' && task.daysOfWeek) {
-          const daysOfWeek = typeof task.daysOfWeek === 'string' 
-            ? JSON.parse(task.daysOfWeek) 
+          const daysOfWeek = typeof task.daysOfWeek === 'string'
+            ? JSON.parse(task.daysOfWeek)
             : task.daysOfWeek;
           return Array.isArray(daysOfWeek) && daysOfWeek.includes(dayOfWeek);
         }
-        return true; // ONCE
+        return true; // DAILY / WEEKLY / ONCE
       });
     }
 
