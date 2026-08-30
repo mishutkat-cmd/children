@@ -343,6 +343,15 @@ const isTaskCompletedForChild = (taskId: string, childStat: ChildStatWithComplet
   return childStat.completedTasks.some((t: Task) => t.id === taskId)
 }
 
+// Стоит ли задание в расписании на конкретный день.
+// CUSTOM хранит выбранные дни недели; остальные частоты актуальны каждый день.
+const isTaskScheduledOn = (task: Task, date: Date): boolean => {
+  if (task.frequency !== 'CUSTOM') return true
+  const days = parseDaysOfWeek(task.daysOfWeek)
+  if (days.length === 0) return true
+  return days.includes(date.getDay())
+}
+
 // Кому назначено задание.
 // Источников назначения два: task.assignedTo ('ALL' или userId ребенка — так
 // пишет форма) и таблица taskAssignments (там лежит childProfileId — так
@@ -1047,6 +1056,7 @@ export default function ParentTasks() {
                       const taskStatus = getTaskStatusForChild(task.id, selectedChildId || '', pendingCompletions)
                       const isPending = taskStatus === 'PENDING'
                       const isPersonalTask = !!task.assignedTo && task.assignedTo !== 'ALL'
+                      const scheduledToday = isTaskScheduledOn(task, new Date())
                       const childrenStatuses = showAllChildrenStatus && todayStatistics?.children
                         ? todayStatistics.children
                             .filter((cs: any) => isTaskAssignedToChild(task, cs))
@@ -1167,25 +1177,38 @@ export default function ParentTasks() {
                                 )}
                                 {childrenStatuses.length === 0 ? (
                                   <Typography variant="caption" sx={{ color: '#C7C7CC' }}>—</Typography>
-                                ) : childrenStatuses.map((cs: any) => (
-                                  <Tooltip key={cs.childName} title={`${cs.childName}: ${cs.isCompleted ? 'выполнено' : cs.isPending ? 'ожидает' : 'не выполнено'}`}>
-                                    <Box sx={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 0.4,
-                                      px: 0.75, py: 0.2, borderRadius: 10, cursor: 'default',
-                                      fontSize: '0.72rem', fontWeight: 600,
-                                      background: cs.isCompleted ? '#34C75918' : cs.isPending ? '#FF9F0A18' : '#F2F2F7',
-                                      color: cs.isCompleted ? '#34C759' : cs.isPending ? '#FF9F0A' : '#8E8E93',
-                                      border: `1px solid ${cs.isCompleted ? '#34C75940' : cs.isPending ? '#FF9F0A40' : '#E5E5EA'}`,
-                                    }}>
+                                ) : childrenStatuses.map((cs: any) => {
+                                  // Ребенок в этом списке — уже назначенный, поэтому
+                                  // «ещё не выполнено» рисуем обычным тёмным текстом:
+                                  // серый цвет читался как «задание ему не выбрано».
+                                  // Выключенный вид остаётся только за днями, когда
+                                  // задания нет в расписании.
+                                  const label = !scheduledToday
+                                    ? 'сегодня не по расписанию'
+                                    : cs.isCompleted ? 'выполнено' : cs.isPending ? 'ожидает подтверждения' : 'ещё не выполнено'
+                                  const accent = !scheduledToday ? '#C7C7CC' : cs.isCompleted ? '#34C759' : cs.isPending ? '#FF9F0A' : colors.primary.main
+                                  return (
+                                    <Tooltip key={cs.childName} title={`${cs.childName}: ${label}`}>
                                       <Box sx={{
-                                        width: 6, height: 6, borderRadius: '50%',
-                                        background: cs.isCompleted ? '#34C759' : cs.isPending ? '#FF9F0A' : '#C7C7CC',
-                                        flexShrink: 0,
-                                      }} />
-                                      {cs.childName.split(' ')[0]}
-                                    </Box>
-                                  </Tooltip>
-                                ))}
+                                        display: 'inline-flex', alignItems: 'center', gap: 0.4,
+                                        px: 0.75, py: 0.2, borderRadius: 10, cursor: 'default',
+                                        fontSize: '0.72rem', fontWeight: 600,
+                                        background: !scheduledToday ? 'transparent' : cs.isCompleted ? '#34C75918' : cs.isPending ? '#FF9F0A18' : '#F2F2F7',
+                                        color: !scheduledToday ? '#8E8E93' : cs.isCompleted ? '#34C759' : cs.isPending ? '#FF9F0A' : colors.text.primary,
+                                        border: `1px ${scheduledToday ? 'solid' : 'dashed'} ${accent}${scheduledToday ? '40' : '80'}`,
+                                        opacity: scheduledToday ? 1 : 0.75,
+                                      }}>
+                                        <Box sx={{
+                                          width: 6, height: 6, borderRadius: '50%',
+                                          background: scheduledToday && (cs.isCompleted || cs.isPending) ? accent : 'transparent',
+                                          border: scheduledToday && (cs.isCompleted || cs.isPending) ? 'none' : `1px solid ${accent}`,
+                                          flexShrink: 0,
+                                        }} />
+                                        {cs.childName.split(' ')[0]}
+                                      </Box>
+                                    </Tooltip>
+                                  )
+                                })}
                               </Box>
                             </TableCell>
                           )}
