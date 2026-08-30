@@ -24,7 +24,7 @@ export class LocalStorageService {
 
   /** Folders whose contents may be served by the static handler. */
   static readonly PUBLIC_FOLDERS = ['avatars', 'badges', 'rewards', 'wishlist', 'characters'] as const;
-  static readonly PRIVATE_FOLDERS = ['proofs'] as const;
+  static readonly PRIVATE_FOLDERS = ['proofs', 'audio'] as const;
 
   /** Web-served root. Everything under it is reachable at `${publicBase}/...`. */
   get publicRoot(): string {
@@ -126,6 +126,12 @@ export class LocalStorageService {
         buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
         buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
       ) return 'image/webp';
+
+      // Аудио-записи ребёнка: контейнер MP4/M4A начинается с box 'ftyp'
+      // (байты 4..8), запись expo-audio на iOS и Android ложится именно в него.
+      if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
+        return 'audio/mp4';
+      }
 
       return null;
     } catch {

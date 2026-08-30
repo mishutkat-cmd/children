@@ -2,7 +2,7 @@ import axios, { AxiosError, AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '../store/authStore'
 
 // В продакшене при раздаче SPA с того же домена — относительные запросы (пустая строка)
-const API_BASE_URL =
+export const API_BASE_URL =
   import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ''
     ? import.meta.env.VITE_API_URL
     : import.meta.env.PROD

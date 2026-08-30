@@ -288,3 +288,17 @@ export interface ChildLocationHistory {
   count: number
   points: ChildLocation[]
 }
+
+// ── Аудио «послушать, что вокруг» (с согласия ребёнка) ─────────
+
+export type AudioRequestStatus = 'PENDING' | 'DENIED' | 'READY' | 'EXPIRED'
+
+export interface AudioRequest {
+  id: string
+  childId: string
+  status: AudioRequestStatus
+  durationSec: number
+  audioUrl: string | null
+  createdAt: string
+  respondedAt: string | null
+}

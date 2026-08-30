@@ -120,6 +120,7 @@ async function bootstrap() {
         '/wishlist',
         '/notifications',
         '/locations',
+        '/audio',
         '/upload',
         '/health',
         '/diagnostics',

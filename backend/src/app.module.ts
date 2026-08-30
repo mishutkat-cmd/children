@@ -18,6 +18,7 @@ import { MotivationModule } from './motivation/motivation.module';
 import { BadgesModule } from './badges/badges.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { LocationsModule } from './locations/locations.module';
+import { AudioModule } from './audio/audio.module';
 import { RetentionModule } from './retention/retention.module';
 import { StorageKvModule } from './storage-kv/storage-kv.module';
 
@@ -45,6 +46,7 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
     BadgesModule,
     NotificationsModule,
     LocationsModule,
+    AudioModule,
     RetentionModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

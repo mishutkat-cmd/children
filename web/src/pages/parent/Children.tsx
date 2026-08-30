@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ListenControl from '../../components/ListenControl'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -387,6 +388,10 @@ export default function ParentChildren() {
                     >
                       Посмотреть бейджи
                     </Button>
+                    <ListenControl
+                      childId={child.id}
+                      childName={child.childProfile?.name || child.login}
+                    />
                   </CardContent>
                 </AnimatedCard>
               </Grid>
