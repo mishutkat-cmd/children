@@ -11,6 +11,17 @@ type CompletionStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 type LedgerType = 'EARN' | 'SPEND' | 'BONUS' | 'PENALTY' | 'ADJUST';
 type LedgerRefType = 'COMPLETION' | 'EXCHANGE' | 'CHALLENGE' | 'DECAY' | 'MANUAL';
 
+/**
+ * Пошаговый лог начисления баллов незаменим при разборе «почему не начислилось»,
+ * но на проде он писался на каждое выполнение и каждое подтверждение — включая
+ * сериализацию объектов внутри цикла пакетного подтверждения. Оставляем его за
+ * тем же флагом, за которым он уже спрятан в TasksService.
+ */
+const isDev = process.env.NODE_ENV === 'development';
+const debug = (...args: any[]) => {
+  if (isDev) console.log(...args);
+};
+
 @Injectable()
 export class CompletionsService {
   constructor(
@@ -23,7 +34,7 @@ export class CompletionsService {
 
   async create(childId: string, familyId: string, dto: CreateCompletionDto) {
     try {
-      console.log('[CompletionsService] create called:', { childId, familyId, taskId: dto.taskId });
+      debug('[CompletionsService] create called:', { childId, familyId, taskId: dto.taskId });
       
       // Валидация: убеждаемся, что taskId указан
       if (!dto.taskId) {
@@ -35,9 +46,9 @@ export class CompletionsService {
       let userId = childId;
 
       // Проверяем, является ли childId userId или ChildProfile.id
-      console.log('[CompletionsService] Looking for childProfile by userId:', childId);
+      debug('[CompletionsService] Looking for childProfile by userId:', childId);
       const childProfileByUserId = await this.db.findFirst('childProfiles', { userId: childId });
-      console.log('[CompletionsService] Looking for childProfile by id:', childId);
+      debug('[CompletionsService] Looking for childProfile by id:', childId);
       const childProfileById = await this.db.findFirst('childProfiles', { id: childId });
       const childProfile = childProfileByUserId || childProfileById;
 
@@ -46,7 +57,7 @@ export class CompletionsService {
         throw new NotFoundException(`Child not found: childId=${childId}, familyId=${familyId}`);
       }
       
-      console.log('[CompletionsService] Child profile found:', { childProfileId: childProfile.id, userId: childProfile.userId });
+      debug('[CompletionsService] Child profile found:', { childProfileId: childProfile.id, userId: childProfile.userId });
 
       // Проверяем, что user принадлежит к familyId
       const user = await this.db.findFirst('users', { id: childProfile.userId, familyId });
@@ -96,7 +107,7 @@ export class CompletionsService {
 
       if (existing) {
         const dateStr = targetDateStart.toLocaleDateString('ru-RU');
-        console.log(`Task ${task.id} already completed on ${dateStr} for child ${childProfileId}. Existing completion:`, {
+        debug(`Task ${task.id} already completed on ${dateStr} for child ${childProfileId}. Existing completion:`, {
           id: existing.id,
           status: existing.status,
           performedAt: existing.performedAt,
@@ -137,7 +148,7 @@ export class CompletionsService {
         ? Math.round(task.points * multiplier)
         : task.points; // Используем точное значение без округления, если нет multiplier
       
-      console.log('[CompletionsService] Points calculation:', {
+      debug('[CompletionsService] Points calculation:', {
         taskId: task.id,
         taskTitle: task.title,
         basePoints: task.points,
@@ -223,7 +234,7 @@ export class CompletionsService {
         });
         // Не создаем дублирующую запись, но продолжаем выполнение
       } else {
-        console.log('[CompletionsService] Awarding points:', {
+        debug('[CompletionsService] Awarding points:', {
           userId,
           childProfileId,
           finalPoints,
@@ -253,7 +264,7 @@ export class CompletionsService {
             completionId,
             meta,
           );
-          console.log('[CompletionsService] Points awarded successfully');
+          debug('[CompletionsService] Points awarded successfully');
         } catch (ledgerError: any) {
           console.error('[CompletionsService] Error awarding points:', ledgerError.message);
           console.error('[CompletionsService] Ledger error stack:', ledgerError.stack);
@@ -408,7 +419,7 @@ export class CompletionsService {
     });
     
     const hasLedgerEntry = existingLedgerEntries.length > 0;
-    console.log('[CompletionsService] approve - Checking for duplicate ledger entries:', {
+    debug('[CompletionsService] approve - Checking for duplicate ledger entries:', {
       completionId: completion.id,
       pointsAlreadyAwarded,
       hasLedgerEntry,
@@ -453,7 +464,7 @@ export class CompletionsService {
         ? Math.round(task.points * multiplier)
         : task.points; // Используем точное значение без округления, если нет multiplier
       
-      console.log('[CompletionsService] approve - Points calculation:', {
+      debug('[CompletionsService] approve - Points calculation:', {
         taskId: task.id,
         taskTitle: task.title,
         basePoints: task.points,
@@ -475,7 +486,7 @@ export class CompletionsService {
       
       if (finalLedgerCheck.length === 0) {
         // Create ledger entry только если его еще нет
-        console.log('[CompletionsService] approve - Creating ledger entry for completion:', completion.id);
+        debug('[CompletionsService] approve - Creating ledger entry for completion:', completion.id);
         await this.ledgerService.createEntry(
           familyId,
           userId,
@@ -490,10 +501,10 @@ export class CompletionsService {
           },
         );
       } else {
-        console.log('[CompletionsService] approve - Ledger entry already exists, skipping');
+        debug('[CompletionsService] approve - Ledger entry already exists, skipping');
       }
     } else if (hasLedgerEntry) {
-      console.log('[CompletionsService] approve - Points already awarded and ledger entry exists, skipping point award');
+      debug('[CompletionsService] approve - Points already awarded and ledger entry exists, skipping point award');
     }
     
     // Check and reward challenges for this completion
@@ -617,7 +628,7 @@ export class CompletionsService {
     });
 
     if (!completion) {
-      console.log('[CompletionsService] markAsNotCompleted - No completion found:', {
+      debug('[CompletionsService] markAsNotCompleted - No completion found:', {
         taskId,
         childId,
         childProfileId,
@@ -630,7 +641,7 @@ export class CompletionsService {
 
     const task = await this.db.findFirst('tasks', { id: completion.taskId });
 
-    console.log('[CompletionsService] markAsNotCompleted - Found completion:', {
+    debug('[CompletionsService] markAsNotCompleted - Found completion:', {
       completionId: completion.id,
       status: completion.status,
       pointsAwarded: completion.pointsAwarded,
@@ -673,7 +684,7 @@ export class CompletionsService {
     // Рассчитываем, сколько еще нужно отнять
     const remainingPointsToDeduct = totalEarned - totalAdjusted;
     
-    console.log('[CompletionsService] markAsNotCompleted - Ledger analysis:', {
+    debug('[CompletionsService] markAsNotCompleted - Ledger analysis:', {
       completionId: completion.id,
       completionPointsAwarded: completion.pointsAwarded,
       earnEntriesCount: earnEntries.length,
@@ -686,7 +697,7 @@ export class CompletionsService {
 
     // Если есть некомпенсированные баллы - создаем ADJUST запись
     if (remainingPointsToDeduct > 0) {
-      console.log('[CompletionsService] markAsNotCompleted - Creating adjust entry to cancel remaining points:', remainingPointsToDeduct);
+      debug('[CompletionsService] markAsNotCompleted - Creating adjust entry to cancel remaining points:', remainingPointsToDeduct);
       await this.ledgerService.createEntry(
         familyId,
         userId, // Используем userId для LedgerEntry
@@ -699,9 +710,9 @@ export class CompletionsService {
           reason: 'COMPLETION_CANCELLED',
         },
       );
-      console.log('[CompletionsService] markAsNotCompleted - Balance should be updated via ledgerService');
+      debug('[CompletionsService] markAsNotCompleted - Balance should be updated via ledgerService');
     } else if (remainingPointsToDeduct === 0) {
-      console.log('[CompletionsService] markAsNotCompleted - All points already cancelled, skipping');
+      debug('[CompletionsService] markAsNotCompleted - All points already cancelled, skipping');
     } else {
       console.warn('[CompletionsService] markAsNotCompleted - Negative remaining points detected (more adjusted than earned), this should not happen!');
     }

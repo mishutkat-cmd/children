@@ -51,7 +51,13 @@ function loadOne(path: string): boolean {
     const content = readFileSync(path, 'utf8');
     const parsed = dotenvParse ? dotenvParse(content) : parseEnvFile(content);
     for (const [key, value] of Object.entries(parsed)) {
-      if (value !== undefined) process.env[key] = String(value);
+      if (value === undefined) continue;
+      // Реальное окружение сильнее файла — обычная семантика dotenv. Раньше
+      // .env затирал уже выставленные переменные, из-за чего `PORT=3099 node
+      // server.js` молча уходил на порт из файла, а поднять вторую копию
+      // рядом (например, для проверки) было нельзя.
+      if (process.env[key] !== undefined && process.env[key] !== '') continue;
+      process.env[key] = String(value);
     }
     envFileUsed = path;
     return true;
