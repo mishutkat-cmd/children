@@ -172,21 +172,13 @@ export default function ChildTasks() {
       queryClient.invalidateQueries({ queryKey: ['child-tasks-today'] })
       queryClient.invalidateQueries({ queryKey: ['child-summary'] })
       queryClient.invalidateQueries({ queryKey: ['child-completions'] })
-      // Принудительно обновляем все данные для немедленного отображения изменений
-      queryClient.refetchQueries({ queryKey: ['child-summary'] })
-      queryClient.refetchQueries({ queryKey: ['child-tasks-date'] })
-      queryClient.refetchQueries({ queryKey: ['child-tasks-today'] })
+      // refetchQueries тех же ключей здесь не нужен: invalidateQueries уже
+      // перезапрашивает активные запросы, а так каждое выполнение уходило
+      // на сервер дважды.
       setCompletionDialog({ open: false, task: null })
       setNote('')
       setProofUrl('')
       setProofFile(null)
-      // Очищаем submittedTasks через небольшую задержку после обновления данных
-      setTimeout(() => {
-        setSubmittedTasks((prev) => {
-          const newSet = new Set(prev)
-          return newSet
-        })
-      }, 2000)
     },
     onError: (_error: any, variables) => {
       // Убираем задание из списка отправленных при ошибке

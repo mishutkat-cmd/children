@@ -2,18 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { Completion, CreateCompletionDto } from '../types/api'
 
-export const useCompletions = (childId?: string) => {
-  return useQuery<Completion[]>({
-    queryKey: ['completions', childId],
-    queryFn: async () => {
-      const url = childId ? `/completions?childId=${childId}` : '/completions'
-      const response = await api.get(url)
-      return response.data
-    },
-    enabled: childId !== undefined,
-  })
-}
-
 export const usePendingCompletions = () => {
   return useQuery<Completion[]>({
     queryKey: ['pending-completions'],
@@ -24,61 +12,9 @@ export const usePendingCompletions = () => {
   })
 }
 
-export const useCreateCompletion = () => {
-  const queryClient = useQueryClient()
-  
-  return useMutation({
-    mutationFn: async (data: CreateCompletionDto) => {
-      const response = await api.post('/completions', data)
-      return response.data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['completions'] })
-      queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-    },
-  })
-}
-
-export const useCreateCompletionForChild = () => {
-  const queryClient = useQueryClient()
-  
-  return useMutation({
-    mutationFn: async (data: CreateCompletionDto & { childId: string; performedAt?: string }) => {
-      const response = await api.post('/completions/parent/completions', data)
-      return response.data
-    },
-    onSuccess: () => {
-      // Инвалидируем все связанные запросы для полного обновления данных
-      // Используем более широкую инвалидацию для всех вариантов query keys
-      queryClient.invalidateQueries({ queryKey: ['completions'] })
-      queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-      queryClient.invalidateQueries({ queryKey: ['child-analytics'] })
-      queryClient.invalidateQueries({ queryKey: ['completions-for-calendar'] })
-      queryClient.invalidateQueries({ queryKey: ['week-completions'] }) // Инвалидируем календарь недели
-      queryClient.invalidateQueries({ queryKey: ['child-badges'] })
-      queryClient.invalidateQueries({ queryKey: ['badges'] })
-      queryClient.invalidateQueries({ queryKey: ['challenges'] })
-      queryClient.invalidateQueries({ queryKey: ['child-summary'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['child-tasks-today'] })
-      queryClient.invalidateQueries({ queryKey: ['child-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['children'] })
-      
-      // Принудительно обновляем статистику с небольшим таймаутом для завершения backend операций
-      setTimeout(() => {
-        queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-        queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-      }, 500)
-    },
-  })
-}
-
-// Списки, которые действительно меняются от подтверждения/отклонения.
-// Ими же инвалидируем после пакетного подтверждения.
+// Списки, которые меняются от любой правки выполнений: отметить, отменить,
+// подтвердить, отклонить. Один список на файл — раньше каждая мутация несла
+// свою копию из полутора десятков invalidateQueries, и они разъезжались.
 const COMPLETION_AFFECTED_KEYS = [
   ['pending-completions'],
   ['completions'],
@@ -114,6 +50,20 @@ const dropFromPending = (queryClient: ReturnType<typeof useQueryClient>, ids: st
     queryClient.setQueryData<Completion[]>(['pending-completions'], previous.filter(c => !removed.has(c.id)))
   }
   return previous
+}
+
+export const useCreateCompletionForChild = () => {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: async (data: CreateCompletionDto & { childId: string; performedAt?: string }) => {
+      const response = await api.post('/completions/parent/completions', data)
+      return response.data
+    },
+    onSuccess: () => {
+      invalidateCompletionQueries(queryClient)
+    },
+  })
 }
 
 export const useApproveCompletionsBatch = () => {
@@ -191,29 +141,7 @@ export const useMarkAsNotCompleted = () => {
       return response.data
     },
     onSuccess: () => {
-      // Инвалидируем все связанные запросы для полного обновления данных
-      queryClient.invalidateQueries({ queryKey: ['completions'] })
-      queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-      queryClient.invalidateQueries({ queryKey: ['child-analytics'] })
-      queryClient.invalidateQueries({ queryKey: ['completions-for-calendar'] })
-      queryClient.invalidateQueries({ queryKey: ['week-completions'] }) // Инвалидируем календарь недели
-      queryClient.invalidateQueries({ queryKey: ['child-badges'] })
-      queryClient.invalidateQueries({ queryKey: ['badges'] })
-      queryClient.invalidateQueries({ queryKey: ['challenges'] })
-      queryClient.invalidateQueries({ queryKey: ['child-summary'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['child-tasks-today'] })
-      queryClient.invalidateQueries({ queryKey: ['child-completions'] })
-      queryClient.invalidateQueries({ queryKey: ['children'] })
-      
-      // Принудительно обновляем статистику с таймаутом для завершения backend операций
-      setTimeout(() => {
-        queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-        queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-        queryClient.refetchQueries({ queryKey: ['child-analytics'] })
-      }, 500)
+      invalidateCompletionQueries(queryClient)
     },
   })
 }

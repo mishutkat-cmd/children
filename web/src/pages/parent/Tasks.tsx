@@ -1510,17 +1510,9 @@ export default function ParentTasks() {
                           createCompletionForChild.mutate(
                             { taskId: task.id, childId: selectedChildId, performedAt: selectedDate ? selectedDate.toISOString() : undefined },
                             {
-                              onSuccess: () => {
-                                setMarkingTaskId(null)
-                                queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-                                queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-                                queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                                setTimeout(() => {
-                                  queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-                                  queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-                                  queryClient.refetchQueries({ queryKey: ['tasks'] })
-                                }, 500)
-                              },
+                              // Инвалидацию делает сама мутация (useCompletions),
+                              // здесь достаточно снять спиннер с кнопки.
+                              onSuccess: () => setMarkingTaskId(null),
                               onError: () => setMarkingTaskId(null),
                             }
                           )
@@ -1531,11 +1523,7 @@ export default function ParentTasks() {
                           markAsNotCompleted.mutate(
                             { taskId: task.id, childId: selectedChildId, date: selectedDate ? selectedDate.toISOString() : undefined },
                             {
-                              onSuccess: () => {
-                                setNotCompletingTaskId(null)
-                                queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-                                queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-                              },
+                              onSuccess: () => setNotCompletingTaskId(null),
                               onError: () => setNotCompletingTaskId(null),
                             }
                           )
@@ -1543,34 +1531,14 @@ export default function ParentTasks() {
                         onApprove={pendingCompletion?.id ? () => {
                           setApprovingCompletionId(pendingCompletion.id)
                           approveCompletion.mutate(pendingCompletion.id, {
-                            onSuccess: () => {
-                              setApprovingCompletionId(null)
-                              queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-                              queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-                              queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-                              queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                              setTimeout(() => {
-                                queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-                                queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-                              }, 300)
-                            },
+                            onSuccess: () => setApprovingCompletionId(null),
                             onError: () => setApprovingCompletionId(null),
                           })
                         } : undefined}
                         onReject={pendingCompletion?.id ? () => {
                           setRejectingCompletionId(pendingCompletion.id)
                           rejectCompletion.mutate(pendingCompletion.id, {
-                            onSuccess: () => {
-                              setRejectingCompletionId(null)
-                              queryClient.invalidateQueries({ queryKey: ['pending-completions'] })
-                              queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-                              queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-                              queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                              setTimeout(() => {
-                                queryClient.refetchQueries({ queryKey: ['tasks-statistics-today'] })
-                                queryClient.refetchQueries({ queryKey: ['children-statistics'] })
-                              }, 300)
-                            },
+                            onSuccess: () => setRejectingCompletionId(null),
                             onError: () => setRejectingCompletionId(null),
                           })
                         } : undefined}
