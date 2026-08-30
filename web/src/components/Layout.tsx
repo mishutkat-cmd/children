@@ -443,7 +443,7 @@ export default function Layout({ children }: LayoutProps) {
                   onClick={() => navigate('/parent/wishlist')}
                 />
                 <Tab
-                  label="Отчёт"
+                  label={t('nav.reports')}
                   onClick={() => navigate('/parent/reports')}
                 />
                 <Tab
