@@ -96,6 +96,9 @@ export const COLLECTIONS: Record<string, string[][]> = {
   locationPoints: [['childId', 'capturedAt'], ['familyId', 'capturedAt'], ['expiresAt']],
   childLocations: [['familyId'], ['childId']],
   locationSettings: [['familyId']],
+  // Аудио «послушать, что вокруг» с согласия ребёнка.
+  audioRequests: [['familyId', 'createdAt'], ['childId', 'status']],
+  audioConsent: [['childId'], ['familyId']],
   _kv: [],
 };
 
