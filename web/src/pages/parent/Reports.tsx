@@ -28,6 +28,41 @@ const MONTH_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 
+/**
+ * Column geometry for the month grid.
+ *
+ * A month is up to 31 day columns plus a task name and a summary — far wider
+ * than any screen, so the container scrolls horizontally. That makes the two
+ * end columns the ones a reader loses first: the task name when scrolling
+ * right, the summary when not scrolling at all. Both are pinned.
+ */
+const TASK_COL_WIDTH = 220
+const DAY_COL_WIDTH = 34
+// Wide enough for the three-group case ("9✅2⏳21❌"), which overflowed at 80.
+const TOTAL_COL_WIDTH = 104
+
+const taskColumnSx = {
+  position: 'sticky' as const,
+  left: 0,
+  zIndex: 2,
+  width: TASK_COL_WIDTH,
+  minWidth: TASK_COL_WIDTH,
+  maxWidth: TASK_COL_WIDTH,
+  borderRight: '2px solid',
+  borderRightColor: 'divider',
+}
+
+const totalColumnSx = {
+  position: 'sticky' as const,
+  right: 0,
+  zIndex: 2,
+  width: TOTAL_COL_WIDTH,
+  minWidth: TOTAL_COL_WIDTH,
+  px: 1,
+  borderLeft: '2px solid',
+  borderLeftColor: 'divider',
+}
+
 function daysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
 }
@@ -223,12 +258,24 @@ export default function ParentReports() {
         ) : !childId ? (
           <Card><CardContent><Typography color="text.secondary">Нет детей</Typography></CardContent></Card>
         ) : (
-          <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
-            <Table size="small" sx={{ minWidth: days.length * 38 + 220 }}>
+          <TableContainer
+            component={Paper}
+            variant="outlined"
+            sx={{ overflowX: 'auto', maxWidth: '100%' }}
+          >
+            <Table
+              size="small"
+              sx={{
+                // Sum of what the columns below actually ask for. Computing it
+                // from a different per-day figure let the table claim a width
+                // its own cells did not agree with.
+                minWidth: TASK_COL_WIDTH + days.length * DAY_COL_WIDTH + TOTAL_COL_WIDTH,
+              }}
+            >
               <TableHead>
                 {/* Day numbers row */}
                 <TableRow sx={{ bgcolor: 'grey.50' }}>
-                  <TableCell sx={{ fontWeight: 700, minWidth: 200, position: 'sticky', left: 0, bgcolor: 'grey.50', zIndex: 2, borderRight: '2px solid', borderRightColor: 'divider' }}>
+                  <TableCell sx={{ ...taskColumnSx, fontWeight: 700, bgcolor: 'grey.50', zIndex: 3 }}>
                     Задание
                   </TableCell>
                   {days.map(d => {
@@ -244,7 +291,8 @@ export default function ParentReports() {
                           fontWeight: isToday ? 900 : isWeekend ? 600 : 400,
                           color: isToday ? 'primary.main' : isWeekend ? 'error.main' : 'text.primary',
                           p: '4px 2px',
-                          minWidth: 34,
+                          width: DAY_COL_WIDTH,
+                          minWidth: DAY_COL_WIDTH,
                           fontSize: '0.75rem',
                           borderBottom: isToday ? '2px solid' : undefined,
                           borderBottomColor: 'primary.main',
@@ -255,7 +303,10 @@ export default function ParentReports() {
                       </TableCell>
                     )
                   })}
-                  <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap', minWidth: 80 }}>
+                  <TableCell
+                    align="center"
+                    sx={{ ...totalColumnSx, fontWeight: 700, fontSize: '0.75rem', bgcolor: 'grey.50', zIndex: 3 }}
+                  >
                     Итого
                   </TableCell>
                 </TableRow>
@@ -271,11 +322,29 @@ export default function ParentReports() {
                   return (
                     <TableRow key={task.id} sx={{ bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', '&:hover': { bgcolor: 'action.hover' } }}>
                       {/* Task name */}
-                      <TableCell sx={{ position: 'sticky', left: 0, bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', zIndex: 1, borderRight: '2px solid', borderRightColor: 'divider', py: 0.75 }}>
+                      <TableCell sx={{ ...taskColumnSx, bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', py: 0.75 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Box sx={{ fontSize: '1.1rem', lineHeight: 1 }}>{sanitizeIcon(task.icon)}</Box>
-                          <Box>
-                            <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.2 }}>{task.title}</Typography>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography
+                              variant="body2"
+                              fontWeight={600}
+                              title={task.title}
+                              sx={{
+                                lineHeight: 1.2,
+                                // The column is a fixed width now, so a long
+                                // title has to be clamped rather than allowed
+                                // to make one row three times taller than the
+                                // rest of the grid.
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                wordBreak: 'break-word',
+                              }}
+                            >
+                              {task.title}
+                            </Typography>
                             <Typography variant="caption" color="text.secondary">{task.points} ⭐</Typography>
                           </Box>
                         </Box>
@@ -311,6 +380,8 @@ export default function ParentReports() {
                               align="center"
                               sx={{
                                 p: '2px',
+                                width: DAY_COL_WIDTH,
+                                minWidth: DAY_COL_WIDTH,
                                 bgcolor: cell.bgcolor,
                                 fontSize: '0.85rem',
                                 cursor: 'default',
@@ -325,7 +396,10 @@ export default function ParentReports() {
                       })}
 
                       {/* Summary */}
-                      <TableCell align="center" sx={{ py: 0.75, px: 1, minWidth: 80 }}>
+                      <TableCell
+                        align="center"
+                        sx={{ ...totalColumnSx, bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', py: 0.75 }}
+                      >
                         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
                           {/* Rate badge */}
                           <Box sx={{
