@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class CreateAudioRequestDto {
   /**
@@ -10,4 +10,9 @@ export class CreateAudioRequestDto {
   @Min(5)
   @Max(60)
   durationSec?: number;
+}
+
+export class SetConsentDto {
+  @IsBoolean()
+  enabled: boolean;
 }

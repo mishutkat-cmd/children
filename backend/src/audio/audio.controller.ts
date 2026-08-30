@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   UploadedFile,
   UseGuards,
@@ -15,7 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { Throttle } from '@nestjs/throttler';
 import { AudioService, DEFAULT_DURATION_SEC } from './audio.service';
-import { CreateAudioRequestDto } from './dto/audio.dto';
+import { CreateAudioRequestDto, SetConsentDto } from './dto/audio.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -35,7 +36,20 @@ export class AudioController {
     return this.audioService.pendingForChild(user.userId, user.familyId);
   }
 
-  @Post('requests')
+  /** Согласие ребёнка на запись без отдельного разрешения каждый раз. */
+  @Get('consent')
+  @Roles('CHILD')
+  getConsent(@User() user: RequestUser) {
+    return this.audioService.getConsent(user.userId, user.familyId);
+  }
+
+  @Patch('consent')
+  @Roles('CHILD')
+  setConsent(@User() user: RequestUser, @Body() dto: SetConsentDto) {
+    return this.audioService.setConsent(user.userId, user.familyId, dto.enabled);
+  }
+
+    @Post('requests')
   @Roles('PARENT')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

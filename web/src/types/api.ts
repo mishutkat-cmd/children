@@ -297,6 +297,7 @@ export interface AudioRequest {
   id: string
   childId: string
   status: AudioRequestStatus
+  autoConsent: boolean
   durationSec: number
   audioUrl: string | null
   createdAt: string

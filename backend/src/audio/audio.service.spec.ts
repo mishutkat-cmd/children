@@ -9,6 +9,8 @@ class FakeDb {
     { id: 'childUser', familyId: 'f1', role: 'CHILD' },
     { id: 'otherChild', familyId: 'f1', role: 'CHILD' },
   ];
+  async set(c: string, id: string, data: any) { this.rows.set(`${c}:${id}`, { ...(this.rows.get(`${c}:${id}`) || {}), ...data }); }
+  getSync(c: string, id: string) { return this.rows.get(`${c}:${id}`) ?? null; }
   async create(_c: string, data: any, id?: string) { this.rows.set(id ?? data.id, { ...data, createdAt: new Date() }); return id ?? data.id; }
   async get(_c: string, id: string) { return this.rows.get(id) ?? null; }
   async update(_c: string, id: string, patch: any) { this.rows.set(id, { ...this.rows.get(id), ...patch }); }
@@ -74,5 +76,17 @@ describe('AudioService — согласие и владение', () => {
     await expect(
       svc.fulfil('childUser', 'f2', req.id, { buffer: Buffer.from('x') } as any),
     ).rejects.toBeDefined();
+  });
+
+  it('стоячее согласие: ребёнок включает, оно видно в запросе', async () => {
+    await svc.setConsent('childUser', 'f1', true);
+    expect((await svc.getConsent('childUser', 'f1')).enabled).toBe(true);
+    const req = await svc.createRequest('f1', 'parent1', 'childUser', 30);
+    expect((req as any).autoConsent).toBe(true);
+  });
+
+  it('без согласия запрос помечен autoConsent=false', async () => {
+    const req = await svc.createRequest('f1', 'parent1', 'childUser', 30);
+    expect((req as any).autoConsent).toBe(false);
   });
 });

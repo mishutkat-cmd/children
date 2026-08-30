@@ -4,6 +4,7 @@ import { LocalStorageService } from '../files/local-storage.service';
 import { getChildProfileId } from '../db/doc-helpers';
 
 const COLLECTION = 'audioRequests';
+const CONSENT_COLLECTION = 'audioConsent';
 
 /** Сколько ребёнку даётся на ответ, прежде чем запрос считается просроченным. */
 const CONSENT_WINDOW_MS = 3 * 60 * 1000;
@@ -110,6 +111,37 @@ export class AudioService {
     return { ok: true };
   }
 
+  // ── Стоячее согласие ребёнка ────────────────────────────────
+
+  /**
+   * Ребёнок один раз разрешает записывать без отдельного согласия каждый раз.
+   * Включает и выключает это ТОЛЬКО сам ребёнок — иначе это была бы слежка,
+   * а не функция безопасности. Даже при включённом согласии каждая запись
+   * ребёнку видна (плашка и обратный отсчёт) и может быть отменена.
+   */
+  async setConsent(userId: string, familyId: string, enabled: boolean) {
+    const resolved = await getChildProfileId(this.db, userId, familyId);
+    if (!resolved) throw new NotFoundException('Child profile not found');
+    await this.db.set(
+      CONSENT_COLLECTION,
+      resolved.childProfileId,
+      { childId: resolved.childProfileId, familyId, autoConsent: enabled, updatedAt: new Date() },
+      { merge: true },
+    );
+    return { enabled };
+  }
+
+  async getConsent(userId: string, familyId: string) {
+    const resolved = await getChildProfileId(this.db, userId, familyId);
+    if (!resolved) return { enabled: false };
+    return { enabled: this.consentFor(resolved.childProfileId) };
+  }
+
+  private consentFor(childId: string): boolean {
+    const doc = this.db.getSync(CONSENT_COLLECTION, childId);
+    return doc?.autoConsent === true;
+  }
+
   // ── Общее ───────────────────────────────────────────────────
 
   private async assertOwnPending(userId: string, familyId: string, id: string) {
@@ -138,6 +170,7 @@ export class AudioService {
       id: row.id,
       childId: row.childId,
       status,
+      autoConsent: this.consentFor(row.childId),
       durationSec: row.durationSec ?? DEFAULT_DURATION_SEC,
       audioUrl: row.audioUrl ?? null,
       createdAt: row.createdAt,
