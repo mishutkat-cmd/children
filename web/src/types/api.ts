@@ -311,11 +311,19 @@ export interface AppUsage {
   appLabel: string
   totalMs: number
 }
+export interface ActivityCategory { category: string; totalMs: number }
 export interface ChildActivity {
   childId: string
   date: string
   totalMs: number
+  categories: ActivityCategory[]
   apps: AppUsage[]
+}
+export interface ActivityHistory {
+  childId: string
+  days: number
+  avgMs: number
+  series: { date: string; totalMs: number }[]
 }
 export interface ActivitySummaryRow {
   childId: string

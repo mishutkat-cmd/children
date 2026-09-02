@@ -25,3 +25,13 @@ export const useChildActivity = (childId: string | null, date?: string) => {
     staleTime: 60_000,
   })
 }
+
+import type { ActivityHistory } from '../types/api'
+export const useChildActivityHistory = (childId: string | null, days = 7) => {
+  return useQuery<ActivityHistory>({
+    queryKey: ['activity-history', childId, days],
+    queryFn: async () => (await api.get(`/activity/children/${childId}/history?days=${days}`)).data,
+    enabled: !!childId,
+    staleTime: 60_000,
+  })
+}
