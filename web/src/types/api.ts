@@ -303,3 +303,26 @@ export interface AudioRequest {
   createdAt: string
   respondedAt: string | null
 }
+
+// ── Аналитика активности (экранное время по приложениям) ──────
+
+export interface AppUsage {
+  packageName: string
+  appLabel: string
+  totalMs: number
+}
+export interface ChildActivity {
+  childId: string
+  date: string
+  totalMs: number
+  apps: AppUsage[]
+}
+export interface ActivitySummaryRow {
+  childId: string
+  userId: string
+  name: string
+  avatarUrl?: string | null
+  totalMs: number
+  topApp: string | null
+  hasData: boolean
+}

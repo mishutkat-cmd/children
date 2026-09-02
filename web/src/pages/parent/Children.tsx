@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import BarChartIcon from '@mui/icons-material/BarChart'
 import ListenControl from '../../components/ListenControl'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -392,6 +393,14 @@ export default function ParentChildren() {
                       childId={child.id}
                       childName={child.childProfile?.name || child.login}
                     />
+                    <Button
+                      size="small"
+                      startIcon={<BarChartIcon />}
+                      onClick={() => navigate('/parent/activity')}
+                      sx={{ mt: 1 }}
+                    >
+                      Аналитика активности
+                    </Button>
                   </CardContent>
                 </AnimatedCard>
               </Grid>

@@ -155,12 +155,13 @@ export default function Layout({ children }: LayoutProps) {
       else if (path.startsWith('/parent/wishlist')) tabValue = 6
       else if (path.startsWith('/parent/reports')) tabValue = 7
       else if (path.startsWith('/parent/map')) tabValue = 8
+      else if (path.startsWith('/parent/activity')) tabValue = 9
       else tabValue = 0
 
-      const maxTabIndex = 8 // 9 табов: 0-8
+      const maxTabIndex = 9 // 10 табов: 0-9
       const calculatedValue = Math.max(0, Math.min(tabValue, maxTabIndex))
 
-      const knownPaths = ['/parent', '/parent/children', '/parent/tasks', '/parent/challenges', '/parent/badges', '/parent/conversion', '/parent/wishlist', '/parent/reports', '/parent/map']
+      const knownPaths = ['/parent', '/parent/children', '/parent/tasks', '/parent/challenges', '/parent/badges', '/parent/conversion', '/parent/wishlist', '/parent/reports', '/parent/map', '/parent/activity']
       const isKnownPath = knownPaths.some(knownPath => path === knownPath || path.startsWith(knownPath + '/'))
       
       return isKnownPath ? calculatedValue : 0
@@ -449,6 +450,10 @@ export default function Layout({ children }: LayoutProps) {
                 <Tab
                   label={t('nav.map')}
                   onClick={() => navigate('/parent/map')}
+                />
+                <Tab
+                  label={t('nav.activity')}
+                  onClick={() => navigate('/parent/activity')}
                 />
               </>
             ) : (
