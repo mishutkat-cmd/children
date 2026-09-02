@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { getChildProfileId } from '../db/doc-helpers';
 import { ReportUsageDto } from './dto/activity.dto';
+import { categorize } from './categories';
 
 const COLLECTION = 'appUsage';
 /** Сколько дней держим срезы использования. */
@@ -68,7 +69,39 @@ export class ActivityService {
       }))
       .sort((a, b) => b.totalMs - a.totalMs);
     const totalMs = apps.reduce((sum, a) => sum + a.totalMs, 0);
-    return { childId, date, totalMs, apps };
+
+    // Категории: сворачиваем приложения в «видео/игры/соцсети/…».
+    const byCat = new Map<string, number>();
+    for (const a of apps) {
+      const cat = categorize(a.packageName);
+      byCat.set(cat, (byCat.get(cat) || 0) + a.totalMs);
+    }
+    const categories = Array.from(byCat.entries())
+      .map(([category, ms]) => ({ category, totalMs: ms }))
+      .sort((x, y) => y.totalMs - x.totalMs);
+
+    return { childId, date, totalMs, categories, apps };
+  }
+
+  /** Итог экранного времени по дням за последние N дней (для тренда). */
+  async history(familyId: string, childIdOrUserId: string, days = 7) {
+    const resolved = await getChildProfileId(this.db, childIdOrUserId, familyId);
+    if (!resolved) throw new NotFoundException('Child not found in this family');
+    const childId = resolved.childProfileId;
+
+    const window = Math.min(Math.max(days, 1), 30);
+    const out: { date: string; totalMs: number }[] = [];
+    for (let i = window - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const date = d.toISOString().slice(0, 10);
+      const rows = await this.db.findMany(COLLECTION, { childId, date });
+      const totalMs = rows.reduce((sum: number, r: any) => sum + (r.totalMs || 0), 0);
+      out.push({ date, totalMs });
+    }
+    const withData = out.filter((d) => d.totalMs > 0);
+    const avgMs = withData.length ? Math.round(withData.reduce((s, d) => s + d.totalMs, 0) / withData.length) : 0;
+    return { childId, days: window, avgMs, series: out };
   }
 
   /** Итог за день по всем детям — сколько всего экранного времени у каждого. */

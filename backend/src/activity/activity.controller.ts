@@ -30,6 +30,13 @@ export class ActivityController {
     return this.activityService.summary(user.familyId, date || today());
   }
 
+  /** Тренд экранного времени по дням (для графика). Объявлен ДО ':childId'-детали. */
+  @Get('children/:childId/history')
+  @Roles('PARENT')
+  history(@User() user: RequestUser, @Param('childId') childId: string, @Query('days') days?: string) {
+    return this.activityService.history(user.familyId, childId, days ? parseInt(days, 10) : 7);
+  }
+
   /** Разбивка по приложениям за день для одного ребёнка. */
   @Get('children/:childId')
   @Roles('PARENT')

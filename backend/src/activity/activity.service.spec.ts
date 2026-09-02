@@ -52,4 +52,30 @@ describe('ActivityService', () => {
     expect(s[0]!.totalMs).toBe(7200000);
     expect(s[0]!.topApp).toBe('YouTube');
   });
+
+
+  it('сворачивает приложения в категории', async () => {
+    await svc.report('childUser', 'f1', { date: '2026-09-02', apps: [
+      { packageName: 'com.google.android.youtube', appLabel: 'YouTube', totalMs: 3600000 },
+      { packageName: 'com.roblox.client', appLabel: 'Roblox', totalMs: 1800000 },
+      { packageName: 'org.telegram.messenger', appLabel: 'Telegram', totalMs: 600000 },
+    ]});
+    const res: any = await svc.forChild('f1', 'childUser', '2026-09-02');
+    const cats = Object.fromEntries(res.categories.map((c: any) => [c.category, c.totalMs]));
+    expect(cats['Видео']).toBe(3600000);
+    expect(cats['Игры']).toBe(1800000);
+    expect(cats['Мессенджеры']).toBe(600000);
+    expect(res.categories[0].category).toBe('Видео'); // отсортировано по убыванию
+  });
+
+  it('история за 7 дней содержит сегодняшний итог и среднее', async () => {
+    await svc.report('childUser', 'f1', { date: new Date().toISOString().slice(0,10), apps: [
+      { packageName: 'com.google.android.youtube', totalMs: 3600000 },
+    ]});
+    const h: any = await svc.history('f1', 'childUser', 7);
+    expect(h.series).toHaveLength(7);
+    expect(h.series[6].totalMs).toBe(3600000); // последний день — сегодня
+    expect(h.avgMs).toBe(3600000);
+  });
+
 });
