@@ -121,6 +121,7 @@ async function bootstrap() {
         '/notifications',
         '/locations',
         '/audio',
+        '/activity',
         '/upload',
         '/health',
         '/diagnostics',

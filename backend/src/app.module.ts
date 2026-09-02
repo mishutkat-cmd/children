@@ -19,6 +19,7 @@ import { BadgesModule } from './badges/badges.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { LocationsModule } from './locations/locations.module';
 import { AudioModule } from './audio/audio.module';
+import { ActivityModule } from './activity/activity.module';
 import { RetentionModule } from './retention/retention.module';
 import { StorageKvModule } from './storage-kv/storage-kv.module';
 
@@ -47,6 +48,7 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
     NotificationsModule,
     LocationsModule,
     AudioModule,
+    ActivityModule,
     RetentionModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

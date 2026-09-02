@@ -99,6 +99,8 @@ export const COLLECTIONS: Record<string, string[][]> = {
   // Аудио «послушать, что вокруг» с согласия ребёнка.
   audioRequests: [['familyId', 'createdAt'], ['childId', 'status']],
   audioConsent: [['childId'], ['familyId']],
+  // Экранное время по приложениям (дневные срезы с устройства ребёнка).
+  appUsage: [['childId', 'date'], ['familyId', 'date'], ['expiresAt']],
   _kv: [],
 };
 
