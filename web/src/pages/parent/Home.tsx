@@ -277,7 +277,7 @@ export default function ParentHome() {
         <Card sx={{ p: 3, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
           <PetArt pet={{ kind: 'fox' }} size={64} />
           <Typography sx={{ flex: 1, minWidth: 200 }}>Добавьте ребёнка: у него появится свой питомец, задания и цели.</Typography>
-          <Button variant="contained" component={RouterLink} to="/parent/children/manage">Добавить ребёнка</Button>
+          <Button variant="contained" component={RouterLink} to="/parent/children/new">Добавить ребёнка</Button>
         </Card>
       )}
 

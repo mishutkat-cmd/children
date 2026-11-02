@@ -22,7 +22,7 @@ const ParentHome = lazy(() => import('./pages/parent/Home'))
 const ParentTasks = lazy(() => import('./pages/parent/Tasks'))
 const ParentConversion = lazy(() => import('./pages/parent/Conversion'))
 const ParentSettings = lazy(() => import('./pages/parent/Settings'))
-const ParentChildren = lazy(() => import('./pages/parent/Children'))
+const AddChild = lazy(() => import('./pages/parent/AddChild'))
 const ParentChild = lazy(() => import('./pages/parent/Child'))
 const ParentChallenges = lazy(() => import('./pages/parent/Challenges'))
 const ParentBadges = lazy(() => import('./pages/parent/Badges'))
@@ -81,7 +81,8 @@ function App() {
         <Route path="/parent/conversion" element={<PrivateRoute role="PARENT"><ParentConversion /></PrivateRoute>} />
         <Route path="/parent/settings" element={<PrivateRoute role="PARENT"><ParentSettings /></PrivateRoute>} />
         <Route path="/parent/children" element={<PrivateRoute role="PARENT"><ParentChild /></PrivateRoute>} />
-        <Route path="/parent/children/manage" element={<PrivateRoute role="PARENT"><ParentChildren /></PrivateRoute>} />
+        <Route path="/parent/children/new" element={<PrivateRoute role="PARENT"><AddChild /></PrivateRoute>} />
+        <Route path="/parent/children/manage" element={<Navigate to="/parent/children" replace />} />
         <Route path="/parent/children/:childId" element={<PrivateRoute role="PARENT"><ParentChild /></PrivateRoute>} />
         <Route path="/parent/children/:childId/badges" element={<PrivateRoute role="PARENT"><ChildBadges /></PrivateRoute>} />
         <Route path="/parent/challenges" element={<PrivateRoute role="PARENT"><ParentChallenges /></PrivateRoute>} />

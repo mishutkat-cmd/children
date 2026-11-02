@@ -86,7 +86,7 @@ export function ConnectDialog({ kid, onClose }: { kid: Kid; onClose: () => void 
 }
 
 /** Карточка «Вход и устройства» ребёнка (A_Devices). */
-export function DevicesCard({ kid }: { kid: Kid }) {
+export function DevicesCard({ kid, bare = false }: { kid: Kid; bare?: boolean }) {
   const qc = useQueryClient()
   const { data: devices = [] } = useDevices()
   const [connect, setConnect] = useState(false)
@@ -107,9 +107,10 @@ export function DevicesCard({ kid }: { kid: Kid }) {
     </Box>
   )
 
+  const Wrap = bare ? Box : Card
   return (
-    <Card sx={{ p: 2.25 }}>
-      <Typography component="h2" sx={{ fontSize: 18, fontWeight: 700, mb: 1 }}>Вход и устройства</Typography>
+    <Wrap sx={bare ? undefined : { p: 2.25 }}>
+      {!bare && <Typography component="h2" sx={{ fontSize: 18, fontWeight: 700, mb: 1 }}>Вход и устройства</Typography>}
       {mine.length === 0 && pcs.length === 0 && <Typography sx={{ fontSize: 14, color: tokens.text3, pb: 1 }}>Телефон ещё не подключён.</Typography>}
       {mine.map((d) => row(d, d.name || `Телефон ${kid.name}`, `Подключён ${dateLabel(d.createdAt)} · ${seenLabel(d.lastSeenAt)}`))}
       {pcs.map((d) => row(d, d.name || 'Семейный компьютер', 'Общий · вход по секрету из картинок'))}
@@ -122,7 +123,7 @@ export function DevicesCard({ kid }: { kid: Kid }) {
         <Button variant="outlined" size="small" disabled={reset.isPending || secretReset} onClick={() => window.confirm(`Сбросить секрет ${kid.name}? Новый ребёнок придумает в телефоне.`) && reset.mutate()}>Сбросить</Button>
       </Box>
       {connect && <ConnectDialog kid={kid} onClose={() => setConnect(false)} />}
-    </Card>
+    </Wrap>
   )
 }
 
