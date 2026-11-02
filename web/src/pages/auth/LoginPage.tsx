@@ -18,8 +18,6 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useAuthStore } from '../../store/authStore'
 import { api } from '../../lib/api'
 import { colors } from '../../theme'
-import { lazy, Suspense } from 'react'
-const LanguageSwitcher = lazy(() => import('../../components/LanguageSwitcher'))
 
 type LoginType = 'parent' | 'child'
 
@@ -87,11 +85,6 @@ export default function LoginPage() {
         p: 2,
       }}
     >
-      <Box sx={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
-        <Suspense fallback={null}>
-          <LanguageSwitcher />
-        </Suspense>
-      </Box>
 
       <motion.div
         initial={{ opacity: 0, y: 24 }}

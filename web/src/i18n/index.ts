@@ -22,15 +22,10 @@ export function setStoredLanguage(lang: SupportedLanguage): void {
   } catch (_) {}
 }
 
-/** Detect initial language at module load — synchronous, no network. */
+// Интерфейс целиком русский: сохранённый ранее выбор языка и язык браузера
+// больше не учитываются (переключатель убран из шапки).
 function detectInitialLang(): SupportedLanguage {
-  const stored = getStoredLanguage()
-  if (stored) return stored
-  try {
-    const nav = (navigator.language || 'uk').slice(0, 2).toLowerCase() as SupportedLanguage
-    if (SUPPORTED_LANGUAGES.includes(nav)) return nav
-  } catch (_) {}
-  return 'uk'
+  return 'ru'
 }
 
 /**

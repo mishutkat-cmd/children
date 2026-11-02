@@ -1,11 +1,11 @@
 import './i18n'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, useLocation } from 'react-router-dom'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import App from './App'
-import kidsTheme from './theme'
+import { parentTheme, childTheme } from './theme'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useAuthStore } from './store/authStore'
 
@@ -34,6 +34,20 @@ useAuthStore.subscribe((state, prev) => {
   if (state.user?.id !== prev.user?.id) queryClient.clear()
 })
 
+// Тема по роли: ребёнку — Nunito и «пухлые» кнопки, родителю и до входа — Inter.
+// Детский раздел определяется и по адресу, чтобы экран не мигал до загрузки user.
+function RoleTheme({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.user?.role)
+  const location = useLocation()
+  const isChild = location.pathname.startsWith('/child') || (role === 'CHILD' && !location.pathname.startsWith('/parent'))
+  return (
+    <ThemeProvider theme={isChild ? childTheme : parentTheme}>
+      <CssBaseline />
+      {children}
+    </ThemeProvider>
+  )
+}
+
 // Экспортируем queryClient для использования в других местах
 export { queryClient }
 
@@ -42,12 +56,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   // StrictMode вызывает двойной рендер, что может усугублять проблемы с порядком хуков
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={kidsTheme}>
-        <CssBaseline />
-        <BrowserRouter>
+      <BrowserRouter>
+        <RoleTheme>
           <App />
-        </BrowserRouter>
-      </ThemeProvider>
+        </RoleTheme>
+      </BrowserRouter>
     </QueryClientProvider>
   </ErrorBoundary>
 )

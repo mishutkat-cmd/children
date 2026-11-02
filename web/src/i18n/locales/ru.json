@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Kids Motivation",
+    "appName": "Звёздочки",
     "loading": "Загрузка...",
     "save": "Сохранить",
     "cancel": "Отмена",
@@ -54,7 +54,7 @@
     "register": "Зарегистрироваться",
     "registering": "Регистрация...",
     "registerTitle": "Регистрация",
-    "email": "Email",
+    "email": "Почта",
     "name": "Имя",
     "fillRequired": "Заполните все обязательные поля",
     "enterChildName": "Введите имя ребенка",
