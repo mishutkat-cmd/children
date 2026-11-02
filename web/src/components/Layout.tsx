@@ -71,7 +71,6 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     <Box sx={{ width: 240, height: '100%', boxSizing: 'border-box', p: '24px 16px', display: 'flex', flexDirection: 'column', gap: 0.5, bgcolor: tokens.paper, overflowY: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5, ml: 1.5 }}>
         <Typography sx={{ flex: 1, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>Звёздочки</Typography>
-        <NotificationBell user={user} />
       </Box>
       <Box component="nav" aria-label="Разделы" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
         {MAIN.map((i) => <NavLink key={i.to} item={i} pathname={pathname} count={i.badge ? pending : undefined} onClick={onNavigate} />)}
@@ -120,6 +119,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               Проверка · {pending}
             </ButtonBase>
           )}
+          <NotificationBell />
         </Box>
         <Box component="main" sx={{ flex: 1, minWidth: 0, p: { xs: '16px', md: '28px 32px' }, pb: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', display: 'flex', flexDirection: 'column', gap: { xs: 2, md: 2.5 } }}>
           {children}
@@ -138,6 +138,7 @@ export function PageHeader({ kicker, title, children }: { kicker?: ReactNode; ti
         <Typography component="h1" sx={{ mt: '2px', fontSize: { xs: 24, md: 28 }, fontWeight: 700, letterSpacing: '-0.02em' }}>{title}</Typography>
       </Box>
       {children && <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>{children}</Box>}
+      <Box sx={{ display: { xs: 'none', md: 'block' } }}><NotificationBell /></Box>
     </Box>
   )
 }
