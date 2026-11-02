@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Link as RouterLink, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Link as RouterLink, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Button, ButtonBase, CircularProgress, Collapse, MenuItem, TextField, Typography } from '@mui/material'
 import Layout, { PageHeader } from '../../components/Layout'
@@ -31,7 +31,8 @@ export default function ParentChild() {
   const kid = byAnyId(childId)
   const [bonus, setBonus] = useState<'bonus' | 'penalty' | null>(null)
   const [connect, setConnect] = useState(false)
-  const [open, setOpen] = useState<Section | null>('tasks')
+  const [search] = useSearchParams()
+  const [open, setOpen] = useState<Section | null>((search.get('open') as Section) || 'tasks')
   const { data: today } = useTodayStatistics()
   const { data: completions = [] } = useKidCompletions(kid?.userId, 28)
   const { data: tasks = [] } = useTasks('ACTIVE')

@@ -10,12 +10,8 @@ import {
   Avatar,
   IconButton,
   CircularProgress,
-  Grid,
 } from '@mui/material'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
-import CloudUploadIcon from '@mui/icons-material/CloudUpload'
-import EditIcon from '@mui/icons-material/Edit'
-import DeleteIcon from '@mui/icons-material/Delete'
 import LogoutIcon from '@mui/icons-material/Logout'
 import { motion } from 'framer-motion'
 import { useAuthStore } from '../../store/authStore'
@@ -24,8 +20,7 @@ import Layout, { PageHeader } from '../../components/Layout'
 import { card } from '../../components/parent/kit'
 import { FamilyPcCard, InviteCard } from '../../components/parent/access'
 import { colors, tokens } from '../../theme'
-import { useCharacters, useUpdateCharacter } from '../../hooks/useCharacters'
-import type { Character } from '../../types/api'
+import PetSettings from '../../components/parent/PetSettings'
 
 const SECTIONS = [
   ['money', 'Звёзды и деньги'],
@@ -335,8 +330,10 @@ export default function ParentSettings() {
           </Box>
         </motion.div>
 
-        {/* Настройка персонажей */}
-        <CharacterSettings />
+        <Box id="pets" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>Питомцы</Typography>
+          <PetSettings />
+        </Box>
 
         <Box id="adults" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Пригласить второго взрослого</Typography>
@@ -714,267 +711,5 @@ export default function ParentSettings() {
         </Box>
       </Box>
     </Layout>
-  )
-}
-
-// Компонент для настройки персонажей
-function CharacterSettings() {
-  const { data: characters, isLoading } = useCharacters()
-  const updateCharacter = useUpdateCharacter()
-  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
-  const [characterName, setCharacterName] = useState('')
-  const [uploadingState, setUploadingState] = useState<{characterId: string, state: 'zero' | 'low' | 'high'} | null>(null)
-
-  useEffect(() => {
-    if (editingCharacter) {
-      setCharacterName(editingCharacter.name)
-    }
-  }, [editingCharacter])
-
-  const handleUploadImage = async (character: Character, state: 'zero' | 'low' | 'high', file: File) => {
-    setUploadingState({ characterId: character.id, state })
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const response = await api.post('/upload/character', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      const imageUrl = response.data.url
-      
-      const updateData: any = {}
-      if (state === 'zero') updateData.imageUrlZero = imageUrl
-      if (state === 'low') updateData.imageUrlLow = imageUrl
-      if (state === 'high') updateData.imageUrlHigh = imageUrl
-      
-      await updateCharacter.mutateAsync({ id: character.id, data: updateData })
-    } catch (error: any) {
-      alert(error?.response?.data?.message || 'Ошибка при загрузке изображения')
-    } finally {
-      setUploadingState(null)
-    }
-  }
-
-  const handleDeleteImage = async (character: Character, state: 'zero' | 'low' | 'high') => {
-    const updateData: any = {}
-    if (state === 'zero') updateData.imageUrlZero = null
-    if (state === 'low') updateData.imageUrlLow = null
-    if (state === 'high') updateData.imageUrlHigh = null
-    
-    try {
-      await updateCharacter.mutateAsync({ id: character.id, data: updateData })
-    } catch (error: any) {
-      alert(error?.response?.data?.message || 'Ошибка при удалении изображения')
-    }
-  }
-
-  const handleSaveName = async () => {
-    if (!editingCharacter || !characterName.trim()) return
-    try {
-      await updateCharacter.mutateAsync({ id: editingCharacter.id, data: { name: characterName.trim() } })
-      setEditingCharacter(null)
-    } catch (error: any) {
-      alert(error?.response?.data?.message || 'Ошибка при сохранении имени')
-    }
-  }
-
-  if (isLoading) {
-    return (
-      <Box display="flex" justifyContent="center" p={3}>
-        <CircularProgress />
-      </Box>
-    )
-  }
-
-  return (
-    <motion.div id="kids"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.15, duration: 0.5 }}
-      style={{ marginBottom: '24px' }}
-    >
-      <Box
-        sx={{
-          ...card,
-              padding: { xs: '20px', sm: '24px' },
-        }}
-      >
-        <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-          Детское приложение: питомцы
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontSize: '0.875rem' }}>
-          Настройте 3 персонажа с 3 состояниями сытости каждый. Дети смогут выбрать одного персонажа.
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontSize: '0.875rem' }}>
-          Для каждого состояния можно загрузить по одному изображению.
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
-          Состояния сытости: <strong>0 звёзд</strong>, <strong>1–99 звёзд</strong>, <strong>100+ звёзд</strong>
-        </Typography>
-
-          <Grid container spacing={3}>
-            {characters?.slice(0, 3).map((character) => {
-              const isUploading = uploadingState?.characterId === character.id
-              return (
-                <Grid item xs={12} md={4} key={character.id}>
-                  <Box
-                    sx={{
-                      background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-                      backdropFilter: 'blur(20px)',
-                      WebkitBackdropFilter: 'blur(20px)',
-                      borderRadius: '16px',
-                      padding: { xs: '16px', sm: '20px' },
-                      border: editingCharacter?.id === character.id
-                        ? `2px solid ${colors.primary.main}`
-                        : '1px solid rgba(229, 229, 234, 0.5)',
-                      boxShadow: editingCharacter?.id === character.id
-                        ? `0 8px 32px ${colors.primary.main}20`
-                        : '0 4px 16px rgba(0,0,0,0.05)',
-                      transition: 'all 0.3s ease',
-                    }}
-                  >
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                        {editingCharacter?.id === character.id ? (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-                            <TextField
-                              size="small"
-                              value={characterName}
-                              onChange={(e) => setCharacterName(e.target.value)}
-                              placeholder="Имя персонажа"
-                              sx={{ flex: 1 }}
-                            />
-                            <Button size="small" onClick={handleSaveName} disabled={updateCharacter.isPending}>
-                              Сохранить
-                            </Button>
-                            <Button size="small" onClick={() => setEditingCharacter(null)}>
-                              Отмена
-                            </Button>
-                          </Box>
-                        ) : (
-                          <>
-                            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                              {character.name}
-                            </Typography>
-                            <IconButton size="small" onClick={() => setEditingCharacter(character)}>
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </>
-                        )}
-                      </Box>
-
-                      <Grid container spacing={1}>
-                        {(['zero', 'low', 'high'] as const).map((state) => {
-                          const stateLabels = { zero: '0 звёзд', low: '1–99 звёзд', high: '100+ звёзд' }
-                          const imageUrl = 
-                            state === 'zero' ? character.imageUrlZero :
-                            state === 'low' ? character.imageUrlLow :
-                            character.imageUrlHigh
-                          const uploading = isUploading && uploadingState?.state === state
-
-                          return (
-                            <Grid item xs={12} key={state}>
-                              <Box sx={{ mb: 2 }}>
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontWeight: 600 }}>
-                                  {stateLabels[state]}
-                                </Typography>
-                                
-                                {imageUrl ? (
-                                  <Box sx={{ position: 'relative', border: '1px solid #e0e0e0', borderRadius: 1, p: 0.5 }}>
-                                    <Box
-                                      component="img" loading="lazy" decoding="async"
-                                      src={imageUrl}
-                                      alt={`${character.name} - ${stateLabels[state]}`}
-                                      sx={{
-                                        width: '100%',
-                                        height: '120px',
-                                        objectFit: 'contain',
-                                        borderRadius: 0.5,
-                                      }}
-                                    />
-                                    <IconButton
-                                      size="small"
-                                      sx={{ 
-                                        position: 'absolute', 
-                                        top: 4, 
-                                        right: 4, 
-                                        bgcolor: 'error.main',
-                                        color: 'white',
-                                        '&:hover': { bgcolor: 'error.dark' }
-                                      }}
-                                      onClick={() => handleDeleteImage(character, state)}
-                                      disabled={updateCharacter.isPending}
-                                    >
-                                      <DeleteIcon sx={{ fontSize: 18 }} />
-                                    </IconButton>
-                                    <IconButton
-                                      size="small"
-                                      sx={{ 
-                                        position: 'absolute', 
-                                        bottom: 4, 
-                                        right: 4, 
-                                        bgcolor: 'primary.main',
-                                        color: 'white',
-                                        '&:hover': { bgcolor: 'primary.dark' }
-                                      }}
-                                      component="label"
-                                      disabled={uploading || updateCharacter.isPending}
-                                    >
-                                      {uploading ? (
-                                        <CircularProgress size={18} sx={{ color: 'white' }} />
-                                      ) : (
-                                        <CloudUploadIcon sx={{ fontSize: 18 }} />
-                                      )}
-                                      <input
-                                        hidden
-                                        accept="image/*"
-                                        type="file"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0]
-                                          if (file) handleUploadImage(character, state, file)
-                                        }}
-                                      />
-                                    </IconButton>
-                                  </Box>
-                                ) : (
-                                  <Button
-                                    variant="outlined"
-                                    component="label"
-                                    fullWidth
-                                    size="small"
-                                    sx={{ height: '120px', flexDirection: 'column', gap: 1 }}
-                                    disabled={uploading || updateCharacter.isPending}
-                                  >
-                                    {uploading ? (
-                                      <CircularProgress size={20} />
-                                    ) : (
-                                      <>
-                                        <CloudUploadIcon fontSize="small" />
-                                        <Typography variant="body2">
-                                          Загрузить изображение
-                                        </Typography>
-                                      </>
-                                    )}
-                                    <input
-                                      hidden
-                                      accept="image/*"
-                                      type="file"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0]
-                                        if (file) handleUploadImage(character, state, file)
-                                      }}
-                                    />
-                                  </Button>
-                                )}
-                              </Box>
-                            </Grid>
-                          )
-                        })}
-                      </Grid>
-                  </Box>
-                </Grid>
-              )
-            })}
-          </Grid>
-      </Box>
-    </motion.div>
   )
 }

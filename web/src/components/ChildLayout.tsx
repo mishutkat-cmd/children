@@ -17,7 +17,7 @@ const NAV: { to: string; label: string; icon: IconName; match: (p: string) => bo
     icon: 'trophy',
     match: (p) => p.startsWith('/child/rewards') || p.startsWith('/child/challenges') || p.startsWith('/child/achievements'),
   },
-  { to: '/child/profile', label: 'Я', icon: 'user', match: (p) => p.startsWith('/child/profile') },
+  { to: '/child/profile', label: 'Я', icon: 'user', match: (p) => p.startsWith('/child/profile') || p.startsWith('/child/pet') },
 ]
 
 function StreakChip({ days }: { days: number }) {

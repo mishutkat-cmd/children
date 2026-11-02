@@ -16,6 +16,7 @@ const ChildTasks = lazy(() => import('./pages/child/Tasks'))
 const ChildGoals = lazy(() => import('./pages/child/Wishlist'))
 const ChildRewards = lazy(() => import('./pages/child/Rewards'))
 const ChildProfile = lazy(() => import('./pages/child/Profile'))
+const ChildPet = lazy(() => import('./pages/child/Pet'))
 
 // Parent pages — lazy loaded
 const ParentHome = lazy(() => import('./pages/parent/Home'))
@@ -75,6 +76,7 @@ function App() {
         <Route path="/child/wishlist" element={<Navigate to="/child/goals" replace />} />
         <Route path="/child/challenges" element={<Navigate to="/child/rewards" replace />} />
         <Route path="/child/achievements" element={<Navigate to="/child/rewards" replace />} />
+        <Route path="/child/pet" element={<PrivateRoute role="CHILD"><ChildPet /></PrivateRoute>} />
         <Route path="/child/profile" element={<PrivateRoute role="CHILD"><ChildProfile /></PrivateRoute>} />
 
         <Route path="/parent" element={<PrivateRoute role="PARENT"><ParentHome /></PrivateRoute>} />

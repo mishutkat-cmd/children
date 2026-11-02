@@ -4,7 +4,6 @@ export * from './useTasks'
 export * from './useCompletions'
 export * from './useChallenges'
 export * from './useBadges'
-export * from './useCharacters'
 export { useChildBadges } from './useBadges'
 export * from './useExchanges'
 

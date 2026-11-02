@@ -1,13 +1,13 @@
 import { useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Box, ButtonBase, CircularProgress, Typography } from '@mui/material'
 import ChildLayout from '../../components/ChildLayout'
 import { Icon, KidAvatar, formatNumber } from '../../components/ui'
 import { tokens } from '../../theme'
 import { api } from '../../lib/api'
-import { useCharacters } from '../../hooks/useCharacters'
 import { useChildCompletions, useChildName, useChildSummary, useStreak } from '../../hooks/useChildData'
-import { getCharacterImageUrl } from '../../utils/satiety'
+import { PetArt, petLabel, petMood } from '../../lib/pets'
 import SecretPad from '../../components/auth/SecretPad'
 
 const card = { bgcolor: tokens.paper, borderRadius: '22px', boxShadow: `0 2px 0 ${tokens.kidShadow}` }
@@ -23,24 +23,18 @@ function relDay(iso: string) {
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
-/** «Я»: фото, звёзды, серия, выбор персонажа и последние звёзды (C_Profile). */
+/** «Я»: фото, звёзды, серия, питомец и последние звёзды (C_Profile). */
 export default function ChildProfile() {
   const qc = useQueryClient()
   const name = useChildName()
   const streak = useStreak()
   const { data: summary } = useChildSummary()
   const { data: completions = [] } = useChildCompletions()
-  const { data: characters = [], isLoading: lc } = useCharacters()
   const profile: any = (summary as any)?.profile
   const balance = summary?.pointsBalance ?? 0
-  const selectedId = summary?.character?.id || profile?.selectedCharacterId
+  const pet = profile?.pet
   const approved = completions.filter((c: any) => c.status === 'APPROVED')
   const recent = [...approved].sort((a: any, b: any) => +new Date(b.performedAt) - +new Date(a.performedAt)).slice(0, 5)
-
-  const select = useMutation({
-    mutationFn: async (id: string) => (await api.patch('/children/child/profile', { selectedCharacterId: id })).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['child-summary'] }),
-  })
 
   const photo = useMutation({
     mutationFn: async (file: File) => {
@@ -65,7 +59,6 @@ export default function ChildProfile() {
           </ButtonBase>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography component="h1" sx={{ fontSize: 26, fontWeight: 900 }}>{name}</Typography>
-            {summary?.character?.name && <Typography sx={{ fontSize: 15, fontWeight: 800, color: tokens.text3 }}>с персонажем «{summary.character.name}»</Typography>}
           </Box>
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
@@ -82,31 +75,15 @@ export default function ChildProfile() {
         </Box>
       </Box>
 
-      {(lc || characters.length > 0) && (
-        <>
-          <Typography sx={caps}>Мой персонаж</Typography>
-          {lc ? <CircularProgress sx={{ alignSelf: 'center' }} /> : (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(3, minmax(0, 1fr))', md: 'repeat(6, minmax(0, 1fr))' }, gap: 1.25 }}>
-              {characters.map((ch: any) => {
-                const on = ch.id === selectedId
-                const img = getCharacterImageUrl(ch, balance)
-                return (
-                  <ButtonBase
-                    key={ch.id}
-                    aria-pressed={on}
-                    onClick={() => !on && select.mutate(ch.id)}
-                    sx={{ ...card, flexDirection: 'column', gap: 0.75, p: '12px 6px', border: `3px solid ${on ? tokens.primary : 'transparent'}`, fontSize: 15, fontWeight: 900 }}
-                  >
-                    {img ? <img src={img} alt="" style={{ width: 52, height: 52, objectFit: 'contain' }} /> : <KidAvatar size={52} />}
-                    {ch.name}
-                  </ButtonBase>
-                )
-              })}
-            </Box>
-          )}
-          <Typography sx={{ fontSize: 14, fontWeight: 700, color: tokens.text3 }}>Чем больше звёзд, тем веселее персонаж: грустит → спокоен → сияет.</Typography>
-        </>
-      )}
+      <ButtonBase component={RouterLink} to="/child/pet" sx={{ ...card, p: 2, display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'flex-start', textAlign: 'left' }}>
+        <PetArt pet={pet} mood={petMood((summary as any)?.todayPointsBalance > 0 ? 1 : 0)} size={72} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={caps}>Мой питомец</Typography>
+          <Typography sx={{ fontSize: 22, fontWeight: 900 }}>{pet?.name || petLabel(pet?.kind)}</Typography>
+          <Typography sx={{ fontSize: 14, fontWeight: 700, color: tokens.text3 }}>Имя, окрас и наряды</Typography>
+        </Box>
+        <Icon name="chevron" size={24} />
+      </ButtonBase>
 
       <Box sx={{ ...card, p: '6px 16px 4px' }}>
         <Typography sx={{ ...caps, mt: 1, mb: 0.25 }}>Последние звёзды</Typography>

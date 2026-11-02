@@ -300,8 +300,12 @@ export class ChildrenService {
       }
     }
 
+    // Для стадий роста питомца: Малыш → Подросток → Взрослый.
+    const approvedCount = childProfileId ? await this.db.count('completions', { childId: childProfileId, status: 'APPROVED' }) : 0;
+
     return {
       profile,
+      approvedCount,
       pointsBalance: profile?.pointsBalance || 0,
       todayPointsBalance,
       recentCompletions,
