@@ -42,6 +42,10 @@ export class ExchangesService {
       if (!rewardGoal) {
         throw new NotFoundException('Reward not found');
       }
+      // Желание, предложенное ребёнком, нельзя получить, пока родитель не назначил цену.
+      if (rewardGoal.needsPrice || !(rewardGoal.costPoints > 0)) {
+        throw new BadRequestException('Цену этого желания ещё не назначили');
+      }
 
       pointsSpent = rewardGoal.costPoints;
     } else if (dto.cashCents) {

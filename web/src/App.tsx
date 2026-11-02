@@ -11,10 +11,9 @@ const RegisterPage = lazy(() => import('./pages/auth/RegisterPage'))
 // Child pages — lazy loaded
 const ChildDashboard = lazy(() => import('./pages/child/Dashboard'))
 const ChildTasks = lazy(() => import('./pages/child/Tasks'))
-const ChildChallenges = lazy(() => import('./pages/child/Challenges'))
-const ChildWishlist = lazy(() => import('./pages/child/Wishlist'))
+const ChildGoals = lazy(() => import('./pages/child/Wishlist'))
+const ChildRewards = lazy(() => import('./pages/child/Rewards'))
 const ChildProfile = lazy(() => import('./pages/child/Profile'))
-const ChildAchievements = lazy(() => import('./pages/child/Achievements'))
 
 // Parent pages — lazy loaded
 const ParentHome = lazy(() => import('./pages/parent/Home'))
@@ -64,9 +63,12 @@ function App() {
 
         <Route path="/child" element={<PrivateRoute role="CHILD"><ChildDashboard /></PrivateRoute>} />
         <Route path="/child/tasks" element={<PrivateRoute role="CHILD"><ChildTasks /></PrivateRoute>} />
-        <Route path="/child/challenges" element={<PrivateRoute role="CHILD"><ChildChallenges /></PrivateRoute>} />
-        <Route path="/child/achievements" element={<PrivateRoute role="CHILD"><ChildAchievements /></PrivateRoute>} />
-        <Route path="/child/wishlist" element={<PrivateRoute role="CHILD"><ChildWishlist /></PrivateRoute>} />
+        <Route path="/child/goals" element={<PrivateRoute role="CHILD"><ChildGoals /></PrivateRoute>} />
+        <Route path="/child/rewards" element={<PrivateRoute role="CHILD"><ChildRewards /></PrivateRoute>} />
+        {/* Старые адреса из уведомлений и закладок */}
+        <Route path="/child/wishlist" element={<Navigate to="/child/goals" replace />} />
+        <Route path="/child/challenges" element={<Navigate to="/child/rewards" replace />} />
+        <Route path="/child/achievements" element={<Navigate to="/child/rewards" replace />} />
         <Route path="/child/profile" element={<PrivateRoute role="CHILD"><ChildProfile /></PrivateRoute>} />
 
         <Route path="/parent" element={<PrivateRoute role="PARENT"><ParentHome /></PrivateRoute>} />

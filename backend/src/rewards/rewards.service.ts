@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { CreateRewardDto, UpdateRewardDto } from './dto/rewards.dto';
 import { RequestUser } from '../common/decorators/user.decorator';
@@ -28,13 +28,17 @@ export class RewardsService {
   }
 
   async create(familyId: string, dto: CreateRewardDto, actor: RequestUser) {
+    const isChild = actor.role === 'CHILD';
+    if (!isChild && !dto.costPoints) {
+      throw new BadRequestException('Укажите цену в звёздах');
+    }
     const rewardId = crypto.randomUUID();
     await this.db.create('rewards', {
       id: rewardId,
       familyId,
       ...dto,
-      // Ребёнок заводит только «желание»: денежную стоимость задаёт родитель.
-      ...(actor.role === 'CHILD' && { moneyValueCents: 0 }),
+      // Ребёнок только предлагает желание: цену в звёздах и деньгах ставит родитель.
+      ...(isChild && { costPoints: 0, moneyValueCents: 0, needsPrice: true }),
       createdByUserId: actor.userId,
       status: 'ACTIVE',
     }, rewardId);
@@ -46,8 +50,10 @@ export class RewardsService {
     const reward = await this.findOne(id, familyId);
     if (actor.role === 'CHILD') {
       await this.assertChildOwnsReward(reward, actor.userId);
-      const { moneyValueCents, ...rest } = dto as any;
+      const { moneyValueCents, costPoints, ...rest } = dto as any;
       dto = rest;
+    } else if (dto.costPoints) {
+      (dto as any).needsPrice = false;
     }
     await this.db.update('rewards', id, dto);
     return this.db.findFirst('rewards', { id });

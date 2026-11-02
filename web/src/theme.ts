@@ -98,7 +98,10 @@ function buildTheme(role: 'parent' | 'child'): Theme {
   return createTheme(base, {
     components: {
       MuiCssBaseline: {
-        styleOverrides: { body: { backgroundColor: tokens.bg, color: tokens.text } },
+        styleOverrides: {
+          body: { backgroundColor: tokens.bg, color: tokens.text },
+          'button, input, textarea, select': { fontFamily: 'inherit' },
+        },
       },
       MuiButton: {
         defaultProps: { disableElevation: true },
@@ -196,7 +199,10 @@ function buildTheme(role: 'parent' | 'child'): Theme {
   })
 }
 
-export const parentTheme = responsiveFontSizes(buildTheme('parent'), { factor: 2 })
-export const childTheme = responsiveFontSizes(buildTheme('child'), { factor: 2 })
+// Масштабируем только заголовки: медиа-правила на body1/body2 перебивали бы
+// размер, заданный прямо в sx у текста.
+const HEADINGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const
+export const parentTheme = responsiveFontSizes(buildTheme('parent'), { factor: 2, variants: [...HEADINGS] })
+export const childTheme = responsiveFontSizes(buildTheme('child'), { factor: 2, variants: [...HEADINGS] })
 
 export default parentTheme

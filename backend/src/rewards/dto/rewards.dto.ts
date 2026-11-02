@@ -18,9 +18,11 @@ export class CreateRewardDto {
   @IsOptional()
   imageUrl?: string;
 
+  // Ребёнок цену не передаёт: желание без цены ждёт, пока её назначит родитель.
   @IsInt()
   @Min(1)
-  costPoints: number;
+  @IsOptional()
+  costPoints?: number;
 
   @IsInt()
   @IsOptional()
