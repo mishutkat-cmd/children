@@ -18,7 +18,7 @@ Last reviewed: **2026-06-16**.
 | **CORS_ORIGINS** | `~/.secrets/children/children.env` | CORS allowlist | Edit when adding/removing a frontend host | 2026-04-29 |
 | **Firebase Web API key** | hardcoded in `mobile/src/lib/firebase.ts` *(now removed; left here as a note)* | Was used by mobile Firebase JS SDK | Not a secret per Google's design, but worth not embedding — mobile now talks only to our backend | — |
 | **GitHub repo admin access** | GitHub org / personal accounts | Can read/overwrite all of the above secrets via GitHub UI | Review on every team change; require 2FA on every admin | — |
-| **VPS root / odoo user SSH keys** | `~/.ssh/authorized_keys` on VPS | Login to the server | Audit on every team change | — |
+| **VPS root / children user SSH keys** | `~/.ssh/authorized_keys` on VPS | Login to the server | Audit on every team change | — |
 
 ## When to rotate immediately, regardless of cadence
 
@@ -40,7 +40,7 @@ Steps:
 
 1. Generate a new secret on the server (does not need to leave the box):
    ```
-   ssh -p 22022 odoo@91.227.181.162 'openssl rand -hex 48'
+   ssh children@134.122.85.62 'openssl rand -hex 48'
    ```
 2. Edit `~/.secrets/children/children.env`, replace the `JWT_SECRET=…` line.
 3. `pm2 reload children --update-env` to pick up the new env without
@@ -64,8 +64,8 @@ Steps:
    → Settings (gear) → Service accounts → Generate new private key.
 2. Download the JSON, copy to the VPS in place:
    ```
-   scp -P 22022 firebase-sa-new.json odoo@91.227.181.162:~/.secrets/children/firebase-sa.json.new
-   ssh -p 22022 odoo@91.227.181.162
+   scp firebase-sa-new.json children@134.122.85.62:~/.secrets/children/firebase-sa.json.new
+   ssh children@134.122.85.62
    chmod 600 ~/.secrets/children/firebase-sa.json.new
    mv ~/.secrets/children/firebase-sa.json.new ~/.secrets/children/firebase-sa.json
    pm2 reload children --update-env
@@ -84,14 +84,14 @@ Steps:
    ssh-keygen -t ed25519 -N "" -C "github-actions-children-deploy" \
      -f ~/.ssh/id_ed25519_children_ci_new
    ```
-2. Append the new **public** key to `~odoo/.ssh/authorized_keys` on the
+2. Append the new **public** key to `~children/.ssh/authorized_keys` on the
    VPS — keep the old one in there for now so deploys don't break
    mid-rotation.
 3. Update `DEPLOY_SSH_KEY` in GitHub repo settings → Secrets → Actions
    with the contents of the new **private** key.
 4. Trigger a workflow_dispatch on the deploy workflow and confirm it
    goes green.
-5. Remove the old public key line from `~odoo/.ssh/authorized_keys`.
+5. Remove the old public key line from `~children/.ssh/authorized_keys`.
 6. Delete `~/.ssh/id_ed25519_children_ci` locally; rename `_new` → no
    suffix.
 

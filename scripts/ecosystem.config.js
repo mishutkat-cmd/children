@@ -22,8 +22,9 @@ module.exports = {
       // Restart if RSS exceeds 600MB (tune for your host)
       max_memory_restart: '600M',
       // Logs
-      out_file: './backend/logs/pm2.out.log',
-      error_file: './backend/logs/pm2.err.log',
+      // Resolved against `cwd` (backend/), so these land in backend/logs.
+      out_file: './logs/pm2.out.log',
+      error_file: './logs/pm2.err.log',
       merge_logs: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       // Env

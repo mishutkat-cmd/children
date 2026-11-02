@@ -1,17 +1,20 @@
 # Деплой Kids Motivation
 
-Текущий прод: **https://children.evolvenext.net** (VPS, Caddy + PM2).
+Текущий прод: **https://children.evolvenext.net** (VPS DigitalOcean, Caddy + PM2).
+До 2026-11-02 жил на `91.227.181.162` (пользователь `odoo`) — данные там сохранены, процесс остановлен.
 
 ## Текущая инфраструктура
 
 | Что | Значение |
 |---|---|
-| Хост | `91.227.181.162` (LAN: `10.20.17.240`) |
-| SSH | порт **22022**, пользователь `odoo` |
-| Путь проекта | `/home/odoo/crmproject/children` |
-| Process manager | **PM2** (`scripts/ecosystem.config.js`), автозапуск через `pm2-odoo.service` |
-| Бэкенд слушает | TCP `localhost:3010` (можно переключить на unix-socket через `PORT=`) |
-| Reverse proxy | **Caddy** (`/etc/caddy/Caddyfile`) → `localhost:3010` |
+| Хост | `134.122.85.62` (Ubuntu 24.04, общий с erp / mycrm / english) |
+| SSH | порт 22, пользователь `children` (админ — `root`) |
+| Путь проекта | `/home/children/apps/children` |
+| Node | 20.20.2 через nvm в `~children/.nvm` (`scripts/deploy.sh` подгружает его сам) |
+| Process manager | **PM2** (`scripts/ecosystem.config.js`) + `pm2-logrotate`, автозапуск через `pm2-children.service` |
+| Бэкенд слушает | TCP `3010` (наружу закрыт ufw; можно переключить на unix-socket через `PORT=`) |
+| Reverse proxy | **Caddy**, общий `/etc/caddy/Caddyfile` → `127.0.0.1:3010` |
+| Бэкапы БД | cron пользователя `children`, 4:15 UTC → `~/backups/children` (30 дней) |
 | TLS | Let's Encrypt, авто через Caddy |
 | CI | GitHub Actions, `.github/workflows/deploy.yml`, push в `main` → автодеплой |
 
@@ -34,7 +37,7 @@
 | `JWT_SECRET` | секрет для JWT, ≥ 32 символа (на проде сгенерирован `openssl rand -hex 48`) |
 | `JWT_EXPIRES_IN` | например `7d` |
 | `FRONTEND_ENABLED` | `true` чтобы бэкенд раздавал SPA |
-| `FRONTEND_BUILD_PATH` | абсолютный путь к `frontend/build` (на проде `/home/odoo/crmproject/children/frontend/build`) |
+| `FRONTEND_BUILD_PATH` | абсолютный путь к `frontend/build` (на проде `/home/children/apps/children/frontend/build`) |
 | `DATABASE_PATH` | абсолютный путь к файлу SQLite (`.../backend/data/children.db`) |
 | `UPLOADS_PATH` | каталог публичных загрузок, его же отдаёт Caddy по `/uploads/*` |
 | `UPLOADS_PRIVATE_PATH` | каталог фотоподтверждений, **вне** веб-корня |
@@ -90,11 +93,11 @@ node dist/main.js
 
 | Secret | Текущее значение |
 |---|---|
-| `DEPLOY_HOST` | `91.227.181.162` |
-| `DEPLOY_PORT` | `22022` |
-| `DEPLOY_USER` | `odoo` |
-| `DEPLOY_PATH` | `/home/odoo/crmproject/children` |
-| `DEPLOY_SSH_KEY` | приватный ключ деплоя (публичный лежит в `~odoo/.ssh/authorized_keys`) |
+| `DEPLOY_HOST` | `134.122.85.62` |
+| `DEPLOY_PORT` | `22` |
+| `DEPLOY_USER` | `children` |
+| `DEPLOY_PATH` | `/home/children/apps/children` |
+| `DEPLOY_SSH_KEY` | приватный ключ `~children/.ssh/gha_deploy` (публичный — в `~children/.ssh/authorized_keys`) |
 | `DEPLOY_BRANCH` | (опц., по умолчанию `main`) |
 
 CI запускает на сервере `scripts/deploy.sh main`.
@@ -102,8 +105,8 @@ CI запускает на сервере `scripts/deploy.sh main`.
 ## Ручной деплой на сервере
 
 ```bash
-ssh -p 22022 odoo@91.227.181.162
-cd /home/odoo/crmproject/children
+ssh children@134.122.85.62      # или root@… и `sudo -iu children`
+cd ~/apps/children
 ./scripts/deploy.sh           # ветка main
 ./scripts/deploy.sh production
 ```
@@ -117,13 +120,14 @@ cd /home/odoo/crmproject/children
 
 ## Автоперезапуск
 
-На текущем сервере: **PM2** + `pm2 save` + `pm2-odoo.service` (systemd-юнит, поднимающий PM2 после ребута).
+На текущем сервере: **PM2** + `pm2 save` + `pm2-children.service` (systemd-юнит, поднимающий PM2 после ребута).
 
 ```bash
 # первичная настройка PM2 (уже сделано на текущем проде)
 pm2 start scripts/ecosystem.config.js
 pm2 save
-sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u odoo --hp /home/odoo
+# от root:
+env PATH=$PATH:/home/children/.nvm/versions/node/v20.20.2/bin pm2 startup systemd -u children --hp /home/children
 ```
 
 PM2 рестартит на crash, при `max_memory_restart=600M`, и после ребута сервера. Конфиг — `scripts/ecosystem.config.js`.
@@ -139,7 +143,7 @@ PM2 рестартит на crash, при `max_memory_restart=600M`, и посл
 изменений:
 
 ```bash
-cd /home/odoo/crmproject/children/backend
+cd /home/children/apps/children/backend
 node dist/cli/retention.js --dry-run
 node dist/cli/retention.js
 ```
@@ -175,19 +179,35 @@ Firestore бэкапил себя сам — теперь это наша заб
 
 ## Caddy vhost
 
-В `/etc/caddy/Caddyfile`:
+Блок в общем `/etc/caddy/Caddyfile` (рядом erp / app / english — правка задевает
+всех, поэтому сначала `caddy validate`, копия `Caddyfile.before-<что>-<дата>`):
 
 ```caddy
 children.evolvenext.net {
-    encode gzip
-    reverse_proxy localhost:3010
-    request_body {
-        max_size 50MB
-    }
+	encode zstd gzip
+	handle_path /uploads/* {
+		root * /home/children/apps/children/uploads
+		header Cache-Control "public, max-age=31536000, immutable"
+		header X-Content-Type-Options "nosniff"
+		file_server
+	}
+	reverse_proxy 127.0.0.1:3010
+	request_body {
+		max_size 50MB
+	}
 }
 ```
 
-Reload без даунтайма: `sudo systemctl reload caddy`. TLS Caddy получает сам у Let's Encrypt — отдельной настройки не нужно.
+`/uploads/*` Caddy отдаёт с диска сам, поэтому `/home/children` и
+`/home/children/apps` — `751` (проход без листинга). `uploads-private` остаётся
+`700` и доступен только через авторизованный `/api/v1/files`.
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+systemctl reload caddy      # без даунтайма для соседей
+```
+
+TLS Caddy получает сам у Let's Encrypt — отдельной настройки не нужно.
 
 ## Диагностика
 
@@ -216,7 +236,7 @@ pm2 describe children
 Caddy:
 
 ```bash
-sudo journalctl -u caddy -f
+journalctl -u caddy -f      # от root
 ```
 
 ## Чек-лист перед первым деплоем нового окружения

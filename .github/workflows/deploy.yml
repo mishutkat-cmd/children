@@ -1,16 +1,16 @@
 # CI/CD: on push to main → build & deploy to server via SSH.
 #
 # Required GitHub secrets:
-#   DEPLOY_HOST       — ssh host (e.g. 91.227.181.162 or children.evolvenext.net)
-#   DEPLOY_PORT       — ssh port (e.g. 22022; defaults to 22 if unset)
-#   DEPLOY_USER       — ssh user (e.g. odoo)
+#   DEPLOY_HOST       — ssh host (134.122.85.62)
+#   DEPLOY_PORT       — ssh port (optional; defaults to 22)
+#   DEPLOY_USER       — ssh user (children)
 #   DEPLOY_SSH_KEY    — private key (id_ed25519 contents)
 #   DEPLOY_PATH       — absolute path to project root on server
 #   DEPLOY_BRANCH     — (optional) branch to deploy, default: main
 #
 # The server must have:
 #   - the repo cloned at $DEPLOY_PATH
-#   - node/npm installed
+#   - node/npm installed (nvm in the deploy user's home is picked up by deploy.sh)
 #   - scripts/deploy.sh executable
 #   - at least one of: PM2, systemd unit, ISPmanager, or auto-restart.sh running
 

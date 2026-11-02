@@ -10,7 +10,8 @@
 # на живой базе и всегда даёт консистентный результат.
 #
 # Cron:
-#   15 4 * * * /home/odoo/crmproject/children/scripts/backup-db.sh >> /home/odoo/logs/children-backup.log 2>&1
+#   PATH=/home/children/.nvm/versions/node/v20.20.2/bin:/usr/local/bin:/usr/bin:/bin
+#   15 4 * * * $HOME/apps/children/scripts/backup-db.sh >> $HOME/logs/children-backup.log 2>&1
 
 set -euo pipefail
 

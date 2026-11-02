@@ -24,6 +24,15 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICE_NAME="${SERVICE_NAME:-children}"
 
 cd "$PROJECT_ROOT"
+
+# Node comes from nvm in the deploy user's home. CI logs in over a
+# non-interactive SSH shell, where ~/.bashrc returns before it loads nvm,
+# so load it here when node isn't already on PATH.
+if ! command -v node >/dev/null 2>&1 && [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  . "$NVM_DIR/nvm.sh"
+fi
+
 echo "==> Deploying branch '$BRANCH' in $PROJECT_ROOT"
 
 # ---- 1. Git sync ----
@@ -77,6 +86,9 @@ fi
 
 # ---- 3. Restart ----
 echo "==> Restarting service"
+
+# PM2 log files (scripts/ecosystem.config.js) go here; PM2 won't create it.
+mkdir -p backend/logs
 
 restarted=0
 
