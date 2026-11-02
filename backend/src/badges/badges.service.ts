@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
-import { CreateBadgeDto, AwardBadgeDto } from './dto/badges.dto';
+import { CreateBadgeDto, AwardBadgeDto, CreateAchievementDto } from './dto/badges.dto';
+import { BUILTIN_ACHIEVEMENTS, TIER_NAMES, progressFor, type AchievementRule, type KidFacts } from './achievements';
 
 /**
  * Per-child precomputed bundle used by getBadgeProgress. Letting the
@@ -516,6 +517,12 @@ export class BadgesService {
       return [];
     }
 
+    try {
+      await this.checkAchievements(childProfile, familyId);
+    } catch (e: any) {
+      console.warn('[BadgesService] checkAchievements:', e.message);
+    }
+
     const badges = await this.db.findMany('badges', { familyId });
     if (badges.length === 0) return [];
 
@@ -564,5 +571,123 @@ export class BadgesService {
       results[child.id] = await this.checkAndAwardBadges(child.id, familyId);
     }));
     return results;
+  }
+
+  // ─── Ачивки с уровнями ──────────────────────────────────────────────────────
+
+  private async achievementRules(familyId: string): Promise<AchievementRule[]> {
+    const custom = await this.db.findMany('achievementRules', { familyId });
+    return [
+      ...BUILTIN_ACHIEVEMENTS,
+      ...custom.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        sub: c.sub || '',
+        icon: c.icon || 'medal',
+        kind: 'TASK' as const,
+        match: c.taskId,
+        levels: c.levels || [3, 10, 30],
+        custom: true,
+      })),
+    ];
+  }
+
+  private async kidFacts(profile: any, tasks: Map<string, any>, challengeEntries: any[]): Promise<KidFacts> {
+    const completions = await this.db.findMany('completions', { childId: profile.id, status: 'APPROVED' });
+    const won = new Set(challengeEntries.filter((e: any) => e.childId === profile.userId).map((e: any) => e.refId));
+    return { completions, tasks, totalEarned: profile.totalEarned ?? 0, challengesWon: won.size };
+  }
+
+  private async familyFacts(familyId: string) {
+    const [rules, tasks, challengeEntries] = await Promise.all([
+      this.achievementRules(familyId),
+      this.db.findMany('tasks', { familyId }),
+      this.db.findMany('ledgerEntries', { familyId, refType: 'CHALLENGE' }),
+    ]);
+    return { rules, tasks: new Map<string, any>(tasks.map((t: any) => [t.id, t])), challengeEntries };
+  }
+
+  /** Уровни всех ачивок у всех детей семьи. */
+  async getAchievements(familyId: string) {
+    const users = await this.db.findMany('users', { familyId, role: 'CHILD' });
+    const profiles = users.length ? await this.db.findMany('childProfiles', { userId: { in: users.map((u: any) => u.id) } }) : [];
+    const { rules, tasks, challengeEntries } = await this.familyFacts(familyId);
+    const kids = await Promise.all(
+      profiles.map(async (p: any) => {
+        const facts = await this.kidFacts(p, tasks, challengeEntries);
+        const stored = p.achievementTiers || {};
+        return {
+          userId: p.userId,
+          profileId: p.id,
+          name: p.name,
+          items: rules.map((r) => ({ ...progressFor(r, facts), earnedAt: stored[r.id]?.at ?? null })),
+        };
+      }),
+    );
+    return { rules, kids };
+  }
+
+  /**
+   * После каждого одобрения: если ребёнок дорос до нового уровня — запоминаем
+   * и шлём родителю уведомление. При первом подсчёте уровни сохраняем молча,
+   * иначе старая история разом выдала бы десяток уведомлений.
+   */
+  async checkAchievements(profile: any, familyId: string) {
+    const { rules, tasks, challengeEntries } = await this.familyFacts(familyId);
+    const facts = await this.kidFacts(profile, tasks, challengeEntries);
+    const first = !profile.achievementTiers;
+    const stored: Record<string, { tier: number; at: string }> = { ...(profile.achievementTiers || {}) };
+    const now = new Date().toISOString();
+    const raised: { rule: AchievementRule; tier: number }[] = [];
+    for (const rule of rules) {
+      const { tier } = progressFor(rule, facts);
+      if (tier > (stored[rule.id]?.tier ?? 0)) {
+        stored[rule.id] = { tier, at: now };
+        raised.push({ rule, tier });
+      }
+    }
+    if (!first && raised.length === 0) return [];
+    await this.db.update('childProfiles', profile.id, { achievementTiers: stored });
+    if (first) return [];
+    for (const { rule, tier } of raised) {
+      const id = crypto.randomUUID();
+      await this.db.create('notifications', {
+        id,
+        familyId,
+        type: 'BADGE_EARNED',
+        title: 'Новая ачивка',
+        message: `${profile.name ?? 'Ребёнок'}: ${TIER_NAMES[tier]} «${rule.title}»`,
+        childId: profile.id,
+        userId: profile.userId,
+        refType: 'ACHIEVEMENT',
+        refId: rule.id,
+        read: false,
+        createdAt: new Date(),
+      }, id);
+    }
+    return raised;
+  }
+
+  async createAchievement(familyId: string, dto: CreateAchievementDto) {
+    const task = await this.db.findFirst('tasks', { id: dto.taskId, familyId });
+    if (!task) throw new NotFoundException('Task not found');
+    const id = crypto.randomUUID();
+    await this.db.create('achievementRules', {
+      id,
+      familyId,
+      title: dto.title,
+      sub: task.title,
+      taskId: dto.taskId,
+      levels: dto.levels ?? [3, 10, 30],
+      createdAt: new Date(),
+    }, id);
+    return this.db.findFirst('achievementRules', { id });
+  }
+
+  async deleteAchievement(familyId: string, id: string) {
+    const rule = await this.db.findFirst('achievementRules', { id, familyId });
+    if (!rule) throw new NotFoundException('Achievement not found');
+    await this.db.delete('achievementRules', id);
+    return { ok: true };
   }
 }

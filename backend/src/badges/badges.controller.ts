@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
-import { CreateBadgeDto, AwardBadgeDto } from './dto/badges.dto';
+import { CreateBadgeDto, AwardBadgeDto, CreateAchievementDto } from './dto/badges.dto';
 
 @Controller('badges')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -24,6 +24,24 @@ export class BadgesController {
   @Roles('PARENT')
   findAll(@User() user: RequestUser) {
     return this.badgesService.findAll(user.familyId);
+  }
+
+  @Get('achievements')
+  @Roles('PARENT')
+  achievements(@User() user: RequestUser) {
+    return this.badgesService.getAchievements(user.familyId);
+  }
+
+  @Post('achievements')
+  @Roles('PARENT')
+  createAchievement(@User() user: RequestUser, @Body() dto: CreateAchievementDto) {
+    return this.badgesService.createAchievement(user.familyId, dto);
+  }
+
+  @Delete('achievements/:id')
+  @Roles('PARENT')
+  deleteAchievement(@User() user: RequestUser, @Param('id') id: string) {
+    return this.badgesService.deleteAchievement(user.familyId, id);
   }
 
   @Post()

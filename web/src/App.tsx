@@ -25,6 +25,7 @@ const ParentSettings = lazy(() => import('./pages/parent/Settings'))
 const AddChild = lazy(() => import('./pages/parent/AddChild'))
 const ParentChild = lazy(() => import('./pages/parent/Child'))
 const ParentChallenges = lazy(() => import('./pages/parent/Challenges'))
+const ParentAchievements = lazy(() => import('./pages/parent/Achievements'))
 const ParentBadges = lazy(() => import('./pages/parent/Badges'))
 const ParentGoals = lazy(() => import('./pages/parent/Goals'))
 const ParentApprovals = lazy(() => import('./pages/parent/Approvals'))
@@ -86,6 +87,7 @@ function App() {
         <Route path="/parent/children/:childId" element={<PrivateRoute role="PARENT"><ParentChild /></PrivateRoute>} />
         <Route path="/parent/children/:childId/badges" element={<PrivateRoute role="PARENT"><ChildBadges /></PrivateRoute>} />
         <Route path="/parent/challenges" element={<PrivateRoute role="PARENT"><ParentChallenges /></PrivateRoute>} />
+        <Route path="/parent/achievements" element={<PrivateRoute role="PARENT"><ParentAchievements /></PrivateRoute>} />
         <Route path="/parent/badges" element={<PrivateRoute role="PARENT"><ParentBadges /></PrivateRoute>} />
         <Route path="/parent/goals" element={<PrivateRoute role="PARENT"><ParentGoals /></PrivateRoute>} />
         <Route path="/parent/wishlist" element={<Navigate to="/parent/goals" replace />} />

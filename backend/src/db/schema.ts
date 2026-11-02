@@ -78,6 +78,7 @@ export const COLLECTIONS: Record<string, string[][]> = {
   ],
   badges: [['familyId', 'createdAt']],
   childBadges: [['childId', 'badgeId']],
+  achievementRules: [['familyId']],
   notifications: [
     ['familyId', 'createdAt'],
     ['familyId', 'read'],

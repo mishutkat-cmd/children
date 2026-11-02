@@ -19,7 +19,8 @@ const MAIN: NavItem[] = [
 ]
 const MORE: NavItem[] = [
   { to: '/parent/goals', label: 'Цели и награды', icon: 'gift', match: (p) => /^\/parent\/(goals|wishlist|conversion)/.test(p) },
-  { to: '/parent/challenges', label: 'Челленджи', icon: 'trophy', match: (p) => /^\/parent\/(challenges|badges)/.test(p) },
+  { to: '/parent/challenges', label: 'Челленджи', icon: 'trophy', match: (p) => p.startsWith('/parent/challenges') },
+  { to: '/parent/achievements', label: 'Ачивки', icon: 'medal', match: (p) => /^\/parent\/(achievements|badges)/.test(p) },
   { to: '/parent/reports', label: 'Отчёт', icon: 'chart', match: (p) => p.startsWith('/parent/reports') },
   { to: '/parent/map', label: 'Где дети', icon: 'map', match: (p) => p.startsWith('/parent/map') },
   { to: '/parent/activity', label: 'Экранное время', icon: 'clock', match: (p) => p.startsWith('/parent/activity') },
