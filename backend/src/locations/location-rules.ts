@@ -117,3 +117,20 @@ export function hasCoordinates(doc: any): boolean {
     Number.isFinite(doc.lng)
   );
 }
+
+export type Place = { id: string; name: string; lat: number; lng: number; radius?: number; kids?: string[] };
+
+/** В каком безопасном месте точка. Ближайшее, если круги пересекаются. */
+export function placeOf<T extends Place>(p: { lat?: number; lng?: number } | null | undefined, places: T[]): T | null {
+  if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') return null;
+  let best: T | null = null;
+  let bestD = Infinity;
+  for (const place of places) {
+    const d = haversineMeters(p.lat, p.lng, place.lat, place.lng);
+    if (d <= (place.radius ?? 150) && d < bestD) {
+      best = place;
+      bestD = d;
+    }
+  }
+  return best;
+}

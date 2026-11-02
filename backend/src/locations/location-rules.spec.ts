@@ -1,4 +1,4 @@
-import { hasCoordinates, haversineMeters, sanitizePoints } from './location-rules';
+import { hasCoordinates, haversineMeters, placeOf, sanitizePoints } from './location-rules';
 import type { LocationPointDto } from './dto/locations.dto';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
@@ -152,5 +152,21 @@ describe('hasCoordinates', () => {
     expect(hasCoordinates({ lat: '55.75', lng: '37.61' })).toBe(false);
     expect(hasCoordinates({ lat: NaN, lng: 37.61 })).toBe(false);
     expect(hasCoordinates({ lat: 55.75 })).toBe(false);
+  });
+});
+
+describe('placeOf', () => {
+  const home = { id: 'home', name: 'Дом', lat: 50.45, lng: 30.52, radius: 150 };
+  const school = { id: 'school', name: 'Школа', lat: 50.4512, lng: 30.52, radius: 200 };
+
+  it('точка в радиусе — в этом месте, за радиусом — нигде', () => {
+    expect(placeOf({ lat: 50.4505, lng: 30.52 }, [home])?.id).toBe('home');
+    expect(placeOf({ lat: 50.46, lng: 30.52 }, [home])).toBeNull();
+    expect(placeOf(null, [home])).toBeNull();
+  });
+
+  it('пересекающиеся круги — выбираем ближайшее место', () => {
+    expect(placeOf({ lat: 50.4509, lng: 30.52 }, [home, school])?.id).toBe('school');
+    expect(Math.round(haversineMeters(home.lat, home.lng, school.lat, school.lng))).toBe(133);
   });
 });

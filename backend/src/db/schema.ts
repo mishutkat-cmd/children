@@ -100,6 +100,7 @@ export const COLLECTIONS: Record<string, string[][]> = {
   // equivalent for (see LocationsService.purgeExpiredPoints).
   locationPoints: [['childId', 'capturedAt'], ['familyId', 'capturedAt'], ['expiresAt']],
   childLocations: [['familyId'], ['childId']],
+  safePlaces: [['familyId']],
   locationSettings: [['familyId']],
   // Аудио «послушать, что вокруг» с согласия ребёнка.
   audioRequests: [['familyId', 'createdAt'], ['childId', 'status']],

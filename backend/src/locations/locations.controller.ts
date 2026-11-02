@@ -18,6 +18,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
 import {
   HistoryQueryDto,
+  SafePlaceDto,
   UpdateMySharingDto,
   UpdateChildLocationSettingsDto,
   UpdateFamilyLocationSettingsDto,
@@ -46,6 +47,30 @@ export class LocationsController {
   @Roles('PARENT')
   setMySharing(@User() user: RequestUser, @Body() dto: UpdateMySharingDto) {
     return this.locationsService.setMySharing(user.userId, user.familyId, dto.enabled);
+  }
+
+  @Get('places')
+  @Roles('PARENT')
+  listPlaces(@User() user: RequestUser) {
+    return this.locationsService.listPlaces(user.familyId);
+  }
+
+  @Post('places')
+  @Roles('PARENT')
+  createPlace(@User() user: RequestUser, @Body() dto: SafePlaceDto) {
+    return this.locationsService.createPlace(user.familyId, dto);
+  }
+
+  @Patch('places/:id')
+  @Roles('PARENT')
+  updatePlace(@User() user: RequestUser, @Param('id') id: string, @Body() dto: SafePlaceDto) {
+    return this.locationsService.updatePlace(user.familyId, id, dto);
+  }
+
+  @Delete('places/:id')
+  @Roles('PARENT')
+  deletePlace(@User() user: RequestUser, @Param('id') id: string) {
+    return this.locationsService.deletePlace(user.familyId, id);
   }
 
   /** Вся семья на карте: дети и родители, включившие шеринг. */

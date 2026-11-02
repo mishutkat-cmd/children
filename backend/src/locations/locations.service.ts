@@ -7,11 +7,12 @@ import {
   type LocationSubjectType,
 } from '../auth/device-token.service';
 import { getChildProfileId } from '../db/doc-helpers';
-import { hasCoordinates, sanitizePoints, type PreparedPoint } from './location-rules';
+import { hasCoordinates, placeOf, sanitizePoints, type PreparedPoint } from './location-rules';
 import {
   IngestBatchDto,
   UpdateChildLocationSettingsDto,
   UpdateFamilyLocationSettingsDto,
+  SafePlaceDto,
 } from './dto/locations.dto';
 
 /** Последняя известная точка: один документ на ребёнка, id = childProfileId. */
@@ -154,6 +155,14 @@ export class LocationsService {
         );
       }
     });
+
+    if (ctx.subjectType !== 'PARENT' && last && newest.ts > lastTs) {
+      try {
+        await this.notifyPlaceChange(ctx, last, newest);
+      } catch (e: any) {
+        this.logger.warn(`[ingest] place notification failed: ${e?.message}`);
+      }
+    }
 
     const isMoving = newest.isMoving === true;
     return {
@@ -509,5 +518,60 @@ export class LocationsService {
   private toIso(value: any): string | null {
     const ms = this.toMillis(value);
     return ms > 0 ? new Date(ms).toISOString() : null;
+  }
+
+  // ─── Безопасные места ──────────────────────────────────────────────────────
+
+  async listPlaces(familyId: string) {
+    return this.db.findMany('safePlaces', { familyId }, { createdAt: 'asc' });
+  }
+
+  async createPlace(familyId: string, dto: SafePlaceDto) {
+    const id = crypto.randomUUID();
+    await this.db.create('safePlaces', { id, familyId, radius: 150, kids: [], note: '', kind: 'other', ...dto, createdAt: new Date() }, id);
+    return this.db.findFirst('safePlaces', { id });
+  }
+
+  async updatePlace(familyId: string, id: string, dto: SafePlaceDto) {
+    const place = await this.db.findFirst('safePlaces', { id, familyId });
+    if (!place) throw new NotFoundException('Place not found');
+    await this.db.update('safePlaces', id, { ...dto });
+    return this.db.findFirst('safePlaces', { id });
+  }
+
+  async deletePlace(familyId: string, id: string) {
+    const place = await this.db.findFirst('safePlaces', { id, familyId });
+    if (!place) throw new NotFoundException('Place not found');
+    await this.db.delete('safePlaces', id);
+    return { ok: true };
+  }
+
+  /** Ребёнок пришёл в безопасное место или ушёл из него — сообщаем родителю. */
+  private async notifyPlaceChange(ctx: DeviceContext, last: any, newest: PreparedPoint) {
+    const all = await this.db.findMany('safePlaces', { familyId: ctx.familyId });
+    const places = all.filter((p: any) => !p.kids?.length || p.kids.includes(ctx.userId));
+    if (places.length === 0) return;
+    const was = placeOf(last, places);
+    const now = placeOf(newest, places);
+    if (was?.id === now?.id) return;
+    const prefs = (await this.db.findFirst('familySettings', { familyId: ctx.familyId }))?.notifPrefs;
+    if (prefs?.location === false) return;
+    const profile = await this.db.findFirst('childProfiles', { id: ctx.childId });
+    const name = profile?.name ?? 'Ребёнок';
+    const message = now ? `${name} теперь в месте «${now.name}»` : `${name} больше не в месте «${was!.name}»`;
+    const id = crypto.randomUUID();
+    await this.db.create('notifications', {
+      id,
+      familyId: ctx.familyId,
+      type: 'LOCATION',
+      title: now ? 'Пришли на место' : 'Ушли с места',
+      message,
+      childId: ctx.childId,
+      userId: ctx.userId,
+      refType: 'PLACE',
+      refId: (now ?? was)!.id,
+      read: false,
+      createdAt: new Date(),
+    }, id);
   }
 }

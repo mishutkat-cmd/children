@@ -10,6 +10,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Length,
   Max,
   Min,
   ValidateNested,
@@ -154,4 +155,44 @@ export class HistoryQueryDto {
 export class UpdateMySharingDto {
   @IsBoolean()
   enabled: boolean;
+}
+
+/** Безопасное место: дом, школа, секция. Приход и уход — уведомление родителю. */
+export class SafePlaceDto {
+  @IsString()
+  @Length(1, 40)
+  name: string;
+
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat: number;
+
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(50)
+  @Max(1000)
+  radius?: number;
+
+  /** userId детей; пусто — все дети. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  kids?: string[];
+
+  /** Подпись вроде «8:00–15:00 по будням». */
+  @IsOptional()
+  @IsString()
+  @Length(0, 60)
+  note?: string;
+
+  @IsOptional()
+  @IsIn(['home', 'school', 'sport', 'other'])
+  kind?: 'home' | 'school' | 'sport' | 'other';
 }
