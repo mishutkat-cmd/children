@@ -3,8 +3,12 @@ import {
   IsOptional,
   IsInt,
   IsEnum,
+  IsIn,
   Min,
 } from 'class-validator';
+
+/** SHOP — общий магазин наград; PERSONAL — личная цель одного ребёнка; FAMILY — общая семейная цель. */
+export const REWARD_SCOPES = ['SHOP', 'PERSONAL', 'FAMILY'] as const;
 
 export class CreateRewardDto {
   @IsString()
@@ -31,6 +35,15 @@ export class CreateRewardDto {
 
   @IsEnum(['ITEM', 'CASH', 'EVENT'])
   type: 'ITEM' | 'CASH' | 'EVENT';
+
+  @IsIn(REWARD_SCOPES as unknown as string[])
+  @IsOptional()
+  scope?: 'SHOP' | 'PERSONAL' | 'FAMILY';
+
+  /** userId ребёнка, чья это личная цель. Другие дети её не видят. */
+  @IsString()
+  @IsOptional()
+  ownerChildId?: string;
 }
 
 export class UpdateRewardDto {
@@ -55,4 +68,13 @@ export class UpdateRewardDto {
   @Min(0)
   @IsOptional()
   moneyValueCents?: number;
+
+  @IsIn(REWARD_SCOPES as unknown as string[])
+  @IsOptional()
+  scope?: 'SHOP' | 'PERSONAL' | 'FAMILY';
+
+  /** userId ребёнка, чья это личная цель. Другие дети её не видят. */
+  @IsString()
+  @IsOptional()
+  ownerChildId?: string;
 }

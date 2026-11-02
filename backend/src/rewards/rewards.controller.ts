@@ -22,7 +22,7 @@ export class RewardsController {
 
   @Get()
   findAll(@User() user: RequestUser, @Query('status') status?: string) {
-    return this.rewardsService.findAll(user.familyId, status as any);
+    return this.rewardsService.findAll(user.familyId, status as any, user);
   }
 
   @Post()

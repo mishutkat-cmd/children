@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { LocalStorageService } from '../files/local-storage.service';
 import { AddToWishlistDto, ReorderWishlistDto, UpdateWishlistItemDto } from './dto/wishlist.dto';
@@ -60,6 +60,9 @@ export class WishlistService {
     const reward = await this.db.findFirst('rewards', { id: dto.rewardGoalId, familyId });
     if (!reward) {
       throw new NotFoundException('Reward not found');
+    }
+    if (reward.scope === 'PERSONAL' && reward.ownerChildId && reward.ownerChildId !== childId) {
+      throw new BadRequestException('Это цель другого ребёнка');
     }
 
     const existing = await this.db.findFirst('wishlist', { 

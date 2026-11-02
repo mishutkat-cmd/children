@@ -46,6 +46,10 @@ export class ExchangesService {
       if (rewardGoal.needsPrice || !(rewardGoal.costPoints > 0)) {
         throw new BadRequestException('Цену этого желания ещё не назначили');
       }
+      // Личная цель брата или сестры — не для этого ребёнка.
+      if (rewardGoal.scope === 'PERSONAL' && rewardGoal.ownerChildId && rewardGoal.ownerChildId !== userId) {
+        throw new BadRequestException('Это цель другого ребёнка');
+      }
 
       pointsSpent = rewardGoal.costPoints;
     } else if (dto.cashCents) {
