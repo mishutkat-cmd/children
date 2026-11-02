@@ -126,7 +126,7 @@ export class ChallengesService {
               typeof challenge.participantsJson === 'string'
                 ? JSON.parse(challenge.participantsJson)
                 : challenge.participantsJson || [];
-            if (participants.length > 0 && !participants.includes(childProfileId)) return null;
+            if (participants.length > 0 && !participants.includes(childProfileId) && !participants.includes(childId)) return null;
 
             const progress = await this.getChallengeProgress(challenge, childProfileId);
             const reward =
@@ -174,7 +174,7 @@ export class ChallengesService {
         .map((child: any) => {
           const childProfile = profileByUserId.get(child.id) ?? null;
           const childProfileId = childProfile?.id ?? child.id;
-          if (participants.length > 0 && !participants.includes(childProfileId)) return null;
+          if (participants.length > 0 && !participants.includes(childProfileId) && !participants.includes(child.id)) return null;
           return { child, childProfile, childProfileId };
         })
         .filter((x): x is { child: any; childProfile: any; childProfileId: string } => x !== null);
