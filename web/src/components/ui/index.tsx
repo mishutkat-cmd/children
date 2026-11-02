@@ -171,6 +171,10 @@ export const CATEGORY_STYLE: Record<string, { bg: string; color: string; label: 
   sport: { bg: tokens.reviewSoft, color: tokens.review, label: 'Спорт' },
   reading: { bg: tokens.doneSoft, color: tokens.done, label: 'Чтение' },
   pets: { bg: tokens.starSoft, color: '#9A5B00', label: 'Питомцы' },
+  creative: { bg: '#FFE8DC', color: '#C2510F', label: 'Творчество' },
   other: { bg: tokens.chip, color: tokens.text2, label: 'Другое' },
 }
-export const categoryStyle = (c?: string | null) => CATEGORY_STYLE[c ?? ''] ?? CATEGORY_STYLE.other
+// Старая форма писала категории по-русски.
+const CATEGORY_ALIAS: Record<string, string> = { учеба: 'study', учёба: 'study', спорт: 'sport', дом: 'home', творчество: 'creative' }
+export const categoryKey = (c?: string | null) => (c && (CATEGORY_ALIAS[c.toLowerCase()] ?? c)) || 'other'
+export const categoryStyle = (c?: string | null) => CATEGORY_STYLE[categoryKey(c)] ?? CATEGORY_STYLE.other

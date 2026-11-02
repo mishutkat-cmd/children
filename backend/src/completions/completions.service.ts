@@ -606,7 +606,7 @@ export class CompletionsService {
     return { total: unique.length, approved, failed };
   }
 
-  async reject(id: string, familyId: string) {
+  async reject(id: string, familyId: string, reason?: string) {
     const completion = await this.db.findFirst('completions', { id, familyId });
 
     if (!completion) {
@@ -626,6 +626,8 @@ export class CompletionsService {
 
     await this.db.update('completions', id, {
       status: 'REJECTED',
+      // Ребёнок видит, что переделать: «Покрывало на полу».
+      rejectReason: reason?.trim().slice(0, 200) || null,
     });
     
     return this.db.findFirst('completions', { id });

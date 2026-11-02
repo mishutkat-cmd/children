@@ -1,498 +1,140 @@
-import React, { ReactNode, useMemo } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
-import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Box,
-  Tabs,
-  Tab,
-  IconButton,
-  Menu,
-  MenuItem,
-  ListItemIcon,
-  ListItemText,
-  Divider,
-  CircularProgress,
-  Tooltip,
-  Avatar,
-} from '@mui/material'
+import { useState, type ReactNode } from 'react'
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
+import { Avatar, Box, ButtonBase, Drawer, IconButton, Menu, MenuItem, Typography } from '@mui/material'
 import { useAuthStore } from '../store/authStore'
-import { api } from '../lib/api'
-import LogoutIcon from '@mui/icons-material/Logout'
-import AccountCircleIcon from '@mui/icons-material/AccountCircle'
-import SettingsIcon from '@mui/icons-material/Settings'
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet'
-import { colors } from '../theme'
+import { usePendingCompletions } from '../hooks/useCompletions'
+import { usePendingExchanges } from '../hooks/useExchanges'
+import { tokens } from '../theme'
+import { Icon, type IconName } from './ui'
 import NotificationBell from './NotificationBell'
 
-interface LayoutProps {
-  children: ReactNode
+type NavItem = { to: string; label: string; icon: IconName; match: (p: string) => boolean; badge?: boolean }
+
+const MAIN: NavItem[] = [
+  { to: '/parent', label: 'Сводка', icon: 'home', match: (p) => p === '/parent' || p === '/parent/' },
+  { to: '/parent/approvals', label: 'Проверка', icon: 'inbox', match: (p) => p.startsWith('/parent/approvals'), badge: true },
+  { to: '/parent/tasks', label: 'Задания', icon: 'list', match: (p) => p.startsWith('/parent/tasks') },
+  { to: '/parent/children', label: 'Дети', icon: 'users', match: (p) => p.startsWith('/parent/children') },
+]
+const MORE: NavItem[] = [
+  { to: '/parent/goals', label: 'Цели и награды', icon: 'gift', match: (p) => /^\/parent\/(goals|wishlist|conversion)/.test(p) },
+  { to: '/parent/challenges', label: 'Челленджи', icon: 'trophy', match: (p) => /^\/parent\/(challenges|badges)/.test(p) },
+  { to: '/parent/reports', label: 'Отчёт', icon: 'chart', match: (p) => p.startsWith('/parent/reports') },
+  { to: '/parent/map', label: 'Где дети', icon: 'map', match: (p) => p.startsWith('/parent/map') },
+  { to: '/parent/activity', label: 'Экранное время', icon: 'clock', match: (p) => p.startsWith('/parent/activity') },
+]
+const SETTINGS: NavItem = { to: '/parent/settings', label: 'Настройки', icon: 'settings', match: (p) => p.startsWith('/parent/settings') }
+
+/** Сколько ждёт решения родителя: выполнения + обмены. Общий счётчик для бейджа и сводки. */
+export function usePendingCount() {
+  const { data: completions = [] } = usePendingCompletions()
+  const { data: exchanges = [] } = usePendingExchanges()
+  return (completions?.length || 0) + ((exchanges as any[])?.length || 0)
 }
 
-export default function Layout({ children }: LayoutProps) {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  const location = useLocation()
-  const { user, token, clearAuth, setAuth } = useAuthStore()
-  const queryClient = useQueryClient()
-  const isParent = user?.role === 'PARENT'
-  const [accountMenuAnchor, setAccountMenuAnchor] = React.useState<null | HTMLElement>(null)
-
-  const handleLogout = () => {
-    // Очищаем кеш React Query при выходе
-    queryClient.clear()
-    clearAuth()
-    navigate('/login')
-    setAccountMenuAnchor(null)
-  }
-
-  const handleAccountMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAccountMenuAnchor(event.currentTarget)
-  }
-
-  const handleAccountMenuClose = () => {
-    setAccountMenuAnchor(null)
-  }
-
-  const handleProfileClick = () => {
-    if (isParent) {
-      navigate('/parent/settings')
-    } else {
-      navigate('/child/profile')
-    }
-    handleAccountMenuClose()
-  }
-
-  const uploadAvatarMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData()
-      formData.append('file', file)
-      const response = await api.post('/upload/avatar', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      })
-      return response.data
-    },
-    onSuccess: async (data) => {
-      if (isParent) {
-        // Обновляем профиль родителя
-        const profileResponse = await api.patch('/auth/profile', { avatarUrl: data.url })
-        if (user && token && profileResponse.data) {
-          setAuth(token, {
-            ...user,
-            avatarUrl: profileResponse.data.avatarUrl || user.avatarUrl,
-          })
-        }
-      } else {
-        // Обновляем профиль ребенка
-        const profileResponse = await api.patch('/children/child/profile', { avatarUrl: data.url })
-        if (user && token && profileResponse.data) {
-          setAuth(token, {
-            ...user,
-            avatarUrl: profileResponse.data.childProfile?.avatarUrl || user.avatarUrl,
-          })
-        }
-      }
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] })
-      queryClient.invalidateQueries({ queryKey: ['child-profile'] })
-      queryClient.invalidateQueries({ queryKey: ['child-summary'] })
-      handleAccountMenuClose()
-    },
-    onError: (error: any) => {
-      alert(error?.response?.data?.message || t('common.uploadError'))
-    },
-  })
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        alert(t('common.chooseImage'))
-        return
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        alert(t('common.fileTooBig'))
-        return
-      }
-      uploadAvatarMutation.mutate(file)
-    }
-    // Сброс input после выбора файла
-    e.target.value = ''
-  }
-
-  // Определяем роль по пути для надежности
-  const pathIsParent = location.pathname.startsWith('/parent')
-  const pathIsChild = location.pathname.startsWith('/child')
-  const effectiveIsParent = (isParent ?? pathIsParent) && !pathIsChild
-  
-  // Вычисляем значение таба в зависимости от того, какие табы будут отображены
-  // Важно: это должно вычисляться после определения effectiveIsParent
-  const validTabValue = useMemo(() => {
-    const path = location.pathname
-    
-    // Всегда начинаем с 0 для безопасности
-    let tabValue = 0
-    
-    if (effectiveIsParent) {
-      // Для parent: 9 табов (0-8): Главная, Дети, Задания, Челленджи, Бейджи,
-      // Конвертация, Список бажань, Отчёт, Карта
-      // Порядок проверки важен - более специфичные пути должны проверяться первыми
-      if (path === '/parent' || path === '/parent/') tabValue = 0
-      else if (path.startsWith('/parent/children')) tabValue = 1
-      else if (path.startsWith('/parent/tasks')) tabValue = 2
-      else if (path.startsWith('/parent/challenges')) tabValue = 3
-      else if (path.startsWith('/parent/badges')) tabValue = 4
-      else if (path.startsWith('/parent/conversion')) tabValue = 5
-      else if (path.startsWith('/parent/wishlist')) tabValue = 6
-      else if (path.startsWith('/parent/reports')) tabValue = 7
-      else if (path.startsWith('/parent/map')) tabValue = 8
-      else if (path.startsWith('/parent/activity')) tabValue = 9
-      else tabValue = 0
-
-      const maxTabIndex = 9 // 10 табов: 0-9
-      const calculatedValue = Math.max(0, Math.min(tabValue, maxTabIndex))
-
-      const knownPaths = ['/parent', '/parent/children', '/parent/tasks', '/parent/challenges', '/parent/badges', '/parent/conversion', '/parent/wishlist', '/parent/reports', '/parent/map', '/parent/activity']
-      const isKnownPath = knownPaths.some(knownPath => path === knownPath || path.startsWith(knownPath + '/'))
-      
-      return isKnownPath ? calculatedValue : 0
-    } else {
-      // Для child: 5 табов (0-4): Главная, Задания, Челленджи, Бейджи, Список желаний
-      // ВАЖНО: Если путь не соответствует ни одному табу (например, /child/profile), возвращаем 0
-      if (path === '/child' || path === '/child/') tabValue = 0
-      else if (path.startsWith('/child/tasks')) tabValue = 1
-      else if (path.startsWith('/child/challenges')) tabValue = 2
-      else if (path.startsWith('/child/achievements')) tabValue = 3
-      else if (path.startsWith('/child/wishlist')) tabValue = 4
-      else {
-        // Если путь не соответствует ни одному табу (например, /child/profile), возвращаем 0
-        tabValue = 0
-      }
-      
-      // Гарантируем, что значение не превышает максимум (4 для child)
-      // И что оно не меньше 0
-      const maxTabIndex = 4 // 5 табов: 0, 1, 2, 3, 4
-      const calculatedValue = Math.max(0, Math.min(tabValue, maxTabIndex))
-      
-      // Дополнительная проверка: если путь не соответствует ни одному из известных, возвращаем 0
-      const knownPaths = ['/child', '/child/tasks', '/child/challenges', '/child/achievements', '/child/wishlist']
-      const isKnownPath = knownPaths.some(knownPath => path === knownPath || path.startsWith(knownPath + '/'))
-      
-      return isKnownPath ? calculatedValue : 0
-    }
-  }, [location.pathname, effectiveIsParent])
-  
-  // Дополнительная защита: гарантируем, что validTabValue соответствует количеству табов
-  const safeTabValue = useMemo(() => {
-    if (effectiveIsParent) {
-      const maxIndex = 7 // 8 табов: 0-7
-      const safe = Math.max(0, Math.min(validTabValue, maxIndex))
-      if (safe < 0 || safe > maxIndex) return 0
-      return safe
-    } else {
-      // Для child: 5 табов (0-4): Главная, Задания, Челленджи, Бейджи, Список желаний
-      const maxIndex = 4 // 5 табов: 0, 1, 2, 3, 4
-      // Дополнительная проверка: если validTabValue больше maxIndex или меньше 0, возвращаем 0
-      if (validTabValue > maxIndex || validTabValue < 0) {
-        // invalid tab index for child, correct to 0
-        return 0
-      }
-      const safe = Math.max(0, Math.min(validTabValue, maxIndex))
-      // Финальная проверка на всякий случай
-      if (safe < 0 || safe > maxIndex) {
-        // invalid safe tab value, correct to 0
-        return 0
-      }
-      return safe
-    }
-  }, [validTabValue, effectiveIsParent])
-
-
+function NavLink({ item, pathname, count, onClick }: { item: NavItem; pathname: string; count?: number; onClick?: () => void }) {
+  const on = item.match(pathname)
   return (
-    <Box
+    <ButtonBase
+      component={RouterLink}
+      to={item.to}
+      onClick={onClick}
+      aria-current={on ? 'page' : undefined}
       sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        // 100dvh keeps the page exactly viewport-tall while iOS Safari
-        // collapses its URL bar; 100vh fallback covers older WebViews.
-        minHeight: '100dvh',
-        '@supports not (min-height: 100dvh)': { minHeight: '100vh' },
-        background: colors.background.default,
+        justifyContent: 'flex-start', gap: 1.5, height: 44, px: 1.5, borderRadius: '12px', fontSize: 14, width: '100%',
+        fontWeight: on ? 600 : 500, color: on ? tokens.primaryInk : tokens.text2, bgcolor: on ? tokens.primarySoft : 'transparent',
+        '&:hover': { bgcolor: on ? tokens.primarySoft : '#F5F7FC' },
       }}
     >
-      <AppBar
-        position="sticky"
-        elevation={0}
-        sx={{
-          zIndex: 1100,
-          background: colors.background.paper,
-          borderBottom: '0.5px solid #D2D2D7',
-        }}
-      >
-        <Toolbar
-          sx={{
-            py: 2,
-            // 16px horizontal on phone (iOS HIG) instead of 24px — gives
-            // 16px back to the content column on a 360px viewport.
-            px: { xs: 2, sm: 4 },
-            // Respect notched iPhone safe area on the top edge.
-            pt: 'calc(env(safe-area-inset-top, 0px) + 16px)',
-            maxWidth: 1440,
-            mx: 'auto',
-            width: '100%',
-          }}
-        >
-          <Typography 
-            variant="h5" 
-            component="div" 
-            sx={{ 
-              fontWeight: 700,
-              color: colors.text.primary,
-              fontSize: { xs: '1.25rem', sm: '1.5rem' },
-              letterSpacing: '-0.02em',
-              flexGrow: 1,
-            }}
-          >
-            {t('common.appName')}
-          </Typography>
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            {effectiveIsParent && (
-            <>
-              <Tooltip title={t('nav.bonusOrPenalty')}>
-                <IconButton
-                  color="primary"
-                  onClick={() => {
-                    const onParentHome = location.pathname === '/parent' || location.pathname === '/parent/'
-                    if (onParentHome) {
-                      window.dispatchEvent(new CustomEvent('open-bonus-dialog'))
-                    } else {
-                      navigate('/parent', { state: { openBonusDialog: true } })
-                    }
-                  }}
-                  sx={{ p: 0.75 }}
-                >
-                  <AccountBalanceWalletIcon />
-                </IconButton>
-              </Tooltip>
-              <NotificationBell user={user} />
-            </>
-            )}
-          </Box>
-
-          <IconButton
-            onClick={handleAccountMenuOpen}
-            sx={{
-              p: 0.5,
-              '&:hover': {
-                background: colors.background.light,
-              },
-            }}
-          >
-            {user?.avatarUrl ? (
-              <Avatar
-                src={user.avatarUrl}
-                sx={{
-                  width: 40,
-                  height: 40,
-                  border: `2px solid ${colors.background.light}`,
-                }}
-              >
-                {user?.email?.[0]?.toUpperCase() || 'U'}
-              </Avatar>
-            ) : (
-              <Avatar
-                sx={{
-                  width: 40,
-                  height: 40,
-                  bgcolor: colors.primary.main,
-                  border: `2px solid ${colors.background.light}`,
-                }}
-              >
-                {user?.email?.[0]?.toUpperCase() || <AccountCircleIcon />}
-              </Avatar>
-            )}
-          </IconButton>
-          <Menu
-            anchorEl={accountMenuAnchor}
-            open={Boolean(accountMenuAnchor)}
-            onClose={handleAccountMenuClose}
-            anchorOrigin={{
-              vertical: 'bottom',
-              horizontal: 'right',
-            }}
-            transformOrigin={{
-              vertical: 'top',
-              horizontal: 'right',
-            }}
-            PaperProps={{
-              sx: {
-                mt: 1,
-                minWidth: 200,
-                borderRadius: 2,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              },
-            }}
-          >
-            <MenuItem onClick={handleProfileClick}>
-              <ListItemIcon>
-                <SettingsIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{effectiveIsParent ? t('nav.settings') : t('nav.profile')}</ListItemText>
-            </MenuItem>
-            <MenuItem 
-              component="label"
-              disabled={uploadAvatarMutation.isPending}
-            >
-              <ListItemIcon>
-                {uploadAvatarMutation.isPending ? (
-                  <CircularProgress size={20} />
-                ) : (
-                  <PhotoCameraIcon fontSize="small" />
-                )}
-              </ListItemIcon>
-              <ListItemText>
-                {uploadAvatarMutation.isPending ? t('common.uploading') : t('nav.changePhoto')}
-              </ListItemText>
-              <input
-                hidden
-                accept="image/*"
-                type="file"
-                onChange={handleAvatarUpload}
-                disabled={uploadAvatarMutation.isPending}
-              />
-            </MenuItem>
-            <Divider />
-            <MenuItem onClick={handleLogout}>
-              <ListItemIcon>
-                <LogoutIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{t('nav.logout')}</ListItemText>
-            </MenuItem>
-          </Menu>
-        </Toolbar>
-
-        <Box sx={{ borderBottom: '0.5px solid #D2D2D7', maxWidth: 1440, mx: 'auto', width: '100%' }}>
-          <Tabs
-            value={safeTabValue}
-            onChange={() => {}}
-            variant="scrollable"
-            scrollButtons="auto"
-            sx={{
-              px: { xs: 2, sm: 4 },
-              '& .MuiTabs-indicator': {
-                height: 2,
-                borderRadius: '1px 1px 0 0',
-                backgroundColor: colors.primary.main,
-              },
-              '& .MuiTab-root': {
-                textTransform: 'none',
-                fontWeight: 500,
-                fontSize: '0.9375rem',
-                color: colors.text.secondary,
-                minHeight: 48,
-                '&.Mui-selected': {
-                  color: colors.primary.main,
-                  fontWeight: 600,
-                },
-                '&:hover': {
-                  color: colors.primary.main,
-                },
-              },
-            }}
-          >
-            <Tab 
-              label={t('nav.home')} 
-              onClick={() => navigate(effectiveIsParent ? '/parent' : '/child')}
-            />
-            {effectiveIsParent ? (
-              <>
-                <Tab 
-                  label={t('nav.children')} 
-                  onClick={() => navigate('/parent/children')}
-                />
-                <Tab 
-                  label={t('nav.tasks')} 
-                  onClick={() => navigate('/parent/tasks')}
-                />
-                <Tab 
-                  label={t('nav.challenges')} 
-                  onClick={() => navigate('/parent/challenges')}
-                />
-                <Tab 
-                  label={t('nav.badges')} 
-                  onClick={() => navigate('/parent/badges')}
-                />
-                <Tab 
-                  label={t('nav.conversion')} 
-                  onClick={() => navigate('/parent/conversion')}
-                />
-                <Tab
-                  label={t('nav.wishlist')}
-                  onClick={() => navigate('/parent/wishlist')}
-                />
-                <Tab
-                  label={t('nav.reports')}
-                  onClick={() => navigate('/parent/reports')}
-                />
-                <Tab
-                  label={t('nav.map')}
-                  onClick={() => navigate('/parent/map')}
-                />
-                <Tab
-                  label={t('nav.activity')}
-                  onClick={() => navigate('/parent/activity')}
-                />
-              </>
-            ) : (
-              <>
-                <Tab 
-                  label={t('nav.tasks')} 
-                  onClick={() => navigate('/child/tasks')}
-                />
-                <Tab 
-                  label={t('nav.challenges')} 
-                  onClick={() => navigate('/child/challenges')}
-                />
-                <Tab 
-                  label={t('nav.badges')} 
-                  onClick={() => navigate('/child/achievements')}
-                />
-                <Tab 
-                  label={t('nav.wishlistChild')} 
-                  onClick={() => navigate('/child/wishlist')}
-                />
-              </>
-            )}
-          </Tabs>
+      <Icon name={item.icon} size={20} stroke={2} />
+      {item.label}
+      {!!count && (
+        <Box component="span" sx={{ ml: 'auto', minWidth: 22, height: 22, px: '6px', borderRadius: '11px', bgcolor: tokens.danger, color: '#FFF', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          {count > 99 ? '99+' : count}
         </Box>
-      </AppBar>
+      )}
+    </ButtonBase>
+  )
+}
 
-      <Box 
-        component="main" 
-        sx={{
-          flexGrow: 1,
-          position: 'relative',
-          zIndex: 1,
-          maxWidth: 1440,
-          mx: 'auto',
-          width: '100%',
-          // 16px horizontal on phone — same change as the Toolbar so
-          // the main column is exactly 32px wider on a 360px viewport.
-          px: { xs: 2, sm: 4 },
-          py: { xs: 2, sm: 4 },
-          // Respect notched-iPhone bottom inset for future bottom-nav
-          // and home-indicator clearance.
-          pb: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
-        }}
-      >
-        {children}
+function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const { user, clearAuth } = useAuthStore()
+  const pending = usePendingCount()
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const label = user?.login || user?.email || 'Родитель'
+
+  return (
+    <Box sx={{ width: 240, height: '100%', boxSizing: 'border-box', p: '24px 16px', display: 'flex', flexDirection: 'column', gap: 0.5, bgcolor: tokens.paper, overflowY: 'auto' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5, ml: 1.5 }}>
+        <Typography sx={{ flex: 1, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>Звёздочки</Typography>
+        <NotificationBell user={user} />
       </Box>
+      <Box component="nav" aria-label="Разделы" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+        {MAIN.map((i) => <NavLink key={i.to} item={i} pathname={pathname} count={i.badge ? pending : undefined} onClick={onNavigate} />)}
+        <Typography sx={{ m: '16px 0 4px 12px', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: tokens.text3 }}>Ещё</Typography>
+        {MORE.map((i) => <NavLink key={i.to} item={i} pathname={pathname} onClick={onNavigate} />)}
+      </Box>
+      <Box sx={{ mt: 'auto', pt: 2, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+        <NavLink item={SETTINGS} pathname={pathname} onClick={onNavigate} />
+        <ButtonBase
+          onClick={(e) => setAnchor(e.currentTarget)}
+          aria-label="Аккаунт"
+          sx={{ justifyContent: 'flex-start', gap: 1.25, minHeight: 48, px: 1.5, borderRadius: '12px', '&:hover': { bgcolor: '#F5F7FC' } }}
+        >
+          <Avatar src={user?.avatarUrl || undefined} sx={{ width: 32, height: 32, bgcolor: tokens.primary, fontSize: 14 }}>{label[0]?.toUpperCase()}</Avatar>
+          <Box component="span" sx={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Box>
+          <Icon name="chevronDown" size={18} />
+        </ButtonBase>
+        <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'left' }} transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
+          <MenuItem onClick={() => { setAnchor(null); onNavigate?.(); navigate('/parent/settings') }}>Настройки и профиль</MenuItem>
+          <MenuItem onClick={() => { setAnchor(null); clearAuth(); navigate('/login') }} sx={{ color: tokens.danger }}>Выйти</MenuItem>
+        </Menu>
+      </Box>
+    </Box>
+  )
+}
+
+/** Каркас родителя: сайдбар 240px (на телефоне — выдвижное меню) и рабочая область. */
+export default function Layout({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const pending = usePendingCount()
+  return (
+    <Box sx={{ minHeight: '100dvh', display: 'flex', bgcolor: tokens.bg, color: tokens.text }}>
+      <Box component="aside" sx={{ display: { xs: 'none', md: 'block' }, flex: '0 0 240px', borderRight: `1px solid ${tokens.line}`, position: 'sticky', top: 0, height: '100dvh' }}>
+        <Sidebar />
+      </Box>
+      <Drawer open={open} onClose={() => setOpen(false)} sx={{ display: { md: 'none' } }}>
+        <Sidebar onNavigate={() => setOpen(false)} />
+      </Drawer>
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ display: { xs: 'flex', md: 'none' }, alignItems: 'center', gap: 1, px: 1, pt: 'calc(env(safe-area-inset-top, 0px) + 6px)', pb: 0.75, bgcolor: tokens.paper, borderBottom: `1px solid ${tokens.line}`, position: 'sticky', top: 0, zIndex: 1100 }}>
+          <IconButton onClick={() => setOpen(true)} aria-label="Меню"><Icon name="list" /></IconButton>
+          <Typography sx={{ flex: 1, fontSize: 17, fontWeight: 800 }}>Звёздочки</Typography>
+          {pending > 0 && (
+            <ButtonBase component={RouterLink} to="/parent/approvals" sx={{ height: 36, px: 1.5, borderRadius: '18px', bgcolor: tokens.reviewSoft, color: tokens.review, fontSize: 13, fontWeight: 700 }}>
+              Проверка · {pending}
+            </ButtonBase>
+          )}
+        </Box>
+        <Box component="main" sx={{ flex: 1, minWidth: 0, p: { xs: '16px', md: '28px 32px' }, pb: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', display: 'flex', flexDirection: 'column', gap: { xs: 2, md: 2.5 } }}>
+          {children}
+        </Box>
+      </Box>
+    </Box>
+  )
+}
+
+/** Заголовок страницы родителя: надзаголовок, h1 и действия справа. */
+export function PageHeader({ kicker, title, children }: { kicker?: ReactNode; title: ReactNode; children?: ReactNode }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: { xs: 'flex-start', sm: 'center' }, gap: 1.5, flexDirection: { xs: 'column', sm: 'row' } }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        {kicker && <Typography sx={{ fontSize: 13, color: tokens.text3, '&::first-letter': { textTransform: 'uppercase' } }}>{kicker}</Typography>}
+        <Typography component="h1" sx={{ mt: '2px', fontSize: { xs: 24, md: 28 }, fontWeight: 700, letterSpacing: '-0.02em' }}>{title}</Typography>
+      </Box>
+      {children && <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>{children}</Box>}
     </Box>
   )
 }

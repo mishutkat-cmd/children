@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsDateString, MaxLength } from 'class-validator';
 
 export class CreateCompletionDto {
   @IsUUID()
@@ -20,4 +20,11 @@ export class CreateCompletionDto {
 export class CreateCompletionForChildDto extends CreateCompletionDto {
   @IsString() // childId может быть как UUID (userId), так и ChildProfile.id
   childId: string;
+}
+
+export class RejectCompletionDto {
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  reason?: string;
 }

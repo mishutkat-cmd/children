@@ -115,13 +115,15 @@ export const useRejectCompletion = () => {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: async (id: string) => {
-      const response = await api.post(`/completions/parent/completions/${id}/reject`)
+    // id или { id, reason } — причина видна ребёнку («Покрывало на полу»).
+    mutationFn: async (arg: string | { id: string; reason?: string }) => {
+      const { id, reason } = typeof arg === 'string' ? { id: arg, reason: undefined } : arg
+      const response = await api.post(`/completions/parent/completions/${id}/reject`, reason ? { reason } : {})
       return response.data
     },
-    onMutate: async (id: string) => {
+    onMutate: async (arg: string | { id: string; reason?: string }) => {
       await queryClient.cancelQueries({ queryKey: ['pending-completions'] })
-      return { previous: dropFromPending(queryClient, [id]) }
+      return { previous: dropFromPending(queryClient, [typeof arg === 'string' ? arg : arg.id]) }
     },
     onError: (_err, _id, context: any) => {
       if (context?.previous) queryClient.setQueryData(['pending-completions'], context.previous)

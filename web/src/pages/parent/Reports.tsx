@@ -1,454 +1,199 @@
-import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import {
-  Typography,
-  Box,
-  Card,
-  CardContent,
-  CircularProgress,
-  IconButton,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Tooltip,
-  Avatar,
-} from '@mui/material'
-import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos'
-import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
-import Layout from '../../components/Layout'
-import { colors } from '../../theme'
+import { useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { useQueries } from '@tanstack/react-query'
+import { Box, Button, CircularProgress, Typography } from '@mui/material'
+import Layout, { PageHeader } from '../../components/Layout'
+import { Card, Chip2, dayKey, labelCaps, useKids, type Kid } from '../../components/parent/kit'
+import { StarAmount, categoryStyle, formatNumber } from '../../components/ui'
+import { tokens } from '../../theme'
 import { api } from '../../lib/api'
+import { useTasks } from '../../hooks/useTasks'
+import { isAssignedTo, isPlannedOn } from './task-model'
 
-const MONTH_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+type Cell = 'done' | 'review' | 'missed' | 'extra' | 'off' | 'future'
 
-/**
- * Column geometry for the month grid.
- *
- * A month is up to 31 day columns plus a task name and a summary — far wider
- * than any screen, so the container scrolls horizontally. That makes the two
- * end columns the ones a reader loses first: the task name when scrolling
- * right, the summary when not scrolling at all. Both are pinned.
- */
-const TASK_COL_WIDTH = 220
-const DAY_COL_WIDTH = 34
-// Wide enough for the three-group case ("9✅2⏳21❌"), which overflowed at 80.
-const TOTAL_COL_WIDTH = 104
-
-const taskColumnSx = {
-  position: 'sticky' as const,
-  left: 0,
-  zIndex: 2,
-  width: TASK_COL_WIDTH,
-  minWidth: TASK_COL_WIDTH,
-  maxWidth: TASK_COL_WIDTH,
-  borderRight: '2px solid',
-  borderRightColor: 'divider',
+const CELL: Record<Cell, { bg: string; color: string; mark: string; label: string }> = {
+  done: { bg: tokens.doneSoft, color: tokens.done, mark: '✓', label: 'сделано' },
+  review: { bg: tokens.reviewSoft, color: tokens.review, mark: '…', label: 'на проверке' },
+  missed: { bg: tokens.dangerSoft, color: tokens.danger, mark: '×', label: 'пропуск' },
+  extra: { bg: tokens.primarySoft, color: tokens.primary, mark: '+', label: 'не по плану' },
+  off: { bg: 'transparent', color: tokens.muted, mark: '', label: '' },
+  future: { bg: 'transparent', color: tokens.muted, mark: '', label: '' },
 }
+const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
-const totalColumnSx = {
-  position: 'sticky' as const,
-  right: 0,
-  zIndex: 2,
-  width: TOTAL_COL_WIDTH,
-  minWidth: TOTAL_COL_WIDTH,
-  px: 1,
-  borderLeft: '2px solid',
-  borderLeftColor: 'divider',
+function weekStart(offset: number) {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + offset * 7)
+  return d
 }
+const fmtDay = (d: Date) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 
-function daysInMonth(year: number, month: number) {
-  return new Date(year, month + 1, 0).getDate()
-}
-
-function sanitizeIcon(icon?: string) {
-  if (!icon || [...icon].length > 3) return '📝'
-  return icon
-}
-
+/** Отчёт (PW_Report): неделя по дням — что сделано, что пропущено, и короткие выводы. */
 export default function ParentReports() {
-  const today = new Date()
-  const [year, setYear] = useState(today.getFullYear())
-  const [month, setMonth] = useState(today.getMonth())
-  const [selectedChildId, setSelectedChildId] = useState<string | null>(null)
+  const location = useLocation()
+  const { kids } = useKids()
+  const { data: tasks = [], isLoading } = useTasks('ACTIVE')
+  const [offset, setOffset] = useState(0)
+  const [who, setWho] = useState<string>((location.state as any)?.childId || '')
+  const selected = kids.filter((k) => (who === 'ALL' ? true : k.userId === (who || kids[0]?.userId)))
 
-  const { data: children } = useQuery({
-    queryKey: ['children'],
-    queryFn: () => api.get('/children').then(r => r.data || []),
+  const start = weekStart(offset)
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d })
+  const end = new Date(days[6]); end.setHours(23, 59, 59, 999)
+  const prevStart = weekStart(offset - 1)
+
+  // Две недели сразу: текущая для таблицы и прошлая для сравнения.
+  const queries = useQueries({
+    queries: kids.map((k) => ({
+      queryKey: ['completions', 'week', k.userId, offset],
+      queryFn: async () => (await api.get(`/completions/parent/completions/${k.userId}?from=${prevStart.toISOString()}&to=${end.toISOString()}`)).data || [],
+      staleTime: 60_000,
+    })),
   })
+  const byKid = new Map(kids.map((k, i) => [k.userId, ((queries[i]?.data as any[]) || []).filter((c) => c.status !== 'REJECTED')]))
+  const loading = isLoading || queries.some((q) => q.isLoading)
 
-  const { data: tasks } = useQuery({
-    queryKey: ['tasks', 'ACTIVE'],
-    queryFn: () => api.get('/tasks?status=ACTIVE').then(r => r.data || []),
-  })
+  const report = useMemo(() => selected.map((kid) => buildKidReport(kid, tasks as any[], byKid.get(kid.userId) || [], days, prevStart)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected.map((k) => k.userId).join(), tasks, queries.map((q) => q.dataUpdatedAt).join(), offset])
 
-  const from = `${year}-${String(month + 1).padStart(2, '0')}-01`
-  const lastDay = daysInMonth(year, month)
-  const to = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`
-
-  // Auto-select first child
-  const childId = selectedChildId || children?.[0]?.id || null
-
-  const { data: completions, isLoading: loadingCompletions } = useQuery({
-    queryKey: ['report-completions', childId, year, month],
-    queryFn: () =>
-      childId
-        ? api.get(`/completions/parent/completions/${childId}?from=${from}&to=${to}`).then(r => r.data || [])
-        : Promise.resolve([]),
-    enabled: !!childId,
-  })
-
-  const days = useMemo(() => {
-    return Array.from({ length: lastDay }, (_, i) => i + 1)
-  }, [lastDay])
-
-  // Map: taskId → day → status
-  const completionMap = useMemo(() => {
-    const map: Record<string, Record<number, 'APPROVED' | 'PENDING' | 'REJECTED'>> = {}
-    if (!completions) return map
-    for (const c of completions) {
-      const date = c.performedAt ? new Date(c.performedAt) : new Date(c.createdAt)
-      const d = date.getDate()
-      const m = date.getMonth()
-      const y = date.getFullYear()
-      if (y !== year || m !== month) continue
-      if (!map[c.taskId]) map[c.taskId] = {}
-      // Keep most recent / best status per day
-      const existing = map[c.taskId][d]
-      if (!existing || c.status === 'APPROVED' || (existing === 'REJECTED' && c.status === 'PENDING')) {
-        map[c.taskId][d] = c.status
-      }
-    }
-    return map
-  }, [completions, year, month])
-
-  // Summary per task
-  const taskStats = useMemo(() => {
-    const stats: Record<string, { approved: number; pending: number; missed: number }> = {}
-    if (!tasks) return stats
-    const todayDay = today.getDate()
-    const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month
-    const relevantDays = isCurrentMonth ? todayDay : lastDay
-    for (const task of tasks) {
-      const dayMap = completionMap[task.id] || {}
-      let approved = 0, pending = 0, missed = 0
-      for (let d = 1; d <= relevantDays; d++) {
-        const status = dayMap[d]
-        if (status === 'APPROVED') approved++
-        else if (status === 'PENDING') pending++
-        else missed++
-      }
-      stats[task.id] = { approved, pending, missed }
-    }
-    return stats
-  }, [completionMap, tasks, year, month, lastDay, today])
-
-  const prevMonth = () => {
-    if (month === 0) { setYear(y => y - 1); setMonth(11) }
-    else setMonth(m => m - 1)
-  }
-  const nextMonth = () => {
-    if (month === 11) { setYear(y => y + 1); setMonth(0) }
-    else setMonth(m => m + 1)
-
-  }
-  const isNextDisabled = year > today.getFullYear() || (year === today.getFullYear() && month >= today.getMonth())
+  const total = report.reduce((a, r) => ({ planned: a.planned + r.planned, done: a.done + r.done, prevPlanned: a.prevPlanned + r.prevPlanned, prevDone: a.prevDone + r.prevDone, stars: a.stars + r.stars }), { planned: 0, done: 0, prevPlanned: 0, prevDone: 0, stars: 0 })
+  const pct = total.planned ? Math.round((total.done / total.planned) * 100) : null
+  const prevPct = total.prevPlanned ? Math.round((total.prevDone / total.prevPlanned) * 100) : null
+  const good = report.flatMap((r) => r.rows.filter((x) => x.planned >= 3 && x.done >= x.planned).map((x) => x.task.title))
+  const bad = report.flatMap((r) => r.rows.filter((x) => x.planned > 0 && x.done === 0 && x.pastPlanned > 0).map((x) => (report.length > 1 ? `${r.kid.name}: «${x.task.title}»` : `«${x.task.title}»`)))
 
   return (
     <Layout>
-      <Box>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
-          <Typography variant="h3" component="h1" sx={{ fontWeight: 700, color: colors.text.primary, letterSpacing: '-0.02em' }}>
-            Отчёт по заданиям
-          </Typography>
-        </Box>
+      <PageHeader kicker={`${fmtDay(days[0])} — ${fmtDay(days[6])}`} title="Отчёт">
+        <Button variant="outlined" onClick={() => setOffset(offset - 1)}>‹ Прошлая неделя</Button>
+        {offset < 0 && <Button variant="outlined" onClick={() => setOffset(offset + 1)}>Следующая ›</Button>}
+        <Button variant="outlined" onClick={() => window.print()}>Распечатать или PDF</Button>
+      </PageHeader>
 
-        {/* Child selector */}
-        {children && children.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 1, mb: 3, flexWrap: 'wrap' }}>
-            {children.map((child: any) => {
-              const name = child.childProfile?.name || child.login
-              const active = (childId === child.id) || (!selectedChildId && children[0].id === child.id)
-              return (
-                <Chip
-                  key={child.id}
-                  avatar={<Avatar sx={{ bgcolor: active ? 'white' : colors.primary.main, color: active ? colors.primary.main : 'white', fontSize: '0.75rem' }}>{name[0]}</Avatar>}
-                  label={name}
-                  onClick={() => setSelectedChildId(child.id)}
-                  color={active ? 'primary' : 'default'}
-                  sx={{ fontWeight: active ? 700 : 400, cursor: 'pointer' }}
-                />
-              )
-            })}
-          </Box>
-        )}
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2.5 }}>
+        {kids.map((k) => <Chip2 key={k.userId} on={who !== 'ALL' && k.userId === (who || kids[0]?.userId)} onClick={() => setWho(k.userId)}>{k.name}</Chip2>)}
+        {kids.length > 1 && <Chip2 on={who === 'ALL'} onClick={() => setWho('ALL')}>{kids.length === 2 ? 'Обоих' : 'Всех'}</Chip2>}
+      </Box>
 
-        {/* Month navigation */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-          <IconButton onClick={prevMonth} size="small">
-            <ArrowBackIosIcon fontSize="small" />
-          </IconButton>
-          <Typography variant="h6" fontWeight={700} sx={{ minWidth: 180, textAlign: 'center' }}>
-            {MONTH_NAMES[month]} {year}
-          </Typography>
-          <IconButton onClick={nextMonth} size="small" disabled={isNextDisabled}>
-            <ArrowForwardIosIcon fontSize="small" />
-          </IconButton>
-        </Box>
-
-        {/* Summary cards */}
-        {tasks && tasks.length > 0 && completions && (
-          <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-            {(() => {
-              const total = Object.values(taskStats).reduce((a, s) => ({
-                approved: a.approved + s.approved,
-                pending: a.pending + s.pending,
-                missed: a.missed + s.missed,
-              }), { approved: 0, pending: 0, missed: 0 })
-              const rate = total.approved + total.missed > 0
-                ? Math.round((total.approved / (total.approved + total.missed)) * 100) : 0
-              return (
-                <>
-                  <Card sx={{ minWidth: 120, textAlign: 'center' }}>
-                    <CardContent sx={{ py: '12px !important' }}>
-                      <Typography variant="h5" fontWeight={700} color="success.main">{total.approved}</Typography>
-                      <Typography variant="caption" color="text.secondary">Выполнено</Typography>
-                    </CardContent>
-                  </Card>
-                  {total.pending > 0 && (
-                    <Card sx={{ minWidth: 120, textAlign: 'center' }}>
-                      <CardContent sx={{ py: '12px !important' }}>
-                        <Typography variant="h5" fontWeight={700} color="warning.main">{total.pending}</Typography>
-                        <Typography variant="caption" color="text.secondary">На проверке</Typography>
-                      </CardContent>
-                    </Card>
-                  )}
-                  <Card sx={{ minWidth: 120, textAlign: 'center' }}>
-                    <CardContent sx={{ py: '12px !important' }}>
-                      <Typography variant="h5" fontWeight={700} color="error.main">{total.missed}</Typography>
-                      <Typography variant="caption" color="text.secondary">Пропущено</Typography>
-                    </CardContent>
-                  </Card>
-                  <Card sx={{ minWidth: 120, textAlign: 'center', bgcolor: rate >= 80 ? 'success.50' : rate >= 50 ? 'warning.50' : 'error.50' }}>
-                    <CardContent sx={{ py: '12px !important' }}>
-                      <Typography variant="h5" fontWeight={700} color={rate >= 80 ? 'success.main' : rate >= 50 ? 'warning.main' : 'error.main'}>
-                        {rate}%
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">Выполнение</Typography>
-                    </CardContent>
-                  </Card>
-                </>
-              )
-            })()}
-          </Box>
-        )}
-
-        {/* Table */}
-        {loadingCompletions ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-            <CircularProgress />
-          </Box>
-        ) : !childId ? (
-          <Card><CardContent><Typography color="text.secondary">Нет детей</Typography></CardContent></Card>
-        ) : (
-          <TableContainer
-            component={Paper}
-            variant="outlined"
-            sx={{ overflowX: 'auto', maxWidth: '100%' }}
-          >
-            <Table
-              size="small"
-              sx={{
-                // Sum of what the columns below actually ask for. Computing it
-                // from a different per-day figure let the table claim a width
-                // its own cells did not agree with.
-                minWidth: TASK_COL_WIDTH + days.length * DAY_COL_WIDTH + TOTAL_COL_WIDTH,
-              }}
-            >
-              <TableHead>
-                {/* Day numbers row */}
-                <TableRow sx={{ bgcolor: 'grey.50' }}>
-                  <TableCell sx={{ ...taskColumnSx, fontWeight: 700, bgcolor: 'grey.50', zIndex: 3 }}>
-                    Задание
-                  </TableCell>
-                  {days.map(d => {
-                    const date = new Date(year, month, d)
-                    const dow = date.getDay()
-                    const isWeekend = dow === 0 || dow === 6
-                    const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === d
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 300px' }, gap: 2.5, alignItems: 'start' }}>
+        <Card sx={{ p: 2.25, overflowX: 'auto' }}>
+          {loading ? <CircularProgress sx={{ m: 2 }} /> : (
+            <Box component="table" sx={{ width: '100%', borderCollapse: 'separate', borderSpacing: '4px', minWidth: 520 }}>
+              <thead>
+                <tr>
+                  <Box component="th" sx={{ ...labelCaps, textAlign: 'left', pb: 1 }}>Задание</Box>
+                  {days.map((d, i) => <Box component="th" key={i} sx={{ ...labelCaps, width: 44, pb: 1, color: dayKey(d) === dayKey(new Date()) ? tokens.primary : tokens.text3 }}>{WEEKDAYS[i]}</Box>)}
+                </tr>
+              </thead>
+              <tbody>
+                {report.map((r) => [
+                  report.length > 1 && <tr key={`h-${r.kid.userId}`}><Box component="td" colSpan={8} sx={{ fontWeight: 700, fontSize: 14, pt: 1.5 }}>{r.kid.name}</Box></tr>,
+                  ...r.rows.map((row) => {
+                    const cat = categoryStyle(row.task.category)
                     return (
-                      <TableCell
-                        key={d}
-                        align="center"
-                        sx={{
-                          fontWeight: isToday ? 900 : isWeekend ? 600 : 400,
-                          color: isToday ? 'primary.main' : isWeekend ? 'error.main' : 'text.primary',
-                          p: '4px 2px',
-                          width: DAY_COL_WIDTH,
-                          minWidth: DAY_COL_WIDTH,
-                          fontSize: '0.75rem',
-                          borderBottom: isToday ? '2px solid' : undefined,
-                          borderBottomColor: 'primary.main',
-                        }}
-                      >
-                        <Box>{d}</Box>
-                        <Box sx={{ fontSize: '0.6rem', color: 'text.secondary', fontWeight: 400 }}>{DAY_NAMES[dow]}</Box>
-                      </TableCell>
+                      <tr key={`${r.kid.userId}-${row.task.id}`}>
+                        <Box component="td" sx={{ fontSize: 14, pr: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box sx={{ flex: '0 0 28px', height: 28, borderRadius: '8px', bgcolor: cat.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>{row.task.icon || '•'}</Box>
+                            {row.task.title}
+                          </Box>
+                        </Box>
+                        {row.cells.map((c, i) => (
+                          <Box component="td" key={i} title={CELL[c].label} sx={{ height: 36, borderRadius: '8px', textAlign: 'center', fontWeight: 800, fontSize: 15, bgcolor: CELL[c].bg, color: CELL[c].color, border: c === 'off' ? `1px dashed ${tokens.line}` : 'none' }}>
+                            {CELL[c].mark}
+                          </Box>
+                        ))}
+                      </tr>
                     )
-                  })}
-                  <TableCell
-                    align="center"
-                    sx={{ ...totalColumnSx, fontWeight: 700, fontSize: '0.75rem', bgcolor: 'grey.50', zIndex: 3 }}
-                  >
-                    Итого
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-
-              <TableBody>
-                {(tasks || []).map((task: any, idx: number) => {
-                  const dayMap = completionMap[task.id] || {}
-                  const stats = taskStats[task.id] || { approved: 0, pending: 0, missed: 0 }
-                  const rate = stats.approved + stats.missed > 0
-                    ? Math.round((stats.approved / (stats.approved + stats.missed)) * 100) : null
-
-                  return (
-                    <TableRow key={task.id} sx={{ bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', '&:hover': { bgcolor: 'action.hover' } }}>
-                      {/* Task name */}
-                      <TableCell sx={{ ...taskColumnSx, bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', py: 0.75 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Box sx={{ fontSize: '1.1rem', lineHeight: 1 }}>{sanitizeIcon(task.icon)}</Box>
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography
-                              variant="body2"
-                              fontWeight={600}
-                              title={task.title}
-                              sx={{
-                                lineHeight: 1.2,
-                                // The column is a fixed width now, so a long
-                                // title has to be clamped rather than allowed
-                                // to make one row three times taller than the
-                                // rest of the grid.
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              {task.title}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">{task.points} ⭐</Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-
-                      {/* Day cells */}
-                      {days.map(d => {
-                        const status = dayMap[d]
-                        const date = new Date(year, month, d)
-                        const isPast = date < new Date(today.getFullYear(), today.getMonth(), today.getDate())
-                        const isToday2 = today.getFullYear() === year && today.getMonth() === month && today.getDate() === d
-                        const dow = date.getDay()
-                        const isWeekend = dow === 0 || dow === 6
-
-                        let cell = { content: '', title: '', bgcolor: 'transparent', color: 'text.secondary' as any }
-                        if (status === 'APPROVED') {
-                          cell = { content: '✅', title: 'Выполнено', bgcolor: '#e8f5e9', color: 'success.main' }
-                        } else if (status === 'PENDING') {
-                          cell = { content: '⏳', title: 'На проверке', bgcolor: '#fff8e1', color: 'warning.main' }
-                        } else if (status === 'REJECTED') {
-                          cell = { content: '🚫', title: 'Отклонено', bgcolor: '#fce4ec', color: 'error.main' }
-                        } else if (isToday2) {
-                          cell = { content: '·', title: 'Сегодня', bgcolor: 'transparent', color: 'text.disabled' }
-                        } else if (isPast) {
-                          cell = { content: '❌', title: 'Пропущено', bgcolor: isWeekend ? 'transparent' : '#fafafa', color: 'error.light' }
-                        } else {
-                          cell = { content: '', title: 'Ещё не наступил', bgcolor: 'transparent', color: 'text.disabled' }
-                        }
-
-                        return (
-                          <Tooltip key={d} title={cell.title} arrow>
-                            <TableCell
-                              align="center"
-                              sx={{
-                                p: '2px',
-                                width: DAY_COL_WIDTH,
-                                minWidth: DAY_COL_WIDTH,
-                                bgcolor: cell.bgcolor,
-                                fontSize: '0.85rem',
-                                cursor: 'default',
-                                borderLeft: isWeekend ? '1px solid' : undefined,
-                                borderLeftColor: 'grey.200',
-                              }}
-                            >
-                              {cell.content}
-                            </TableCell>
-                          </Tooltip>
-                        )
-                      })}
-
-                      {/* Summary */}
-                      <TableCell
-                        align="center"
-                        sx={{ ...totalColumnSx, bgcolor: idx % 2 === 0 ? 'white' : 'grey.50', py: 0.75 }}
-                      >
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                          {/* Rate badge */}
-                          <Box sx={{
-                            px: 1, py: 0.25,
-                            borderRadius: '10px',
-                            bgcolor: rate === null ? 'grey.100' : rate >= 80 ? '#e8f5e9' : rate >= 50 ? '#fff8e1' : '#fce4ec',
-                            minWidth: 48,
-                          }}>
-                            <Typography sx={{
-                              fontSize: '0.8125rem',
-                              fontWeight: 800,
-                              color: rate === null ? 'text.disabled' : rate >= 80 ? 'success.main' : rate >= 50 ? 'warning.main' : 'error.main',
-                              lineHeight: 1,
-                            }}>
-                              {rate === null ? '—' : `${rate}%`}
-                            </Typography>
-                          </Box>
-                          {/* Counts in one line */}
-                          <Typography sx={{ fontSize: '0.6875rem', color: 'text.secondary', whiteSpace: 'nowrap', lineHeight: 1 }}>
-                            <Box component="span" sx={{ color: 'success.main', fontWeight: 600 }}>{stats.approved}✅</Box>
-                            {stats.pending > 0 && <Box component="span" sx={{ color: 'warning.main', fontWeight: 600, ml: 0.25 }}>{stats.pending}⏳</Box>}
-                            <Box component="span" sx={{ color: 'error.main', fontWeight: 600, ml: 0.25 }}>{stats.missed}❌</Box>
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-
-        {/* Legend */}
-        <Box sx={{ display: 'flex', gap: 2, mt: 2, flexWrap: 'wrap' }}>
-          {[
-            { icon: '✅', label: 'Выполнено' },
-            { icon: '⏳', label: 'На проверке' },
-            { icon: '❌', label: 'Пропущено' },
-            { icon: '🚫', label: 'Отклонено' },
-            { icon: '·', label: 'Сегодня' },
-          ].map(({ icon, label }) => (
-            <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Typography variant="body2">{icon}</Typography>
-              <Typography variant="caption" color="text.secondary">{label}</Typography>
+                  }),
+                ])}
+                {report.every((r) => r.rows.length === 0) && <tr><Box component="td" colSpan={8} sx={{ color: tokens.text3, fontSize: 14, py: 2 }}>На эту неделю заданий не было.</Box></tr>}
+              </tbody>
             </Box>
-          ))}
+          )}
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 2 }}>
+            {(['done', 'review', 'missed', 'extra'] as Cell[]).map((c) => (
+              <Box key={c} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, fontSize: 13, color: tokens.text2 }}>
+                <Box sx={{ width: 18, height: 18, borderRadius: '5px', bgcolor: CELL[c].bg, color: CELL[c].color, fontSize: 12, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{CELL[c].mark}</Box>
+                {CELL[c].label}
+              </Box>
+            ))}
+          </Box>
+        </Card>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+          <Card sx={{ p: 2.25, display: 'flex', gap: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography sx={{ fontSize: 28, fontWeight: 800 }}>{pct === null ? '—' : `${pct} %`}</Typography>
+              <Typography sx={{ fontSize: 13, color: tokens.text3 }}>
+                сделано{pct !== null && prevPct !== null && pct !== prevPct && <Box component="span" sx={{ fontWeight: 700, color: pct > prevPct ? tokens.done : tokens.danger }}> · {pct > prevPct ? '+' : '−'}{Math.abs(pct - prevPct)} %</Box>}
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <StarAmount value={total.stars} size={28} weight={800} />
+              <Typography sx={{ fontSize: 13, color: tokens.text3 }}>звёзд</Typography>
+            </Box>
+          </Card>
+          <Card sx={{ p: 2.25, display: 'flex', flexDirection: 'column', gap: 1.5, fontSize: 14 }}>
+            {good.length > 0 && <Typography sx={{ fontSize: 14 }}><b style={{ color: tokens.done }}>Хорошо:</b> {good.slice(0, 3).join(', ')} — без пропусков.</Typography>}
+            {bad.length > 0 && <Typography sx={{ fontSize: 14 }}><b style={{ color: tokens.danger }}>Внимание:</b> {bad.slice(0, 3).join(', ')} — ни разу за неделю. Может, задание слишком большое или неудобное по времени?</Typography>}
+            {good.length === 0 && bad.length === 0 && <Typography sx={{ fontSize: 14, color: tokens.text3 }}>Ровная неделя — ничего особенного.</Typography>}
+            {total.stars > 0 && <Typography sx={{ fontSize: 13, color: tokens.text3 }}>В среднем {formatNumber(Math.round(total.stars / 7))} звёзд в день.</Typography>}
+          </Card>
         </Box>
       </Box>
     </Layout>
   )
+}
+
+function buildKidReport(kid: Kid, tasks: any[], completions: any[], days: Date[], prevStart: Date) {
+  const today = dayKey(new Date())
+  const weekKeys = days.map(dayKey)
+  const firstKey = weekKeys[0]
+  const mine = tasks.filter((t) => isAssignedTo(t, kid))
+  const byTaskDay = new Map<string, any>()
+  for (const c of completions) byTaskDay.set(`${c.taskId}|${dayKey(new Date(c.performedAt))}`, c)
+
+  let planned = 0, done = 0, stars = 0
+  const rows = mine
+    .map((task) => {
+      const flexible = task.frequency === 'WEEKLY' || task.frequency === 'ONCE'
+      const doneThisWeek = weekKeys.filter((k) => byTaskDay.has(`${task.id}|${k}`)).length
+      let rowPlanned = 0, rowDone = 0, pastPlanned = 0
+      const cells: Cell[] = days.map((d, i) => {
+        const key = weekKeys[i]
+        const c = byTaskDay.get(`${task.id}|${key}`)
+        const plannedHere = !flexible && isPlannedOn(task, d) && (!task.createdAt || dayKey(new Date(task.createdAt)) <= key)
+        if (plannedHere && key <= today) { rowPlanned++; if (key < today) pastPlanned++ }
+        if (c) { rowDone++; stars += c.pointsAwarded || 0 }
+        if (c) return c.status === 'PENDING' ? 'review' : plannedHere || flexible ? 'done' : 'extra'
+        if (key > today || (key === today && plannedHere)) return 'future'
+        return plannedHere && key < today ? 'missed' : 'off'
+      })
+      // «Раз в неделю» считаем пропуском только когда неделя кончилась.
+      const weekOver = weekKeys[6] < today
+      if (flexible) { rowPlanned = doneThisWeek || (task.frequency === 'WEEKLY' && weekOver) ? 1 : 0; pastPlanned = weekOver ? rowPlanned : 0 }
+      planned += rowPlanned
+      done += Math.min(rowDone, rowPlanned)
+      return { task, cells, planned: rowPlanned, done: rowDone, pastPlanned }
+    })
+    .filter((r) => r.planned > 0 || r.done > 0)
+
+  // Прошлая неделя — только для «+N %».
+  let prevPlanned = 0, prevDone = 0
+  for (const task of mine) {
+    if (task.frequency === 'ONCE') continue
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(prevStart); d.setDate(prevStart.getDate() + i)
+      const key = dayKey(d)
+      if (key >= firstKey || (task.createdAt && dayKey(new Date(task.createdAt)) > key)) continue
+      const has = byTaskDay.has(`${task.id}|${key}`)
+      if (task.frequency === 'WEEKLY') { if (i === 6) { prevPlanned++ } if (has) prevDone = prevDone + 1 }
+      else if (isPlannedOn(task, d)) { prevPlanned++; if (has) prevDone++ }
+    }
+  }
+  return { kid, rows, planned, done, stars, prevPlanned, prevDone: Math.min(prevDone, prevPlanned) }
 }

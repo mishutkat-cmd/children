@@ -1,2050 +1,355 @@
-import React, { useState, useEffect } from 'react'
-import { useQueryClient, useQuery } from '@tanstack/react-query'
-import {
-  Typography,
-  CardContent,
-  Button,
-  TextField,
-  Box,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Alert,
-  Grid,
-  IconButton,
-  Chip,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Checkbox,
-  FormControlLabel,
-  SelectChangeEvent,
-  CircularProgress,
-  InputAdornment,
-  Tabs,
-  Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Tooltip,
-  ToggleButtonGroup,
-  ToggleButton,
-} from '@mui/material'
-import { motion, AnimatePresence } from 'framer-motion'
-import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/Delete'
-import StarIcon from '@mui/icons-material/Star'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
-import WarningIcon from '@mui/icons-material/Warning'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import ViewModuleIcon from '@mui/icons-material/ViewModule'
-import ViewListIcon from '@mui/icons-material/ViewList'
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import EditIcon from '@mui/icons-material/Edit'
-import ArchiveIcon from '@mui/icons-material/Archive'
-import PersonIcon from '@mui/icons-material/Person'
-import Layout from '../../components/Layout'
-import AnimatedCard from '../../components/AnimatedCard'
-import { ParentTaskCard } from '../../components/ParentTaskCard'
-import { ChildStatsCard } from '../../components/ChildStatsCard'
-import { colors } from '../../theme'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { useQueries } from '@tanstack/react-query'
+import { Box, Button, CircularProgress, Dialog, DialogContent, IconButton, InputAdornment, MenuItem, Switch, TextField, Typography } from '@mui/material'
+import Layout, { PageHeader } from '../../components/Layout'
+import { Card, Chip2, labelCaps, useKids, type Kid } from '../../components/parent/kit'
+import { CATEGORY_STYLE, Icon, StarAmount, categoryKey, categoryStyle } from '../../components/ui'
+import { tokens } from '../../theme'
 import { api } from '../../lib/api'
-import {
-  useChildren,
-  useTasks,
-  useTodayStatistics,
-  useCreateTask,
-  useUpdateTask,
-  useArchiveTask,
-  useUnarchiveTask,
-  useDeleteTask,
-  useChallenges,
-  useCreateCompletionForChild,
-  useChildrenStatistics,
-  useMarkAsNotCompleted,
-  usePendingCompletions,
-  useApproveCompletion,
-  useRejectCompletion,
-} from '../../hooks'
-import type { Task, Challenge, ChildStatistics } from '../../types/api'
+import { useArchiveTask, useCreateTask, useDeleteTask, useTasks, useUnarchiveTask, useUpdateTask } from '../../hooks/useTasks'
+import { TASK_TEMPLATES, type TaskTemplate } from './task-templates'
+import { completionRate, scheduleLabel, type Freq } from './task-model'
 
-// Выбранный в календаре день отправляем как локальный полдень: локальная
-// полночь в toISOString() для UTC+N — это уже предыдущие сутки, и сервер
-// записывал отметку на вчера.
-const localNoonISO = (d: Date) =>
-  new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0).toISOString()
+const DAYS = [1, 2, 3, 4, 5, 6, 0]
+const DAY_LABEL: Record<number, string> = { 0: 'Вс', 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб' }
+const STAR_PRESETS = [5, 10, 15, 20, 30]
+const ICONS = ['🪥', '🛏️', '📚', '📖', '✏️', '🧹', '🍽️', '🗑️', '🧺', '🐾', '🏊', '⚽', '🚴', '🎹', '🎨', '🌱', '🧘', '😴']
 
-const EMOJI_OPTIONS = [
-  // Учёба
-  '📝', '📚', '✏️', '📖', '🎓', '🔬', '🧮', '📐', '🖊️', '📊',
-  // Спорт
-  '🏃', '🏀', '⚽', '🎾', '🏊', '🚴', '🤸', '🏋️', '⛹️', '🧘',
-  // Дом
-  '🧹', '🍽️', '🛏️', '🧺', '🪴', '🧽', '🗑️', '🍳', '🪥', '🚿',
-  // Творчество
-  '🎨', '🎸', '🎹', '🎭', '✂️', '🎬', '📷', '🖼️', '🎤', '🎻',
-  // Игры и развлечения
-  '🎮', '🧩', '🎲', '🎯', '🏆', '🌟',
-  // Здоровье и прочее
-  '🦷', '💊', '😴', '❤️', '🌱', '🐾',
-]
+type Tab = 'DAILY' | 'DAYS' | 'ONCE' | 'ARCHIVE'
 
-const EMOJI_CATEGORIES = [
-  { label: 'Учёба', range: [0, 10] },
-  { label: 'Спорт', range: [10, 20] },
-  { label: 'Дом', range: [20, 30] },
-  { label: 'Творчество', range: [30, 40] },
-  { label: 'Игры', range: [40, 46] },
-  { label: 'Другое', range: [46, 52] },
-]
-
-// Проверяем что иконка — это эмодзи, а не текст
-const sanitizeIcon = (icon?: string) => {
-  if (!icon || [...icon].length > 3) return '📝'
-  return icon
-}
-const CATEGORY_OPTIONS = ['учеба', 'спорт', 'дом', 'творчество'] as const
-const DAYS_OF_WEEK_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'] as const
-const DAYS_OF_WEEK_FULL = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'] as const
-
-// Компонент календаря недели для всей страницы
-function WeekCalendar({ 
-  selectedChildId, 
-  tasks,
-  selectedDate,
-  onDateSelect,
-}: { 
-  selectedChildId: string | null
-  tasks: Task[]
-  selectedDate: Date | null
-  onDateSelect: (date: Date) => void
-}) {
-  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
-    const today = new Date()
-    const dayOfWeek = today.getDay() === 0 ? 6 : today.getDay() - 1 // Понедельник = 0
-    const weekStart = new Date(today)
-    weekStart.setDate(today.getDate() - dayOfWeek)
-    weekStart.setHours(0, 0, 0, 0)
-    return weekStart
-  })
-
-  const weekEnd = new Date(currentWeekStart)
-  weekEnd.setDate(currentWeekStart.getDate() + 6)
-  weekEnd.setHours(23, 59, 59, 999)
-
-  // Получаем все completions для выбранного ребенка за эту неделю
-  const { data: weekCompletions } = useQuery({
-    queryKey: ['week-completions', selectedChildId, currentWeekStart.toISOString()],
-    queryFn: async () => {
-      if (!selectedChildId) return []
-      const response = await api.get(
-        `/completions/parent/completions/${selectedChildId}`,
-        { params: { from: currentWeekStart.toISOString(), to: weekEnd.toISOString() } }
-      )
-      return response.data || []
-    },
-    enabled: !!selectedChildId,
-  })
-
-  // Группируем completions по датам и задачам
-  const completionsByDate = new Map<string, Set<string>>()
-  if (weekCompletions) {
-    weekCompletions.forEach((c: any) => {
-      if (c.status === 'APPROVED' || c.status === 'PENDING') {
-        const date = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt)
-        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        if (!completionsByDate.has(dateStr)) {
-          completionsByDate.set(dateStr, new Set())
-        }
-        completionsByDate.get(dateStr)!.add(c.taskId)
-      }
-    })
-  }
-
-  // Создаем массив дней недели
-  const weekDays = []
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(currentWeekStart)
-    date.setDate(currentWeekStart.getDate() + i)
-    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-    const completedTasks = completionsByDate.get(dateStr) || new Set()
-    const isToday = dateStr === `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`
-    const isSelected = selectedDate && dateStr === `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-    weekDays.push({ 
-      date, 
-      dateStr, 
-      dayName: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][i],
-      completedCount: completedTasks.size,
-      totalTasks: tasks.filter(t => t.status === 'ACTIVE').length,
-      isToday,
-      isSelected: !!isSelected,
-    })
-  }
-
-  const handlePrevWeek = () => {
-    const newWeekStart = new Date(currentWeekStart)
-    newWeekStart.setDate(currentWeekStart.getDate() - 7)
-    setCurrentWeekStart(newWeekStart)
-  }
-
-  const handleNextWeek = () => {
-    const newWeekStart = new Date(currentWeekStart)
-    newWeekStart.setDate(currentWeekStart.getDate() + 7)
-    setCurrentWeekStart(newWeekStart)
-  }
-
-  const handleToday = () => {
-    const today = new Date()
-    const dayOfWeek = today.getDay() === 0 ? 6 : today.getDay() - 1
-    const weekStart = new Date(today)
-    weekStart.setDate(today.getDate() - dayOfWeek)
-    weekStart.setHours(0, 0, 0, 0)
-    setCurrentWeekStart(weekStart)
-  }
-
-  const weekRange = `${weekDays[0].date.getDate()} ${['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'][weekDays[0].date.getMonth()]} - ${weekDays[6].date.getDate()} ${['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'][weekDays[6].date.getMonth()]}`
-
-  return (
-    <AnimatedCard delay={0}>
-      <Box sx={{ p: 1.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-          <IconButton 
-            onClick={handlePrevWeek}
-            size="small"
-            sx={{ color: colors.text.secondary, p: 0.5 }}
-          >
-            <ExpandMoreIcon sx={{ transform: 'rotate(90deg)', fontSize: '1.2rem' }} />
-          </IconButton>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, color: colors.text.primary, fontSize: '0.875rem' }}>
-              {weekRange}
-            </Typography>
-            <Button
-              size="small"
-              onClick={handleToday}
-              sx={{ textTransform: 'none', fontSize: '0.7rem', minWidth: 'auto', px: 1 }}
-            >
-              Сегодня
-            </Button>
-          </Box>
-          <IconButton 
-            onClick={handleNextWeek}
-            size="small"
-            sx={{ color: colors.text.secondary, p: 0.5 }}
-          >
-            <ExpandMoreIcon sx={{ transform: 'rotate(-90deg)', fontSize: '1.2rem' }} />
-          </IconButton>
-        </Box>
-        
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.5 }}>
-          {weekDays.map((dayData) => (
-            <Box
-              key={dayData.dateStr}
-              onClick={() => onDateSelect(dayData.date)}
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                p: 0.75,
-                borderRadius: 1.5,
-                background: dayData.isSelected 
-                  ? colors.primary.main + '30' 
-                  : dayData.isToday 
-                    ? colors.primary.main + '20' 
-                    : 'transparent',
-                border: `1.5px solid ${dayData.isSelected 
-                  ? colors.primary.main 
-                  : dayData.isToday 
-                    ? colors.primary.main 
-                    : colors.background.light}`,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  background: dayData.isSelected 
-                    ? colors.primary.main + '40' 
-                    : dayData.isToday 
-                      ? colors.primary.main + '30' 
-                      : colors.background.light,
-                  transform: 'translateY(-2px)',
-                },
-              }}
-            >
-              <Typography 
-                variant="caption" 
-                sx={{ 
-                  fontSize: '0.65rem', 
-                  color: colors.text.secondary,
-                  mb: 0.25,
-                }}
-              >
-                {dayData.dayName}
-              </Typography>
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  fontWeight: dayData.isSelected || dayData.isToday ? 700 : 500,
-                  color: dayData.isSelected || dayData.isToday ? colors.primary.main : colors.text.primary,
-                  mb: 0.25,
-                  fontSize: '0.9rem',
-                }}
-              >
-                {dayData.date.getDate()}
-              </Typography>
-              <Chip
-                label={`${dayData.completedCount}/${dayData.totalTasks}`}
-                size="small"
-                color={dayData.completedCount === dayData.totalTasks && dayData.totalTasks > 0 ? 'success' : 'default'}
-                sx={{ 
-                  fontSize: '0.65rem',
-                  height: 18,
-                  '& .MuiChip-label': {
-                    px: 0.5,
-                  },
-                }}
-              />
-            </Box>
-          ))}
-        </Box>
-      </Box>
-    </AnimatedCard>
-  )
+interface Draft {
+  id?: string
+  title: string
+  description: string
+  icon: string
+  category: string
+  points: number
+  frequency: Freq
+  daysOfWeek: number[]
+  assignedTo: string
+  requiresProof: boolean
+  autoApprove: boolean
+  archived?: boolean
 }
 
-// Вспомогательные функции.
-// Backend used to return daysOfWeek as a JSON-stringified array; after the
-// "native types" migration it returns a real number[] (or null). Accept both
-// shapes so an older deploy hitting newer data — or vice versa — doesn't
-// silently drop the user's day selection.
-const parseDaysOfWeek = (raw?: string | number[] | null): number[] => {
-  if (!raw) return []
-  if (Array.isArray(raw)) return raw as number[]
-  try {
-    const parsed = JSON.parse(raw as string)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
+const emptyDraft = (): Draft => ({
+  title: '', description: '', icon: '', category: 'home', points: 10, frequency: 'DAILY', daysOfWeek: [],
+  assignedTo: 'ALL', requiresProof: false, autoApprove: false,
+})
 
-interface ChildStatWithCompletions {
-  childId: string
-  childName: string
-  completedTasks?: Task[]
-}
+const toDraft = (t: any, archived = false): Draft => ({
+  id: t.id,
+  title: t.title || '',
+  description: t.description || '',
+  icon: t.icon || '',
+  category: categoryKey(t.category),
+  points: t.points || 10,
+  frequency: t.frequency || 'DAILY',
+  daysOfWeek: Array.isArray(t.daysOfWeek) ? t.daysOfWeek : typeof t.daysOfWeek === 'string' ? JSON.parse(t.daysOfWeek || '[]') : [],
+  assignedTo: t.assignedTo || 'ALL',
+  requiresProof: !!t.requiresProof,
+  autoApprove: t.requiresParentApproval === false,
+  archived,
+})
 
-const isTaskCompletedForChild = (taskId: string, childStat: ChildStatWithCompletions): boolean => {
-  // Проверяем что completedTasks существует и является массивом
-  if (!childStat?.completedTasks || !Array.isArray(childStat.completedTasks)) {
-    return false
-  }
-  return childStat.completedTasks.some((t: Task) => t.id === taskId)
-}
+const whoLabel = (assignedTo: string | undefined, kids: Kid[]) =>
+  !assignedTo || assignedTo === 'ALL' ? (kids.length === 2 ? 'оба' : 'все') : kids.find((k) => k.userId === assignedTo || k.profileId === assignedTo)?.name || '—'
 
-// Стоит ли задание в расписании на конкретный день.
-// CUSTOM хранит выбранные дни недели; остальные частоты актуальны каждый день.
-const isTaskScheduledOn = (task: Task, date: Date): boolean => {
-  if (task.frequency !== 'CUSTOM') return true
-  const days = parseDaysOfWeek(task.daysOfWeek)
-  if (days.length === 0) return true
-  return days.includes(date.getDay())
-}
-
-// Кому назначено задание.
-// Источников назначения два: task.assignedTo ('ALL' или userId ребенка — так
-// пишет форма) и таблица taskAssignments (там лежит childProfileId — так
-// писал старый /assign). Проверяем обе формы id, чтобы задание не «прилипало»
-// к чужому ребенку.
-interface ChildRef {
-  childId: string
-  childProfileId?: string
-}
-
-const isTaskAssignedToChild = (task: Task, child?: ChildRef | null): boolean => {
-  if (!child) return false
-  if (!task.assignedTo || task.assignedTo === 'ALL') return true
-  const profileId = child.childProfileId || child.childId
-  const assignments = (task as any).taskAssignments
-  if (Array.isArray(assignments) && assignments.length > 0) {
-    return assignments.some((a: any) =>
-      a.childId === profileId ||
-      a.childId === child.childId ||
-      (a.child && (
-        a.child.id === profileId ||
-        a.child.id === child.childId ||
-        a.child.userId === child.childId
-      ))
-    )
-  }
-  return task.assignedTo === child.childId || task.assignedTo === profileId
-}
-
-// Функция для определения статуса выполнения задания (APPROVED, PENDING, NOT_COMPLETED)
-const getTaskStatusForChild = (
-  taskId: string,
-  childId: string,
-  pendingCompletions?: any[]
-): 'APPROVED' | 'PENDING' | 'NOT_COMPLETED' => {
-  if (!pendingCompletions || pendingCompletions.length === 0) {
-    return 'NOT_COMPLETED'
-  }
-  
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  
-  // Ищем pending completion для этой задачи и ребенка
-  const pendingCompletion = pendingCompletions.find((c: any) => {
-    const completionChildId = c.child?.childProfile?.id || c.child?.id || c.childId
-    const performedAt = c.performedAt?.toDate ? c.performedAt.toDate() : new Date(c.performedAt)
-    return (
-      c.taskId === taskId &&
-      (completionChildId === childId || c.child?.userId === childId) &&
-      performedAt >= today &&
-      performedAt < tomorrow
-    )
-  })
-  
-  if (pendingCompletion) {
-    return 'PENDING'
-  }
-  
-  return 'NOT_COMPLETED'
-}
-
+/** Задания (PW_Tasks): таблица с вкладками по расписанию и редактор сбоку. */
 export default function ParentTasks() {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [editingTask, setEditingTask] = useState<Task | null>(null)
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    icon: '📝',
-    category: '',
-    points: 10,
-    frequency: 'DAILY' as 'ONCE' | 'DAILY' | 'WEEKLY' | 'CUSTOM',
-    daysOfWeek: [] as number[],
-    assignedTo: 'ALL',
-    requiresProof: false,
-    requiresParentApproval: true,
-  })
-  const [error, setError] = useState('')
-  const [viewMode, setViewMode] = useState<'grid' | 'table' | 'diary'>('grid')
-  // Начало недели для режима «дневник» (понедельник 00:00)
-  const [diaryWeekStart, setDiaryWeekStart] = useState<Date>(() => {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    const day = d.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    d.setDate(d.getDate() + diff)
-    return d
-  })
-  const [statusFilter, setStatusFilter] = useState<'ACTIVE' | 'ARCHIVED'>('ACTIVE')
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
-  // Выбранная дата для отметки заданий (по умолчанию сегодня)
-  const [selectedDate, setSelectedDate] = useState<Date | null>(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    return today
-  })
-  // Инициализируем с гарантированно валидным значением
-  const [tabIndex, setTabIndex] = useState(() => {
-    // Проверяем localStorage на случай сохраненного значения
-    const saved = localStorage.getItem('tasks-tab-index')
-    if (saved !== null) {
-      const parsed = parseInt(saved, 10)
-      // Проверяем что значение валидно (>= 0)
-      if (!isNaN(parsed) && parsed >= 0) {
-        return parsed
-      }
-    }
-    return 0
-  })
+  const location = useLocation()
+  const { kids } = useKids()
+  const { data: active = [], isLoading } = useTasks('ACTIVE')
+  const { data: archived = [] } = useTasks('ARCHIVED')
+  const [tab, setTab] = useState<Tab>('DAILY')
+  const [query, setQuery] = useState('')
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
 
-  const { data: children } = useChildren()
-  const { data: childrenStats } = useChildrenStatistics()
-  const { data: tasks, isLoading, refetch: refetchTasks } = useTasks(statusFilter)
-  const { data: todayStatistics } = useTodayStatistics()
-  const { data: pendingCompletions } = usePendingCompletions()
-  
-  // Логирование только в development режиме
+  // Выполнения всех детей за 4 недели — для колонки «За 4 недели».
+  const completionQueries = useQueries({
+    queries: kids.map((k) => ({
+      queryKey: ['completions', 'range', k.userId, 28],
+      queryFn: async () => {
+        const from = new Date()
+        from.setDate(from.getDate() - 28)
+        from.setHours(0, 0, 0, 0)
+        return (await api.get(`/completions/parent/completions/${k.userId}?from=${from.toISOString()}`)).data || []
+      },
+      staleTime: 60_000,
+    })),
+  })
+  const allCompletions = useMemo(() => completionQueries.flatMap((q) => (q.data as any[]) || []), [completionQueries])
+
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development' && tasks) {
-      console.log('[Tasks] Loaded', tasks.length, 'tasks')
-    }
-  }, [tasks])
-  const { data: challenges } = useChallenges()
+    if ((location.state as any)?.create) setDraft(emptyDraft())
+  }, [location.state])
 
-  const createTask = useCreateTask()
-  const updateTask = useUpdateTask()
-  const archiveTask = useArchiveTask()
-  useUnarchiveTask() // зарезервировано для кнопки «Разархивировать»
-  const deleteTask = useDeleteTask()
-  const createCompletionForChild = useCreateCompletionForChild()
-  const markAsNotCompleted = useMarkAsNotCompleted()
-  const approveCompletion = useApproveCompletion()
-  const rejectCompletion = useRejectCompletion()
-  // Track per-task loading state to avoid all cards showing loading at once
-  const [markingTaskId, setMarkingTaskId] = useState<string | null>(null)
-  const [notCompletingTaskId, setNotCompletingTaskId] = useState<string | null>(null)
-  const [approvingCompletionId, setApprovingCompletionId] = useState<string | null>(null)
-  const [rejectingCompletionId, setRejectingCompletionId] = useState<string | null>(null)
-
-  // Валидируем и корректируем tabIndex, если он выходит за пределы
-  // Количество вкладок: 1 (Все дети) + количество детей
-  // Максимальный валидный индекс = количество детей (0 = "Все дети", 1+ = индекс ребенка)
-  // Если childrenStats еще не загружены, используем только вкладку "Все дети" (0)
-  const maxValidIndex = childrenStats && childrenStats.length > 0 ? childrenStats.length : 0
-  // Гарантируем, что validTabIndex всегда в допустимом диапазоне [0, maxValidIndex]
-  // Если childrenStats еще не загружены или пусты, maxValidIndex = 0, значит validTabIndex = 0
-  const validTabIndex = childrenStats && childrenStats.length > 0 
-    ? Math.max(0, Math.min(tabIndex, maxValidIndex)) // Гарантируем, что значение в диапазоне [0, maxValidIndex]
-    : 0 // Если нет детей, всегда показываем только "Все дети"
-  
-  // Дополнительная защита: если validTabIndex все еще больше чем количество табов, сбрасываем на 0
-  // Количество табов = 1 (Все дети) + количество детей
-  const actualTabCount = childrenStats && childrenStats.length > 0 ? childrenStats.length + 1 : 1 // +1 для "Все дети"
-  // Строгая валидация: гарантируем что safeTabIndex всегда в диапазоне [0, actualTabCount - 1]
-  const safeTabIndex = (() => {
-    if (!childrenStats || childrenStats.length === 0) {
-      return 0 // Если нет детей, только "Все дети" (0)
-    }
-    const maxIndex = actualTabCount - 1 // Максимальный индекс = количество табов - 1
-    const safe = Math.max(0, Math.min(validTabIndex, maxIndex))
-    if (safe !== validTabIndex && safe !== tabIndex) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[Tasks] safeTabIndex corrected from', validTabIndex, 'to', safe)
-      }
-      // Асинхронно корректируем tabIndex
-      setTimeout(() => setTabIndex(safe), 0)
-    }
-    return safe
-  })()
-
-  // Сбрасываем tabIndex, если он невалиден при изменении childrenStats
+  // ⌘K / Ctrl+K — к поиску.
   useEffect(() => {
-    if (childrenStats && childrenStats.length > 0) {
-      const maxValid = childrenStats.length // Максимальный индекс = количество детей (0="Все дети", 1+=дети)
-      if (tabIndex > maxValid || tabIndex < 0) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[Tasks] Invalid tabIndex detected:', tabIndex, 'maxValid:', maxValid)
-        }
-        setTabIndex(0)
-        localStorage.setItem('tasks-tab-index', '0')
-      } else {
-        // Сохраняем валидное значение
-        localStorage.setItem('tasks-tab-index', String(tabIndex))
-      }
-    } else if (childrenStats) {
-      // Загружено, но детей нет — сбрасываем на «Все дети». Пока данные
-      // не пришли (undefined), ничего не трогаем: иначе сохранённая вкладка
-      // затиралась бы при каждой загрузке страницы.
-      if (tabIndex !== 0) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[Tasks] childrenStats not loaded, resetting tabIndex to 0')
-        }
-        setTabIndex(0)
-        localStorage.setItem('tasks-tab-index', '0')
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchRef.current?.focus()
       }
     }
-  }, [childrenStats, tabIndex])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
-  // Определяем выбранного ребенка на основе вкладки (используем safeTabIndex)
-  const selectedChild: ChildStatistics | null = 
-    safeTabIndex > 0 && childrenStats && childrenStats.length > 0 && safeTabIndex <= childrenStats.length
-      ? childrenStats[safeTabIndex - 1]
-      : null
-  const selectedChildId = selectedChild?.childId ?? null
-
-  // Дополнительная защита: сбрасываем tabIndex если он невалиден (упрощено - убрали дублирование)
-  
-  // Синхронизируем tabIndex с safeTabIndex если они не совпадают
-  useEffect(() => {
-    if (childrenStats && childrenStats.length > 0) {
-      const maxValid = childrenStats.length
-      if (tabIndex !== safeTabIndex && tabIndex <= maxValid) {
-        // Если tabIndex валиден, но не совпадает с safeTabIndex, обновляем safeTabIndex не нужно
-        // safeTabIndex уже вычислен правильно выше
-      } else if (tabIndex > maxValid) {
-        setTabIndex(0)
-      }
-    }
-  }, [childrenStats, tabIndex, safeTabIndex])
-
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      icon: '📝',
-      category: '',
-      points: 10,
-      frequency: 'DAILY',
-      daysOfWeek: [],
-      assignedTo: 'ALL',
-      requiresProof: false,
-      requiresParentApproval: true,
-    })
-    setError('')
+  const list = (active as any[])
+  const counts = {
+    DAILY: list.filter((t) => t.frequency === 'DAILY').length,
+    DAYS: list.filter((t) => t.frequency === 'CUSTOM' || t.frequency === 'WEEKLY').length,
+    ONCE: list.filter((t) => t.frequency === 'ONCE').length,
+    ARCHIVE: (archived as any[]).length,
   }
+  const rows = (tab === 'ARCHIVE' ? (archived as any[]) : list.filter((t) =>
+    tab === 'DAILY' ? t.frequency === 'DAILY' : tab === 'DAYS' ? t.frequency === 'CUSTOM' || t.frequency === 'WEEKLY' : t.frequency === 'ONCE',
+  )).filter((t) => !query.trim() || t.title.toLowerCase().includes(query.trim().toLowerCase()))
 
-  const handleOpen = (task?: Task) => {
-    if (task) {
-      setEditingTask(task)
-      setFormData({
-        title: task.title,
-        description: task.description || '',
-        icon: task.icon || '📝',
-        category: task.category || '',
-        points: task.points,
-        frequency: task.frequency,
-        daysOfWeek: parseDaysOfWeek(task.daysOfWeek),
-        assignedTo: task.assignedTo || 'ALL',
-        requiresProof: task.requiresProof || false,
-        requiresParentApproval: task.requiresParentApproval !== false,
-      })
-    } else {
-      setEditingTask(null)
-      resetForm()
-    }
-    setOpen(true)
-  }
-
-  const handleClose = () => {
-    setOpen(false)
-    setEditingTask(null)
-    resetForm()
-  }
-
-  const handleDeleteClick = (task: Task) => {
-    setTaskToDelete(task)
-    setDeleteDialogOpen(true)
-  }
-
-  const handleDeleteConfirm = () => {
-    if (taskToDelete) {
-      deleteTask.mutate(taskToDelete.id, {
-        onSuccess: () => {
-          setDeleteDialogOpen(false)
-          setTaskToDelete(null)
-        },
-        onError: (err: any) => {
-          setError(err.response?.data?.message || 'Ошибка при удалении задачи')
-          setDeleteDialogOpen(false)
-          setTaskToDelete(null)
-        },
-      })
-    }
-  }
-
-  const handleDeleteCancel = () => {
-    setDeleteDialogOpen(false)
-    setTaskToDelete(null)
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-
-    if (!formData.title || !formData.points) {
-      setError('Заполните все обязательные поля')
-      return
-    }
-
-    const submitData = {
-      ...formData,
-      daysOfWeek: formData.frequency === 'CUSTOM' ? formData.daysOfWeek : undefined,
-    }
-
-    if (editingTask) {
-      updateTask.mutate(
-        { id: editingTask.id, data: submitData },
-        {
-          onSuccess: () => {
-            setOpen(false)
-            resetForm()
-          },
-          onError: (err: unknown) => {
-            const errorMessage = (err as Error)?.message || 'Ошибка при обновлении'
-            setError(errorMessage)
-          },
-        }
-      )
-    } else {
-      console.log('[Tasks] Creating task with data:', submitData)
-      createTask.mutate(submitData, {
-        onSuccess: async (data) => {
-          console.log('[Tasks] Task created successfully:', data)
-          // Инвалидируем все кеши
-          await queryClient.invalidateQueries({ queryKey: ['tasks'] })
-          await queryClient.invalidateQueries({ queryKey: ['tasks', 'ACTIVE'] })
-          await queryClient.invalidateQueries({ queryKey: ['tasks', 'ARCHIVED'] })
-          await queryClient.invalidateQueries({ queryKey: ['tasks-statistics-today'] })
-          // Принудительно обновляем список заданий
-          await queryClient.refetchQueries({ queryKey: ['tasks', statusFilter] })
-          await queryClient.refetchQueries({ queryKey: ['tasks'] })
-          await queryClient.refetchQueries({ queryKey: ['tasks', 'ACTIVE'] })
-          // Также вызываем refetch напрямую
-          await refetchTasks()
-          console.log('[Tasks] Cache invalidated and refetched')
-          setOpen(false)
-          resetForm()
-        },
-        onError: (err: unknown) => {
-          console.error('[Tasks] Error creating task:', err)
-          const errorMessage = (err as any)?.response?.data?.message || (err as Error)?.message || 'Ошибка при создании задания'
-          setError(errorMessage)
-        },
-      })
-    }
-  }
-
-  const handleDayToggle = (day: number) => {
-    setFormData({
-      ...formData,
-      daysOfWeek: formData.daysOfWeek.includes(day)
-        ? formData.daysOfWeek.filter((d) => d !== day)
-        : [...formData.daysOfWeek, day],
-    })
-  }
-
-
-  if (isLoading) {
-    return (
-      <Layout>
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-          <CircularProgress size={60} sx={{ color: colors.primary.main }} />
-        </Box>
-      </Layout>
-    )
+  const pickTemplate = (tpl: TaskTemplate) => {
+    setTemplatesOpen(false)
+    setDraft({ ...emptyDraft(), ...tpl })
   }
 
   return (
     <Layout>
-      <Box>
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
-            <Typography 
-              variant="h3" 
-              component="h1"
-              sx={{
-                fontWeight: 700,
-                color: colors.text.primary,
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Управление заданиями 📋
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel>Статус</InputLabel>
-                <Select
-                  value={statusFilter}
-                  label="Статус"
-                  onChange={(e: SelectChangeEvent) => setStatusFilter(e.target.value as 'ACTIVE' | 'ARCHIVED')}
-                  sx={{ borderRadius: 2 }}
-                >
-                  <MenuItem value="ACTIVE">Активные</MenuItem>
-                  <MenuItem value="ARCHIVED">Архив</MenuItem>
-                </Select>
-              </FormControl>
-              <ToggleButtonGroup
-                value={viewMode}
-                exclusive
-                onChange={(_, v) => v && setViewMode(v)}
-                size="small"
-                sx={{
-                  border: '1px solid #D2D2D7',
-                  borderRadius: 2,
-                  '& .MuiToggleButton-root': {
-                    border: 'none',
-                    borderRadius: 2,
-                    px: 1.5,
-                    color: colors.text.secondary,
-                    '&.Mui-selected': {
-                      background: colors.primary.main,
-                      color: '#fff',
-                      '&:hover': { background: colors.primary.main },
-                    },
-                  },
-                }}
-              >
-                <ToggleButton value="grid"><ViewModuleIcon fontSize="small" /></ToggleButton>
-                <ToggleButton value="table"><ViewListIcon fontSize="small" /></ToggleButton>
-                <ToggleButton value="diary"><CalendarMonthIcon fontSize="small" /></ToggleButton>
-              </ToggleButtonGroup>
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => handleOpen()}
-                  sx={{
-                    fontWeight: 600,
-                    transition: 'all 0.2s',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0, 122, 255, 0.3)',
-                    },
-                  }}
-                >
-                  Добавить задание
-                </Button>
-              </motion.div>
-            </Box>
-          </Box>
-        </motion.div>
+      <PageHeader kicker={`${list.length} активных · ⌘K — быстрый поиск`} title="Задания">
+        <Button variant="outlined" onClick={() => setTemplatesOpen(true)}>Из шаблонов</Button>
+        <Button variant="contained" onClick={() => setDraft(emptyDraft())}>+ Новое задание</Button>
+      </PageHeader>
 
-        {/* Календарь недели - показываем только если выбран ребенок */}
-        {validTabIndex > 0 && selectedChildId && tasks && (
-          <Box sx={{ mb: 3 }}>
-            <WeekCalendar 
-              selectedChildId={selectedChildId} 
-              tasks={tasks || []} 
-              selectedDate={selectedDate}
-              onDateSelect={setSelectedDate}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: draft ? 'minmax(0, 1fr) 360px' : '1fr' }, gap: 2.5, alignItems: 'start' }}>
+        <Card sx={{ overflow: 'hidden' }}>
+          <Box sx={{ display: 'flex', gap: 1, p: 1.75, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Chip2 on={tab === 'DAILY'} onClick={() => setTab('DAILY')}>Ежедневные · {counts.DAILY}</Chip2>
+            <Chip2 on={tab === 'DAYS'} onClick={() => setTab('DAYS')}>По дням · {counts.DAYS}</Chip2>
+            <Chip2 on={tab === 'ONCE'} onClick={() => setTab('ONCE')}>Разовые{counts.ONCE ? ` · ${counts.ONCE}` : ''}</Chip2>
+            <Chip2 on={tab === 'ARCHIVE'} onClick={() => setTab('ARCHIVE')}>Архив{counts.ARCHIVE ? ` · ${counts.ARCHIVE}` : ''}</Chip2>
+            <TextField
+              inputRef={searchRef}
+              size="small"
+              placeholder="Найти задание"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              sx={{ ml: { sm: 'auto' }, width: { xs: '100%', sm: 220 } }}
+              InputProps={{ startAdornment: <InputAdornment position="start"><Icon name="search" size={18} /></InputAdornment> }}
             />
           </Box>
-        )}
-
-        {/* Вкладки для выбора ребенка */}
-        {childrenStats && childrenStats.length > 0 && (
-          <Box sx={{ mb: 4 }}>
-            <Tabs
-              value={(() => {
-                // Строгая валидация: гарантируем что значение всегда в допустимом диапазоне
-                // Количество табов = childrenStats.length + 1 (0="Все дети", 1+=дети)
-                if (!childrenStats || childrenStats.length === 0) {
-                  return 0
-                }
-                const actualTabCount = childrenStats.length + 1
-                const maxIndex = actualTabCount - 1
-                // Используем tabIndex напрямую, но валидируем его
-                const currentValue = tabIndex
-                const safe = Math.max(0, Math.min(currentValue, maxIndex))
-                if (safe !== currentValue) {
-                  if (process.env.NODE_ENV === 'development') {
-                    console.warn('[Tasks] Tabs value corrected from', currentValue, 'to', safe)
-                  }
-                  setTimeout(() => setTabIndex(safe), 0)
-                }
-                return safe
-              })()}
-              onChange={(_, newValue) => {
-                // Строгая валидация в onChange
-                if (!childrenStats || childrenStats.length === 0) {
-                  setTabIndex(0)
-                  localStorage.setItem('tasks-tab-index', '0')
-                  return
-                }
-                const actualTabCount = childrenStats.length + 1
-                const maxIndex = actualTabCount - 1
-                const safeValue = Math.max(0, Math.min(newValue, maxIndex))
-                if (safeValue !== newValue && process.env.NODE_ENV === 'development') {
-                  console.warn('[Tasks] Tabs onChange value corrected from', newValue, 'to', safeValue)
-                }
-                setTabIndex(safeValue)
-                localStorage.setItem('tasks-tab-index', String(safeValue))
-              }}
-              variant="scrollable"
-              scrollButtons="auto"
-              sx={{
-                borderBottom: '0.5px solid #D2D2D7',
-                '& .MuiTabs-indicator': {
-                  height: 2,
-                  backgroundColor: colors.primary.main,
-                },
-                '& .MuiTab-root': {
-                  textTransform: 'none',
-                  fontWeight: 500,
-                  fontSize: '0.9375rem',
-                  color: colors.text.secondary,
-                  minHeight: 48,
-                  '&.Mui-selected': {
-                    color: colors.primary.main,
-                    fontWeight: 600,
-                  },
-                  '&:hover': {
-                    color: colors.primary.main,
-                  },
-                },
-              }}
-            >
-              <Tab label="Все дети" />
-              {childrenStats.map((stat) => (
-                <Tab
-                  key={stat.childId}
-                  label={stat.childName}
-                />
-              ))}
-            </Tabs>
-          </Box>
-        )}
-
-        {/* Статистика за сегодня */}
-        {statusFilter === 'ACTIVE' && todayStatistics && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-          >
-            <Grid container spacing={2} sx={{ mb: 3 }}>
-              {(() => {
-                // Фильтруем статистику по выбранному ребенку
-                let childrenToShow = todayStatistics.children || []
-                if (validTabIndex > 0 && selectedChildId && selectedChild) {
-                  // Показываем только статистику выбранного ребенка
-                  childrenToShow = childrenToShow.filter((childStat) => 
-                    childStat.childId === selectedChild.childId
-                  )
-                }
-                // Если выбран "Все дети" (validTabIndex === 0), показываем всех
-                return childrenToShow.map((childStat) => {
-                  const fullStats = childrenStats?.find((s: any) => s.childId === childStat.childId)
-                  const pendingCount = pendingCompletions?.filter((c: any) => 
-                    c.child?.id === childStat.childId || c.childId === childStat.childId
-                  ).length || 0
-                  
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={childStat.childId}>
-                      <ChildStatsCard
-                        childName={childStat.childName || 'Ребенок'}
-                        pointsBalance={fullStats?.currentBalance || 0}
-                        todayPointsBalance={childStat.pointsEarned || 0}
-                        totalPointsEarned={fullStats?.totalPointsEarned || 0}
-                        totalPointsSpent={fullStats?.totalPointsSpent || 0}
-                        pendingCompletions={pendingCount}
-                      />
-                    </Grid>
-                  )
-                })
-              })()}
-            </Grid>
-          </motion.div>
-        )}
-
-        {/* Челленджи */}
-        {statusFilter === 'ACTIVE' && challenges && challenges.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-          >
-            <Typography 
-              variant="h5" 
-              sx={{ 
-                mb: 2,
-                fontWeight: 700,
-                color: colors.warning.main,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-              }}
-            >
-              <EmojiEventsIcon />
-              Активные челленджи
-            </Typography>
-            <Grid container spacing={2} sx={{ mb: 3 }}>
-              {challenges.slice(0, 3).map((challenge: Challenge) => (
-                <Grid item xs={12} sm={6} md={4} key={challenge.id}>
-                  <AnimatedCard>
-                    <CardContent>
-                      <Typography 
-                        variant="h6" 
-                        sx={{ 
-                          fontWeight: 700,
-                          mb: 1,
-                        }}
-                      >
-                        {challenge.title}
-                      </Typography>
-                      {challenge.description && (
-                        <Typography 
-                          variant="body2" 
-                          color="text.secondary" 
-                          sx={{ 
-                            mb: 1.5,
-                          }}
-                        >
-                          {challenge.description}
-                        </Typography>
-                      )}
-                      <Chip
-                        label="Активен"
-                        color="warning"
-                        size="small"
-                      />
-                    </CardContent>
-                  </AnimatedCard>
-                </Grid>
-              ))}
-            </Grid>
-          </motion.div>
-        )}
-
-        {(() => {
-          if (isLoading) return (
-            <Box display="flex" justifyContent="center" p={4}>
-              <CircularProgress />
-            </Box>
-          )
-
-          // Фильтруем задачи по выбранному ребенку
-          let filteredTasks = tasks || []
-          if (validTabIndex > 0 && selectedChildId && selectedChild) {
-            filteredTasks = filteredTasks.filter((task: Task) =>
-              isTaskAssignedToChild(task, selectedChild as unknown as ChildRef)
-            )
-          }
-
-          const showAllChildrenStatus = safeTabIndex === 0
-          const frequencyLabel = (f: string) => ({ ONCE: 'Один раз', DAILY: 'Каждый день', WEEKLY: 'Раз в неделю', CUSTOM: 'По дням' }[f] ?? f)
-
-          if (filteredTasks.length === 0) return (
-            <AnimatedCard>
-              <CardContent sx={{ textAlign: 'center', py: 4 }}>
-                <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
-                  {statusFilter === 'ACTIVE' ? 'Нет активных заданий' : 'Нет заданий в архиве'}
-                </Typography>
-                {statusFilter === 'ACTIVE' && (
-                  <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()} sx={{ fontWeight: 600 }}>
-                    Добавить задание
-                  </Button>
-                )}
-              </CardContent>
-            </AnimatedCard>
-          )
-
-          // ── ТАБЛИЦА ─────────────────────────────────────────────────────────
-          if (viewMode === 'table') return (
-            <Paper sx={{ borderRadius: 3, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06)' }}>
-              <TableContainer>
-                <Table>
-                  {/* Заголовок */}
-                  <TableHead>
-                    <TableRow sx={{ background: '#f5f5f7' }}>
-                      <TableCell sx={{ width: 64, border: 'none', py: 1.5, pl: 2 }} />
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.text.secondary, border: 'none', py: 1.5 }}>
-                        Задание
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.text.secondary, border: 'none', py: 1.5, width: 130 }}>
-                        Категория
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.text.secondary, border: 'none', py: 1.5, width: 130 }}>
-                        Частота
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.text.secondary, border: 'none', py: 1.5, width: 80, textAlign: 'center' }}>
-                        Баллы
-                      </TableCell>
-                      {showAllChildrenStatus && todayStatistics?.children && (
-                        <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.text.secondary, border: 'none', py: 1.5, width: 160 }}>
-                          Дети
-                        </TableCell>
-                      )}
-                      <TableCell sx={{ width: 110, border: 'none', py: 1.5, pr: 2 }} />
-                    </TableRow>
-                  </TableHead>
-
-                  <TableBody>
-                    {filteredTasks.map((task: Task, idx: number) => {
-                      const childStat = selectedChild ? todayStatistics?.children?.find((c: any) => c.childId === selectedChild.childId) : null
-                      const isCompleted = childStat ? isTaskCompletedForChild(task.id, childStat) : false
-                      const taskStatus = getTaskStatusForChild(task.id, selectedChildId || '', pendingCompletions)
-                      const isPending = taskStatus === 'PENDING'
-                      const isPersonalTask = !!task.assignedTo && task.assignedTo !== 'ALL'
-                      const scheduledToday = isTaskScheduledOn(task, new Date())
-                      const childrenStatuses = showAllChildrenStatus && todayStatistics?.children
-                        ? todayStatistics.children
-                            .filter((cs: any) => isTaskAssignedToChild(task, cs))
-                            .map((cs: any) => ({
-                              childName: cs.childName,
-                              isCompleted: isTaskCompletedForChild(task.id, cs),
-                              isPending: getTaskStatusForChild(task.id, cs.childId, pendingCompletions) === 'PENDING',
-                            }))
-                        : []
-
-                      const statusColor = isCompleted ? '#34C759' : isPending ? '#FF9F0A' : 'transparent'
-                      const isEven = idx % 2 === 1
-
-                      return (
-                        <TableRow
-                          key={task.id}
-                          sx={{
-                            background: isEven ? '#fafafa' : '#ffffff',
-                            '&:hover': { background: colors.primary.main + '08' },
-                            transition: 'background 0.15s',
-                            opacity: task.status === 'ARCHIVED' ? 0.55 : 1,
-                            '& td': { borderBottom: '1px solid #F2F2F7' },
-                          }}
-                        >
-                          {/* Иконка */}
-                          <TableCell sx={{ py: 1.25, pl: 2, pr: 0, width: 64 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              {/* Статус-полоска */}
-                              <Box sx={{ width: 3, height: 32, borderRadius: 4, background: statusColor, flexShrink: 0 }} />
-                              {/* Emoji в квадрате */}
-                              <Box sx={{
-                                width: 38, height: 38, borderRadius: 2,
-                                background: colors.primary.main + '14',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '1.25rem', flexShrink: 0,
-                              }}>
-                                {sanitizeIcon(task.icon)}
-                              </Box>
-                            </Box>
-                          </TableCell>
-
-                          {/* Название */}
-                          <TableCell sx={{ py: 1.25 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                              <Typography variant="body2" sx={{ fontWeight: 600, color: colors.text.primary, lineHeight: 1.3 }}>
-                                {task.title}
-                              </Typography>
-                              {task.requiresParentApproval && (
-                                <Tooltip title="Требует одобрения родителя">
-                                  <Box component="span" sx={{ fontSize: '0.9rem', lineHeight: 1 }}>⚠️</Box>
-                                </Tooltip>
-                              )}
-                            </Box>
-                            {task.description && (
-                              <Typography variant="caption" sx={{ color: colors.text.secondary, display: 'block', mt: 0.25, lineHeight: 1.4 }}>
-                                {task.description.length > 70 ? task.description.slice(0, 70) + '…' : task.description}
-                              </Typography>
-                            )}
-                          </TableCell>
-
-                          {/* Категория */}
-                          <TableCell sx={{ py: 1.25 }}>
-                            {task.category ? (
-                              <Box sx={{
-                                display: 'inline-flex', alignItems: 'center',
-                                px: 1, py: 0.25, borderRadius: 10,
-                                background: colors.primary.main + '14',
-                                color: colors.primary.main,
-                                fontSize: '0.75rem', fontWeight: 600,
-                              }}>
-                                {task.category}
-                              </Box>
-                            ) : (
-                              <Typography variant="caption" sx={{ color: '#C7C7CC' }}>—</Typography>
-                            )}
-                          </TableCell>
-
-                          {/* Частота */}
-                          <TableCell sx={{ py: 1.25 }}>
-                            <Typography variant="body2" sx={{ color: colors.text.secondary, fontSize: '0.82rem' }}>
-                              {frequencyLabel(task.frequency)}
-                            </Typography>
-                          </TableCell>
-
-                          {/* Баллы */}
-                          <TableCell sx={{ py: 1.25, textAlign: 'center' }}>
-                            <Box sx={{
-                              display: 'inline-flex', alignItems: 'center', gap: 0.4,
-                              px: 1, py: 0.25, borderRadius: 10,
-                              background: '#FF9F0A18',
-                            }}>
-                              <StarIcon sx={{ fontSize: '0.85rem', color: '#FF9F0A' }} />
-                              <Typography variant="body2" sx={{ fontWeight: 700, color: '#FF9F0A', fontSize: '0.85rem' }}>
-                                {task.points}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-
-                          {/* Кому назначено + статус */}
-                          {showAllChildrenStatus && todayStatistics?.children && (
-                            <TableCell sx={{ py: 1.25 }}>
-                              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                                {isPersonalTask && (
-                                  <Tooltip title="Задание назначено не всем детям">
-                                    <Box sx={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 0.25,
-                                      px: 0.6, py: 0.2, borderRadius: 10, cursor: 'default',
-                                      fontSize: '0.68rem', fontWeight: 700,
-                                      textTransform: 'uppercase', letterSpacing: '0.04em',
-                                      background: colors.primary.main + '14',
-                                      color: colors.primary.main,
-                                      border: `1px dashed ${colors.primary.main}55`,
-                                    }}>
-                                      <PersonIcon sx={{ fontSize: '0.8rem' }} />
-                                      только
-                                    </Box>
-                                  </Tooltip>
-                                )}
-                                {childrenStatuses.length === 0 ? (
-                                  <Typography variant="caption" sx={{ color: '#C7C7CC' }}>—</Typography>
-                                ) : childrenStatuses.map((cs: any) => {
-                                  // Ребенок в этом списке — уже назначенный, поэтому
-                                  // «ещё не выполнено» рисуем обычным тёмным текстом:
-                                  // серый цвет читался как «задание ему не выбрано».
-                                  // Выключенный вид остаётся только за днями, когда
-                                  // задания нет в расписании.
-                                  const label = !scheduledToday
-                                    ? 'сегодня не по расписанию'
-                                    : cs.isCompleted ? 'выполнено' : cs.isPending ? 'ожидает подтверждения' : 'ещё не выполнено'
-                                  const accent = !scheduledToday ? '#C7C7CC' : cs.isCompleted ? '#34C759' : cs.isPending ? '#FF9F0A' : colors.primary.main
-                                  return (
-                                    <Tooltip key={cs.childName} title={`${cs.childName}: ${label}`}>
-                                      <Box sx={{
-                                        display: 'inline-flex', alignItems: 'center', gap: 0.4,
-                                        px: 0.75, py: 0.2, borderRadius: 10, cursor: 'default',
-                                        fontSize: '0.72rem', fontWeight: 600,
-                                        background: !scheduledToday ? 'transparent' : cs.isCompleted ? '#34C75918' : cs.isPending ? '#FF9F0A18' : '#F2F2F7',
-                                        color: !scheduledToday ? '#8E8E93' : cs.isCompleted ? '#34C759' : cs.isPending ? '#FF9F0A' : colors.text.primary,
-                                        border: `1px ${scheduledToday ? 'solid' : 'dashed'} ${accent}${scheduledToday ? '40' : '80'}`,
-                                        opacity: scheduledToday ? 1 : 0.75,
-                                      }}>
-                                        <Box sx={{
-                                          width: 6, height: 6, borderRadius: '50%',
-                                          background: scheduledToday && (cs.isCompleted || cs.isPending) ? accent : 'transparent',
-                                          border: scheduledToday && (cs.isCompleted || cs.isPending) ? 'none' : `1px solid ${accent}`,
-                                          flexShrink: 0,
-                                        }} />
-                                        {cs.childName.split(' ')[0]}
-                                      </Box>
-                                    </Tooltip>
-                                  )
-                                })}
-                              </Box>
-                            </TableCell>
-                          )}
-
-                          {/* Действия */}
-                          <TableCell sx={{ py: 1.25, pr: 2, textAlign: 'right' }}>
-                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
-                              <Tooltip title="Редактировать">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleOpen(task)}
-                                  sx={{ color: colors.primary.main, background: colors.primary.main + '10', borderRadius: 1.5, '&:hover': { background: colors.primary.main + '22' } }}
-                                >
-                                  <EditIcon sx={{ fontSize: '1rem' }} />
-                                </IconButton>
-                              </Tooltip>
-                              {task.status === 'ACTIVE' && (
-                                <Tooltip title="Архивировать">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => archiveTask.mutate(task.id)}
-                                    sx={{ color: '#8E8E93', background: '#F2F2F7', borderRadius: 1.5, '&:hover': { background: '#E5E5EA' } }}
-                                  >
-                                    <ArchiveIcon sx={{ fontSize: '1rem' }} />
-                                  </IconButton>
-                                </Tooltip>
-                              )}
-                              <Tooltip title="Удалить">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleDeleteClick(task)}
-                                  sx={{ color: '#FF3B30', background: '#FF3B3010', borderRadius: 1.5, '&:hover': { background: '#FF3B3022' } }}
-                                >
-                                  <DeleteIcon sx={{ fontSize: '1rem' }} />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
-          )
-
-          // ── ДНЕВНИК ─────────────────────────────────────────────────────────
-          if (viewMode === 'diary') {
-            const parseDow = (raw: any): number[] => {
-              if (!raw) return []
-              if (Array.isArray(raw)) return raw as number[]
-              try {
-                const parsed = JSON.parse(raw)
-                return Array.isArray(parsed) ? parsed : []
-              } catch {
-                return String(raw)
-                  .split(',')
-                  .map((s) => parseInt(s.trim(), 10))
-                  .filter((n) => !Number.isNaN(n))
-              }
-            }
-            const isTaskOnDay = (task: Task, dayOfWeek: number): boolean => {
-              if (task.frequency === 'CUSTOM') {
-                return parseDow((task as any).daysOfWeek).includes(dayOfWeek)
-              }
-              return true
-            }
-            const addDaysLocal = (d: Date, n: number) => {
-              const r = new Date(d); r.setDate(r.getDate() + n); return r
-            }
-            const isSameDayLocal = (a: Date, b: Date) =>
-              a.getFullYear() === b.getFullYear() &&
-              a.getMonth() === b.getMonth() &&
-              a.getDate() === b.getDate()
-            const today = new Date(); today.setHours(0, 0, 0, 0)
-            const weekDays = Array.from({ length: 7 }, (_, i) => {
-              const date = addDaysLocal(diaryWeekStart, i)
-              return { date, dayOfWeek: date.getDay(), isToday: isSameDayLocal(date, today) }
-            })
-            const DAY_NAMES_FULL = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
-            const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-            const weekEnd = addDaysLocal(diaryWeekStart, 6)
-            const weekLabel = diaryWeekStart.getMonth() === weekEnd.getMonth()
-              ? `${diaryWeekStart.getDate()}–${weekEnd.getDate()} ${MONTHS_GEN[diaryWeekStart.getMonth()]}`
-              : `${diaryWeekStart.getDate()} ${MONTHS_GEN[diaryWeekStart.getMonth()]} – ${weekEnd.getDate()} ${MONTHS_GEN[weekEnd.getMonth()]}`
-            const onCurrentWeek = isSameDayLocal(diaryWeekStart, (() => {
-              const d = new Date(); d.setHours(0, 0, 0, 0)
-              const day = d.getDay()
-              d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day))
-              return d
-            })())
-
-            return (
-              <Box>
-                {/* Навигатор недели */}
-                <Paper sx={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  px: 1, py: 0.75, mb: 2, borderRadius: 3,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06)',
-                }}>
-                  <IconButton onClick={() => setDiaryWeekStart(addDaysLocal(diaryWeekStart, -7))} sx={{ color: colors.primary.main }}>
-                    <ChevronLeftIcon />
-                  </IconButton>
-                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: '1rem', textTransform: 'capitalize' }}>
-                      {weekLabel}
-                    </Typography>
-                    {!onCurrentWeek && (
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          const d = new Date(); d.setHours(0, 0, 0, 0)
-                          const day = d.getDay()
-                          d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day))
-                          setDiaryWeekStart(d)
-                        }}
-                        sx={{ textTransform: 'none', fontWeight: 600, minWidth: 'auto', px: 1 }}
-                      >
-                        Сегодня
-                      </Button>
-                    )}
-                  </Box>
-                  <IconButton onClick={() => setDiaryWeekStart(addDaysLocal(diaryWeekStart, 7))} sx={{ color: colors.primary.main }}>
-                    <ChevronRightIcon />
-                  </IconButton>
-                </Paper>
-
-                {/* 7 секций-страниц */}
-                {weekDays.map(({ date, dayOfWeek, isToday: dayIsToday }) => {
-                  const dayTasks = filteredTasks.filter((t: Task) => isTaskOnDay(t, dayOfWeek))
-                  return (
-                    <Paper
-                      key={date.toISOString()}
-                      sx={{
-                        mb: 2,
-                        p: 2,
-                        borderRadius: 3,
-                        borderLeft: dayIsToday ? `4px solid ${colors.primary.main}` : 'none',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06)',
-                      }}
-                    >
-                      {/* Заголовок дня */}
-                      <Box sx={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        pb: 1.5, mb: 1.5, borderBottom: '1px solid #F2F2F7',
-                      }}>
-                        <Box>
-                          <Typography sx={{
-                            fontWeight: 700, fontSize: '1.05rem', letterSpacing: '-0.3px',
-                            color: dayIsToday ? colors.primary.main : colors.text.primary,
-                            textTransform: 'capitalize',
-                          }}>
-                            {DAY_NAMES_FULL[dayOfWeek]}
-                          </Typography>
-                          <Typography sx={{
-                            fontSize: '0.78rem',
-                            color: dayIsToday ? colors.primary.dark : colors.text.secondary,
-                            fontWeight: dayIsToday ? 600 : 400,
-                            mt: 0.25,
-                          }}>
-                            {date.getDate()} {MONTHS_GEN[date.getMonth()]}
-                          </Typography>
-                        </Box>
-                        {dayIsToday && (
-                          <Chip label="сегодня" size="small" sx={{
-                            backgroundColor: colors.primary.main,
-                            color: '#fff',
-                            fontWeight: 700,
-                            fontSize: '0.65rem',
-                            letterSpacing: '0.4px',
-                            textTransform: 'uppercase',
-                            height: 22,
-                          }} />
-                        )}
-                      </Box>
-
-                      {/* Строки задач */}
-                      {dayTasks.length === 0 ? (
-                        <Typography sx={{ fontSize: '0.85rem', fontStyle: 'italic', color: '#C7C7CC', py: 0.5 }}>
-                          — нет задач
-                        </Typography>
-                      ) : (
-                        dayTasks.map((task: Task, i: number) => {
-                          const assignedChildName = (() => {
-                            if (!task.assignedTo || task.assignedTo === 'ALL') return 'Все'
-                            const assigned = (childrenStats || []).filter((s: any) => isTaskAssignedToChild(task, s))
-                            return assigned.map((c: any) => c.childName?.split(' ')[0]).filter(Boolean).join(', ')
-                          })()
-                          return (
-                            <Box
-                              key={task.id}
-                              onClick={() => handleOpen(task)}
-                              sx={{
-                                display: 'flex', alignItems: 'center', gap: 1,
-                                py: 1, cursor: 'pointer',
-                                borderBottom: i === dayTasks.length - 1 ? 'none' : '1px solid #F7F7F9',
-                                transition: 'background 0.15s',
-                                '&:hover': { background: colors.primary.main + '08' },
-                              }}
-                            >
-                              <Typography sx={{ width: 22, color: '#C7C7CC', fontSize: '0.85rem', fontWeight: 600 }}>
-                                {i + 1}.
-                              </Typography>
-                              <Box sx={{
-                                width: 30, height: 30, borderRadius: 1.5,
-                                background: colors.primary.main + '14',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '1rem', flexShrink: 0,
-                              }}>
-                                {sanitizeIcon(task.icon)}
-                              </Box>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
-                                <Typography sx={{
-                                  fontSize: '0.92rem', fontWeight: 600, color: colors.text.primary,
-                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                }}>
-                                  {task.title}
-                                </Typography>
-                                <Box sx={{ display: 'flex', gap: 0.75, mt: 0.25, alignItems: 'center', flexWrap: 'wrap' }}>
-                                  {assignedChildName && (
-                                    <Typography sx={{ fontSize: '0.72rem', color: colors.text.secondary }}>
-                                      {assignedChildName}
-                                    </Typography>
-                                  )}
-                                  {task.requiresParentApproval && (
-                                    <Typography sx={{ fontSize: '0.72rem', color: '#FF9F0A', fontWeight: 600 }}>
-                                      · проверка
-                                    </Typography>
-                                  )}
-                                </Box>
-                              </Box>
-                              <Box sx={{
-                                display: 'inline-flex', alignItems: 'center', gap: 0.4,
-                                px: 1, py: 0.25, borderRadius: 10, background: '#FF9F0A18',
-                              }}>
-                                <StarIcon sx={{ fontSize: '0.8rem', color: '#FF9F0A' }} />
-                                <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#FF9F0A' }}>
-                                  {task.points}
-                                </Typography>
-                              </Box>
-                            </Box>
-                          )
-                        })
-                      )}
-                    </Paper>
-                  )
-                })}
-              </Box>
-            )
-          }
-
-          // ── КАРТОЧКИ (grid) ─────────────────────────────────────────────────
-          return (
-            <Grid container spacing={3}>
-              <React.Fragment key="tasks-list">
-                {filteredTasks.map((task: Task, index: number) => {
-                  const childStat = selectedChild ? todayStatistics?.children?.find((c: any) => c.childId === selectedChild.childId) : null
-                  const isCompleted = childStat ? isTaskCompletedForChild(task.id, childStat) : false
-                  const taskStatus = getTaskStatusForChild(task.id, selectedChildId || '', pendingCompletions)
-                  const isPending = taskStatus === 'PENDING'
-
-                  const pendingCompletion = pendingCompletions?.find((c: any) => {
-                    const performedAt = new Date(c.performedAt)
-                    performedAt.setHours(0, 0, 0, 0)
-                    const today = new Date()
-                    today.setHours(0, 0, 0, 0)
-                    const targetDate = selectedDate ? new Date(selectedDate) : today
-                    targetDate.setHours(0, 0, 0, 0)
-                    return c.taskId === task.id &&
-                      (c.child?.id === selectedChildId || c.child?.userId === selectedChildId) &&
-                      c.status === 'PENDING' &&
-                      performedAt.getTime() === targetDate.getTime()
-                  })
-
-                  const childrenStatuses = showAllChildrenStatus && todayStatistics?.children
-                    ? todayStatistics.children
-                        .filter((cs: any) => isTaskAssignedToChild(task, cs))
-                        .map((childStat: any) => ({
-                          childName: childStat.childName,
-                          isCompleted: isTaskCompletedForChild(task.id, childStat),
-                          isPending: getTaskStatusForChild(task.id, childStat.childId, pendingCompletions) === 'PENDING',
-                        }))
-                    : []
-
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={task.id}>
-                      <ParentTaskCard
-                        task={task}
-                        isCompleted={isCompleted}
-                        isPending={isPending}
-                        pendingCompletion={pendingCompletion}
-                        onEdit={handleOpen}
-                        onArchive={(taskId) => archiveTask.mutate(taskId)}
-                        onDelete={handleDeleteClick}
-                        onMarkCompleted={safeTabIndex > 0 && selectedChildId ? () => {
-                          if (!selectedChildId) return
-                          setMarkingTaskId(task.id)
-                          createCompletionForChild.mutate(
-                            { taskId: task.id, childId: selectedChildId, performedAt: selectedDate ? localNoonISO(selectedDate) : undefined },
-                            {
-                              // Инвалидацию делает сама мутация (useCompletions),
-                              // здесь достаточно снять спиннер с кнопки.
-                              onSuccess: () => setMarkingTaskId(null),
-                              onError: () => setMarkingTaskId(null),
-                            }
-                          )
-                        } : undefined}
-                        onMarkNotCompleted={safeTabIndex > 0 && selectedChildId ? () => {
-                          if (!selectedChildId) return
-                          setNotCompletingTaskId(task.id)
-                          markAsNotCompleted.mutate(
-                            { taskId: task.id, childId: selectedChildId, date: selectedDate ? localNoonISO(selectedDate) : undefined },
-                            {
-                              onSuccess: () => setNotCompletingTaskId(null),
-                              onError: () => setNotCompletingTaskId(null),
-                            }
-                          )
-                        } : undefined}
-                        onApprove={pendingCompletion?.id ? () => {
-                          setApprovingCompletionId(pendingCompletion.id)
-                          approveCompletion.mutate(pendingCompletion.id, {
-                            onSuccess: () => setApprovingCompletionId(null),
-                            onError: () => setApprovingCompletionId(null),
-                          })
-                        } : undefined}
-                        onReject={pendingCompletion?.id ? () => {
-                          setRejectingCompletionId(pendingCompletion.id)
-                          rejectCompletion.mutate(pendingCompletion.id, {
-                            onSuccess: () => setRejectingCompletionId(null),
-                            onError: () => setRejectingCompletionId(null),
-                          })
-                        } : undefined}
-                        isApproving={approvingCompletionId === pendingCompletion?.id}
-                        isRejecting={rejectingCompletionId === pendingCompletion?.id}
-                        isMarking={markingTaskId === task.id || notCompletingTaskId === task.id}
-                        showChildStatus={showAllChildrenStatus}
-                        childrenStatuses={childrenStatuses}
-                        index={index}
-                      />
-                    </Grid>
-                  )
-                })}
-              </React.Fragment>
-            </Grid>
-          )
-        })()}
-
-        <Dialog 
-          open={open} 
-          onClose={handleClose} 
-          maxWidth="sm" 
-          fullWidth
-          fullScreen={typeof window !== 'undefined' && window.innerWidth < 600}
-          PaperProps={{
-            sx: {
-              borderRadius: { xs: 0, sm: 3 },
-              maxHeight: { xs: '100vh', sm: '95vh' },
-              m: { xs: 0, sm: 2 },
-              height: { xs: '100vh', sm: 'auto' },
-            },
-          }}
-        >
-          <form onSubmit={handleSubmit}>
-            <DialogTitle
-              sx={{
-                backgroundColor: colors.primary.main,
-                color: 'white',
-                fontWeight: 700,
-                fontSize: { xs: '1.1rem', sm: '1.3rem' },
-                py: { xs: 1.5, sm: 2 },
-                position: 'sticky',
-                top: 0,
-                zIndex: 1,
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '1.3rem' }}>{formData.icon}</span>
-                {editingTask ? 'Редактировать' : 'Новое задание'}
-              </Box>
-            </DialogTitle>
-
-            <DialogContent 
-              dividers 
-              sx={{ 
-                p: { xs: 1.5, sm: 2 },
-                overflowY: 'auto',
-                maxHeight: { xs: 'calc(100vh - 140px)', sm: 'calc(95vh - 140px)' },
-              }}
-            >
-              <AnimatePresence>
-                {error && (
-                  <Alert severity="error" sx={{ mb: 2 }}>
-                    {error}
-                  </Alert>
-                )}
-              </AnimatePresence>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 1.5, sm: 2 } }}>
-                {/* Иконка */}
-                <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-                    <Box sx={{
-                      width: 52, height: 52, borderRadius: 2.5,
-                      background: colors.primary.main + '18',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '1.8rem', flexShrink: 0,
-                      border: `2px solid ${colors.primary.main}`,
-                    }}>
-                      {sanitizeIcon(formData.icon)}
-                    </Box>
-                    <Typography variant="body2" sx={{ fontWeight: 600, color: colors.text.secondary, fontSize: '0.85rem' }}>
-                      Выбери иконку для задания
-                    </Typography>
-                  </Box>
-                  {EMOJI_CATEGORIES.map((cat) => (
-                    <Box key={cat.label} sx={{ mb: 1 }}>
-                      <Typography variant="caption" sx={{ color: colors.text.secondary, fontWeight: 600, fontSize: '0.7rem', letterSpacing: '0.05em', textTransform: 'uppercase', mb: 0.5, display: 'block' }}>
-                        {cat.label}
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                        {EMOJI_OPTIONS.slice(cat.range[0], cat.range[1]).map((emoji) => (
-                          <Box
-                            key={emoji}
-                            onClick={() => setFormData({ ...formData, icon: emoji })}
-                            sx={{
-                              width: 40, height: 40,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '1.3rem', borderRadius: 2, cursor: 'pointer',
-                              border: `2px solid ${formData.icon === emoji ? colors.primary.main : 'transparent'}`,
-                              background: formData.icon === emoji ? colors.primary.main + '20' : '#f5f5f7',
-                              transition: 'all 0.15s',
-                              '&:hover': { background: colors.primary.main + '15', transform: 'scale(1.1)' },
-                            }}
-                          >
-                            {emoji}
-                          </Box>
-                        ))}
-                      </Box>
-                    </Box>
-                  ))}
-                </Box>
-
-                {/* Название */}
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Название *"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  required
-                  placeholder="Например: Убрать комнату"
-                />
-
-                {/* Описание */}
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Описание"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  multiline
-                  rows={2}
-                  placeholder="Необязательно"
-                />
-
-                {/* Категория */}
-                <Box>
-                  <Typography variant="body2" sx={{ mb: 0.5,  fontWeight: 600, fontSize: '0.85rem' }}>
-                    Категория (необязательно):
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
-                    {CATEGORY_OPTIONS.map((cat) => (
-                      <Chip
-                        key={cat}
-                        label={cat}
-                        onClick={() => setFormData({ ...formData, category: cat })}
-                        color={formData.category === cat ? 'primary' : 'default'}
-                        size="small"
-                        sx={{  cursor: 'pointer', fontSize: '0.75rem' }}
-                      />
+          {isLoading ? <CircularProgress sx={{ m: 4 }} /> : (
+            <Box sx={{ overflowX: 'auto' }}>
+              <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    {['Задание', 'Кто', 'Когда', 'Звёзды', 'За 4 недели'].map((h) => (
+                      <Box component="th" key={h} sx={{ ...labelCaps, textAlign: 'left', p: '10px 12px', borderBottom: `1px solid ${tokens.line}` }}>{h}</Box>
                     ))}
-                  </Box>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    placeholder="Или введите свою категорию"
-                  />
-                </Box>
-
-                {/* Баллы */}
-                <TextField
-                  fullWidth
-                  size="small"
-                  type="number"
-                  label="Баллы *"
-                  value={formData.points}
-                  onChange={(e) => setFormData({ ...formData, points: parseInt(e.target.value) || 0 })}
-                  required
-                  inputProps={{ min: 1 }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <StarIcon sx={{ color: colors.warning.main }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-
-                {/* ─── Расписание (как в календаре) ─────────────────────────── */}
-                <Box>
-                  <Typography variant="body2" sx={{ mb: 1, fontWeight: 700, fontSize: '0.875rem', color: colors.text.primary, display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                    <CalendarMonthIcon sx={{ fontSize: '1.1rem', color: colors.primary.main }} />
-                    Расписание
-                  </Typography>
-
-                  {/* 4 карточки выбора периодичности */}
-                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(4, 1fr)' }, gap: 1, mb: 2 }}>
-                    {([
-                      { value: 'ONCE',   label: 'Один раз',     icon: '📅', hint: 'Без повтора' },
-                      { value: 'DAILY',  label: 'Ежедневно',    icon: '🔁', hint: 'Каждый день' },
-                      { value: 'WEEKLY', label: 'Еженедельно',  icon: '📆', hint: 'Раз в неделю' },
-                      { value: 'CUSTOM', label: 'Свои дни',     icon: '⚙️', hint: 'Выбрать вручную' },
-                    ] as const).map((opt) => {
-                      const isActive = formData.frequency === opt.value
-                      return (
-                        <Box
-                          key={opt.value}
-                          onClick={() => {
-                            setFormData({
-                              ...formData,
-                              frequency: opt.value,
-                              daysOfWeek: opt.value === 'CUSTOM' ? formData.daysOfWeek : [],
-                            })
-                          }}
-                          sx={{
-                            cursor: 'pointer',
-                            p: 1.5,
-                            borderRadius: 2,
-                            border: `2px solid ${isActive ? colors.primary.main : '#E5E5EA'}`,
-                            background: isActive ? colors.primary.main + '0F' : '#fff',
-                            transition: 'all 0.15s',
-                            textAlign: 'center',
-                            '&:hover': {
-                              borderColor: colors.primary.main,
-                              background: isActive ? colors.primary.main + '15' : colors.primary.main + '08',
-                              transform: 'translateY(-1px)',
-                            },
-                          }}
-                        >
-                          <Box sx={{ fontSize: '1.4rem', mb: 0.25 }}>{opt.icon}</Box>
-                          <Typography sx={{
-                            fontSize: '0.82rem', fontWeight: 700,
-                            color: isActive ? colors.primary.main : colors.text.primary,
-                            lineHeight: 1.2,
-                          }}>
-                            {opt.label}
-                          </Typography>
-                          <Typography sx={{ fontSize: '0.68rem', color: colors.text.secondary, mt: 0.25 }}>
-                            {opt.hint}
-                          </Typography>
-                        </Box>
-                      )
-                    })}
-                  </Box>
-
-                  {/* Пресеты + дни недели для CUSTOM */}
-                  {formData.frequency === 'CUSTOM' && (
-                    <Box sx={{ p: 1.5, borderRadius: 2, background: '#F5F5F7', border: '1px solid #E5E5EA' }}>
-                      {/* Быстрые пресеты */}
-                      <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.5 }}>
-                        {([
-                          { label: 'Будни',         days: [1, 2, 3, 4, 5] },
-                          { label: 'Выходные',      days: [6, 0] },
-                          { label: 'Каждый день',   days: [0, 1, 2, 3, 4, 5, 6] },
-                          { label: 'Чёт. (Пн/Ср/Пт)', days: [1, 3, 5] },
-                          { label: 'Нечёт. (Вт/Чт)',  days: [2, 4] },
-                        ] as const).map((preset) => {
-                          const isMatch = preset.days.length === formData.daysOfWeek.length &&
-                            preset.days.every((d) => formData.daysOfWeek.includes(d))
-                          return (
-                            <Box
-                              key={preset.label}
-                              onClick={() => setFormData({ ...formData, daysOfWeek: [...preset.days] })}
-                              sx={{
-                                cursor: 'pointer',
-                                px: 1.25, py: 0.5,
-                                borderRadius: 10,
-                                background: isMatch ? colors.primary.main : '#fff',
-                                color: isMatch ? '#fff' : colors.text.primary,
-                                border: `1px solid ${isMatch ? colors.primary.main : '#D2D2D7'}`,
-                                fontSize: '0.78rem',
-                                fontWeight: 600,
-                                transition: 'all 0.15s',
-                                '&:hover': {
-                                  borderColor: colors.primary.main,
-                                  color: isMatch ? '#fff' : colors.primary.main,
-                                },
-                              }}
-                            >
-                              {preset.label}
-                            </Box>
-                          )
-                        })}
-                        {formData.daysOfWeek.length > 0 && (
-                          <Box
-                            onClick={() => setFormData({ ...formData, daysOfWeek: [] })}
-                            sx={{
-                              cursor: 'pointer',
-                              px: 1.25, py: 0.5,
-                              borderRadius: 10,
-                              background: 'transparent',
-                              color: colors.error.main,
-                              border: `1px solid ${colors.error.main}40`,
-                              fontSize: '0.78rem',
-                              fontWeight: 600,
-                              '&:hover': { background: colors.error.main + '10' },
-                            }}
-                          >
-                            × Очистить
-                          </Box>
-                        )}
-                      </Box>
-
-                      {/* Кружки дней — Пн..Вс */}
-                      <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center', flexWrap: 'wrap' }}>
-                        {[1, 2, 3, 4, 5, 6, 0].map((dayIdx) => {
-                          const isSelected = formData.daysOfWeek.includes(dayIdx)
-                          return (
-                            <Box
-                              key={dayIdx}
-                              onClick={() => handleDayToggle(dayIdx)}
-                              sx={{
-                                width: 44, height: 44,
-                                borderRadius: '50%',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                cursor: 'pointer',
-                                background: isSelected ? colors.primary.main : '#fff',
-                                color: isSelected ? '#fff' : colors.text.primary,
-                                border: `2px solid ${isSelected ? colors.primary.main : '#D2D2D7'}`,
-                                fontWeight: 700,
-                                fontSize: '0.85rem',
-                                transition: 'all 0.15s',
-                                boxShadow: isSelected ? '0 2px 8px rgba(0,122,255,0.3)' : 'none',
-                                '&:hover': {
-                                  borderColor: colors.primary.main,
-                                  transform: 'scale(1.08)',
-                                },
-                              }}
-                            >
-                              {DAYS_OF_WEEK_LABELS[dayIdx]}
-                            </Box>
-                          )
-                        })}
-                      </Box>
-                    </Box>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 && (
+                    <tr><Box component="td" colSpan={5} sx={{ p: 3, color: tokens.text3, fontSize: 14 }}>{tab === 'ARCHIVE' ? 'Архив пуст.' : 'Здесь пока нет заданий.'}</Box></tr>
                   )}
+                  {rows.map((t) => {
+                    const cat = categoryStyle(t.category)
+                    const rate = completionRate(t, allCompletions, kids)
+                    const on = draft?.id === t.id
+                    return (
+                      <Box
+                        component="tr"
+                        key={t.id}
+                        onClick={() => setDraft(toDraft(t, tab === 'ARCHIVE'))}
+                        sx={{ cursor: 'pointer', bgcolor: on ? '#F0F4FF' : 'transparent', '&:hover': { bgcolor: on ? '#F0F4FF' : '#F8F9FC' }, '& td': { p: '12px', borderBottom: `1px solid ${tokens.chip}`, fontSize: 14, verticalAlign: 'middle' } }}
+                      >
+                        <td>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+                            <Box sx={{ flex: '0 0 32px', height: 32, borderRadius: '9px', bgcolor: cat.bg, color: cat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{t.icon || '•'}</Box>
+                            <b style={{ fontWeight: 600 }}>{t.title}</b>
+                            {t.requiresProof && <Box component="span" title="Нужно фото" sx={{ color: tokens.text3, display: 'flex' }}><Icon name="camera" size={16} /></Box>}
+                          </Box>
+                        </td>
+                        <td>{whoLabel(t.assignedTo, kids)}</td>
+                        <td>{scheduleLabel(t)}</td>
+                        <td><StarAmount value={t.points} size={14} weight={700} /></td>
+                        <td>
+                          {rate === null ? <Box component="span" sx={{ color: tokens.text3 }}>—</Box> : (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Box sx={{ width: 64, height: 6, borderRadius: 3, bgcolor: tokens.chip, overflow: 'hidden' }}>
+                                <Box sx={{ width: `${rate}%`, height: '100%', bgcolor: rate >= 70 ? tokens.done : rate >= 45 ? tokens.star : tokens.danger }} />
+                              </Box>
+                              {rate} %
+                            </Box>
+                          )}
+                        </td>
+                      </Box>
+                    )
+                  })}
+                </tbody>
+              </Box>
+            </Box>
+          )}
+        </Card>
 
-                  {/* Превью расписания */}
-                  <Box sx={{
-                    mt: 1.5,
-                    px: 1.5, py: 1,
-                    borderRadius: 2,
-                    background: colors.success.main + '0F',
-                    border: `1px solid ${colors.success.main}30`,
-                    display: 'flex', alignItems: 'center', gap: 1,
-                  }}>
-                    <Box sx={{ fontSize: '1rem' }}>📋</Box>
-                    <Typography sx={{ fontSize: '0.82rem', color: colors.text.primary, lineHeight: 1.35 }}>
-                      {(() => {
-                        if (formData.frequency === 'ONCE') {
-                          return <>Будет показано <b>один раз</b>. Без повтора.</>
-                        }
-                        if (formData.frequency === 'DAILY') {
-                          return <>Будет показано <b>каждый день</b>.</>
-                        }
-                        if (formData.frequency === 'WEEKLY') {
-                          return <>Будет показано <b>раз в неделю</b>.</>
-                        }
-                        if (formData.daysOfWeek.length === 0) {
-                          return <span style={{ color: colors.error.main }}>Выберите хотя бы один день недели</span>
-                        }
-                        const names = [...formData.daysOfWeek]
-                          .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b))
-                          .map((d) => DAYS_OF_WEEK_FULL[d].toLowerCase())
-                        return <>Будет повторяться по: <b>{names.join(', ')}</b></>
-                      })()}
-                    </Typography>
+        {draft && <TaskEditor key={draft.id || 'new'} draft={draft} kids={kids} onClose={() => setDraft(null)} />}
+      </Box>
+
+      <Dialog open={templatesOpen} onClose={() => setTemplatesOpen(false)} fullWidth maxWidth="sm">
+        <DialogContent sx={{ p: 3 }}>
+          <Typography component="h2" sx={{ fontSize: 22, fontWeight: 700, mb: 0.5 }}>Шаблоны заданий</Typography>
+          <Typography sx={{ fontSize: 14, color: tokens.text3, mb: 2 }}>Выберите — и поправьте под свою семью перед сохранением.</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1 }}>
+            {TASK_TEMPLATES.map((tpl) => {
+              const cat = categoryStyle(tpl.category)
+              return (
+                <Box key={tpl.title} component="button" type="button" onClick={() => pickTemplate(tpl)}
+                  sx={{ display: 'flex', alignItems: 'center', gap: 1.25, p: 1.25, borderRadius: '12px', border: `1px solid ${tokens.line}`, bgcolor: tokens.paper, font: 'inherit', textAlign: 'left', cursor: 'pointer', minHeight: 56, '&:hover': { borderColor: tokens.primary } }}>
+                  <Box sx={{ flex: '0 0 36px', height: 36, borderRadius: '10px', bgcolor: cat.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{tpl.icon}</Box>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{tpl.title}</Typography>
+                    <Typography sx={{ fontSize: 12, color: tokens.text3 }}>{scheduleLabel(tpl)} · {tpl.points} звёзд</Typography>
                   </Box>
                 </Box>
-
-                {/* Назначить */}
-                <FormControl fullWidth size="small">
-                  <InputLabel>Назначить</InputLabel>
-                  <Select
-                    value={formData.assignedTo}
-                    onChange={(e: SelectChangeEvent) => setFormData({ ...formData, assignedTo: e.target.value })}
-                    label="Назначить"
-                  >
-                    <MenuItem value="ALL">Всем детям</MenuItem>
-                    {children?.map((child) => (
-                      <MenuItem key={child.id} value={child.id}>
-                        {child.childProfile?.name || child.login}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                {/* Чекбоксы */}
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={formData.requiresProof}
-                        onChange={(e) => setFormData({ ...formData, requiresProof: e.target.checked })}
-                        size="small"
-                      />
-                    }
-                    label={
-                      <Typography variant="body2" sx={{  fontSize: '0.85rem' }}>
-                        Требует доказательства (фото/комментарий)
-                      </Typography>
-                    }
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={formData.requiresParentApproval}
-                        onChange={(e) => setFormData({ ...formData, requiresParentApproval: e.target.checked })}
-                        size="small"
-                      />
-                    }
-                    label={
-                      <Typography variant="body2" sx={{  fontSize: '0.85rem' }}>
-                        Требует подтверждения родителя
-                      </Typography>
-                    }
-                  />
-                </Box>
-              </Box>
-            </DialogContent>
-
-            <DialogActions 
-              sx={{ 
-                p: { xs: 1.5, sm: 2 }, 
-                gap: 1, 
-                flexWrap: 'wrap',
-                position: 'sticky',
-                bottom: 0,
-                background: colors.background.paper,
-                borderTop: `1px solid ${colors.primary.light}40`,
-                zIndex: 1,
-              }}
-            >
-              <Button
-                onClick={handleClose}
-                size="small"
-                sx={{  fontWeight: 700, fontSize: '0.9rem' }}
-              >
-                Отмена
-              </Button>
-              <Button
-                type="submit"
-                variant="contained"
-                size="small"
-                disabled={createTask.isPending || updateTask.isPending}
-                startIcon={createTask.isPending || updateTask.isPending ? <CircularProgress size={14} /> : <CheckCircleIcon />}
-                sx={{  fontWeight: 700, fontSize: '0.9rem' }}
-              >
-                {editingTask ? 'Сохранить' : 'Добавить'}
-              </Button>
-            </DialogActions>
-          </form>
-        </Dialog>
-
-        {/* Показываем ошибки, если есть */}
-        {error && (
-          <Box sx={{ mb: 2 }}>
-            <Alert severity="error" onClose={() => setError('')}>
-              {error}
-            </Alert>
+              )
+            })}
           </Box>
-        )}
-
-        {/* Диалог подтверждения удаления */}
-        <Dialog
-          open={deleteDialogOpen}
-          onClose={handleDeleteCancel}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#d32f2f' }}>
-            <WarningIcon />
-            Подтверждение удаления
-          </DialogTitle>
-          <DialogContent>
-            <Typography variant="body1" sx={{ mb: 2 }}>
-              Вы уверены, что хотите удалить задачу <strong>"{taskToDelete?.title}"</strong>?
-            </Typography>
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              Это действие нельзя отменить. Все назначения этой задачи будут удалены.
-            </Alert>
-          </DialogContent>
-          <DialogActions sx={{ p: 2, gap: 1 }}>
-            <Button
-              onClick={handleDeleteCancel}
-              variant="outlined"
-              size="small"
-              sx={{ fontWeight: 600 }}
-            >
-              Отмена
-            </Button>
-            <Button
-              onClick={handleDeleteConfirm}
-              variant="contained"
-              color="error"
-              size="small"
-              disabled={deleteTask.isPending}
-              startIcon={deleteTask.isPending ? <CircularProgress size={14} /> : <DeleteIcon />}
-              sx={{ fontWeight: 600 }}
-            >
-              Удалить
-            </Button>
-          </DialogActions>
-        </Dialog>
-      </Box>
+        </DialogContent>
+      </Dialog>
     </Layout>
+  )
+}
+
+function TaskEditor({ draft: initial, kids, onClose }: { draft: Draft; kids: Kid[]; onClose: () => void }) {
+  const [d, setD] = useState<Draft>(initial)
+  const [error, setError] = useState('')
+  const create = useCreateTask()
+  const update = useUpdateTask()
+  const archive = useArchiveTask()
+  const unarchive = useUnarchiveTask()
+  const remove = useDeleteTask()
+  const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }))
+  const busy = create.isPending || update.isPending || archive.isPending || unarchive.isPending || remove.isPending
+
+  const toggleDay = (day: number) => {
+    const days = d.daysOfWeek.includes(day) ? d.daysOfWeek.filter((x) => x !== day) : [...d.daysOfWeek, day]
+    set({ daysOfWeek: days })
+  }
+
+  const save = () => {
+    if (!d.title.trim()) return setError('Назовите задание')
+    if (d.frequency === 'CUSTOM' && d.daysOfWeek.length === 0) return setError('Выберите хотя бы один день')
+    if (!(d.points > 0)) return setError('Звёзд должно быть больше нуля')
+    setError('')
+    const payload = {
+      title: d.title.trim(),
+      description: d.description.trim() || undefined,
+      icon: d.icon || undefined,
+      category: d.category,
+      points: Math.round(d.points),
+      frequency: d.frequency,
+      daysOfWeek: d.frequency === 'CUSTOM' ? [...d.daysOfWeek].sort() : [],
+      assignedTo: d.assignedTo,
+      requiresProof: d.requiresProof,
+      requiresParentApproval: !d.autoApprove,
+    }
+    const done = { onSuccess: onClose, onError: (e: any) => setError(e?.response?.data?.message || 'Не получилось сохранить') }
+    if (d.id) update.mutate({ id: d.id, data: payload as any }, done)
+    else create.mutate(payload as any, done)
+  }
+
+  // На узком экране редактор оказывается под таблицей — прокручиваем к нему.
+  const anchor = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (window.innerWidth < 1200) anchor.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  const fld = { display: 'flex', flexDirection: 'column', gap: 0.75 } as const
+  const fldLabel = { fontSize: 13, fontWeight: 600, color: tokens.text2 } as const
+
+  return (
+    <Card sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, position: { lg: 'sticky' }, top: { lg: 28 } }}>
+      <Box ref={anchor} sx={{ display: 'flex', alignItems: 'center', gap: 1, scrollMarginTop: 72 }}>
+        <Typography component="h2" sx={{ flex: 1, fontSize: 18, fontWeight: 700 }}>{d.id ? d.title || 'Задание' : 'Новое задание'}</Typography>
+        <IconButton aria-label="Закрыть" onClick={onClose}><Icon name="x" size={20} /></IconButton>
+      </Box>
+
+      <TextField label="Название" value={d.title} onChange={(e) => set({ title: e.target.value })} autoFocus={!d.id} inputProps={{ maxLength: 80 }} />
+
+      <Box sx={fld}>
+        <Typography sx={fldLabel}>Картинка</Typography>
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          {ICONS.map((i) => (
+            <Box key={i} component="button" type="button" aria-pressed={d.icon === i} onClick={() => set({ icon: d.icon === i ? '' : i })}
+              sx={{ width: 40, height: 40, borderRadius: '10px', fontSize: 20, border: `2px solid ${d.icon === i ? tokens.primary : 'transparent'}`, bgcolor: d.icon === i ? tokens.primarySoft : tokens.bg, cursor: 'pointer' }}>
+              {i}
+            </Box>
+          ))}
+        </Box>
+      </Box>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+        <TextField select label="Кто" value={d.assignedTo} onChange={(e) => set({ assignedTo: e.target.value })}>
+          <MenuItem value="ALL">Все дети</MenuItem>
+          {kids.map((k) => <MenuItem key={k.userId} value={k.userId}>{k.name}</MenuItem>)}
+        </TextField>
+        <TextField select label="Категория" value={d.category} onChange={(e) => set({ category: e.target.value })}>
+          {Object.entries(CATEGORY_STYLE).filter(([k]) => k !== 'chores').map(([k, v]) => <MenuItem key={k} value={k}>{v.label}</MenuItem>)}
+        </TextField>
+      </Box>
+
+      <TextField select label="Когда" value={d.frequency} onChange={(e) => set({ frequency: e.target.value as Freq })}>
+        <MenuItem value="DAILY">Каждый день</MenuItem>
+        <MenuItem value="CUSTOM">По дням недели</MenuItem>
+        <MenuItem value="WEEKLY">Раз в неделю, в любой день</MenuItem>
+        <MenuItem value="ONCE">Один раз</MenuItem>
+      </TextField>
+
+      {d.frequency === 'CUSTOM' && (
+        <Box sx={fld}>
+          <Typography sx={fldLabel}>Дни</Typography>
+          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+            {DAYS.map((day) => <Chip2 key={day} on={d.daysOfWeek.includes(day)} onClick={() => toggleDay(day)} sx={{ px: 1.5 }}>{DAY_LABEL[day]}</Chip2>)}
+          </Box>
+        </Box>
+      )}
+
+      <Box sx={fld}>
+        <Typography sx={fldLabel}>Звёзды</Typography>
+        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+          {STAR_PRESETS.map((n) => <Chip2 key={n} on={d.points === n} onClick={() => set({ points: n })}>{n}</Chip2>)}
+          <TextField size="small" type="number" value={STAR_PRESETS.includes(d.points) ? '' : d.points || ''} placeholder="своё" onChange={(e) => set({ points: Number(e.target.value) })} sx={{ width: 88 }} inputProps={{ min: 1, 'aria-label': 'Своё число звёзд' }} />
+        </Box>
+      </Box>
+
+      <TextField label="Пояснение для ребёнка" value={d.description} onChange={(e) => set({ description: e.target.value })} multiline minRows={2} placeholder="Прочитается вслух, если нажать на задание" />
+
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Typography sx={{ flex: 1, fontSize: 14 }}>Нужно фото</Typography>
+        <Switch checked={d.requiresProof} onChange={(e) => set({ requiresProof: e.target.checked })} inputProps={{ 'aria-label': 'Нужно фото' }} />
+      </Box>
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ flex: 1 }}>
+          <Typography sx={{ fontSize: 14 }}>Одобрять сразу</Typography>
+          <Typography sx={{ fontSize: 12, color: tokens.text3 }}>Звёзды засчитываются без проверки</Typography>
+        </Box>
+        <Switch checked={d.autoApprove} onChange={(e) => set({ autoApprove: e.target.checked })} inputProps={{ 'aria-label': 'Одобрять сразу' }} />
+      </Box>
+
+      {error && <Typography sx={{ color: tokens.danger, fontSize: 14 }}>{error}</Typography>}
+
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+        {d.id && !d.archived && <Button variant="outlined" disabled={busy} onClick={() => archive.mutate(d.id!, { onSuccess: onClose })}>В архив</Button>}
+        {d.id && d.archived && (
+          <>
+            <Button variant="outlined" disabled={busy} onClick={() => unarchive.mutate(d.id!, { onSuccess: onClose })}>Вернуть</Button>
+            <Button color="error" disabled={busy} onClick={() => window.confirm(`Удалить «${d.title}» насовсем? История выполнений останется.`) && remove.mutate(d.id!, { onSuccess: onClose })}>Удалить</Button>
+          </>
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Button variant="contained" disabled={busy} onClick={save}>Сохранить</Button>
+      </Box>
+    </Card>
   )
 }

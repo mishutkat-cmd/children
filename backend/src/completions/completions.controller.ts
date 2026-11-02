@@ -14,7 +14,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
-import { CreateCompletionDto, CreateCompletionForChildDto } from './dto/completions.dto';
+import { CreateCompletionDto, CreateCompletionForChildDto, RejectCompletionDto } from './dto/completions.dto';
 
 @Controller('completions')
 @UseGuards(JwtAuthGuard)
@@ -145,8 +145,8 @@ export class CompletionsController {
   @Post('parent/completions/:id/reject')
   @UseGuards(RolesGuard)
   @Roles('PARENT')
-  reject(@User() user: RequestUser, @Param('id') id: string) {
-    return this.completionsService.reject(id, user.familyId);
+  reject(@User() user: RequestUser, @Param('id') id: string, @Body() dto: RejectCompletionDto) {
+    return this.completionsService.reject(id, user.familyId, dto?.reason);
   }
 
   @Post('parent/completions/mark-not-completed')

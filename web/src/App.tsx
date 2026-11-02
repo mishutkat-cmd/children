@@ -21,9 +21,10 @@ const ParentTasks = lazy(() => import('./pages/parent/Tasks'))
 const ParentConversion = lazy(() => import('./pages/parent/Conversion'))
 const ParentSettings = lazy(() => import('./pages/parent/Settings'))
 const ParentChildren = lazy(() => import('./pages/parent/Children'))
+const ParentChild = lazy(() => import('./pages/parent/Child'))
 const ParentChallenges = lazy(() => import('./pages/parent/Challenges'))
 const ParentBadges = lazy(() => import('./pages/parent/Badges'))
-const ParentWishlist = lazy(() => import('./pages/parent/Wishlist'))
+const ParentGoals = lazy(() => import('./pages/parent/Goals'))
 const ParentApprovals = lazy(() => import('./pages/parent/Approvals'))
 const ChildBadges = lazy(() => import('./pages/parent/ChildBadges'))
 const ParentReports = lazy(() => import('./pages/parent/Reports'))
@@ -75,11 +76,14 @@ function App() {
         <Route path="/parent/tasks" element={<PrivateRoute role="PARENT"><ParentTasks /></PrivateRoute>} />
         <Route path="/parent/conversion" element={<PrivateRoute role="PARENT"><ParentConversion /></PrivateRoute>} />
         <Route path="/parent/settings" element={<PrivateRoute role="PARENT"><ParentSettings /></PrivateRoute>} />
-        <Route path="/parent/children" element={<PrivateRoute role="PARENT"><ParentChildren /></PrivateRoute>} />
+        <Route path="/parent/children" element={<PrivateRoute role="PARENT"><ParentChild /></PrivateRoute>} />
+        <Route path="/parent/children/manage" element={<PrivateRoute role="PARENT"><ParentChildren /></PrivateRoute>} />
+        <Route path="/parent/children/:childId" element={<PrivateRoute role="PARENT"><ParentChild /></PrivateRoute>} />
         <Route path="/parent/children/:childId/badges" element={<PrivateRoute role="PARENT"><ChildBadges /></PrivateRoute>} />
         <Route path="/parent/challenges" element={<PrivateRoute role="PARENT"><ParentChallenges /></PrivateRoute>} />
         <Route path="/parent/badges" element={<PrivateRoute role="PARENT"><ParentBadges /></PrivateRoute>} />
-        <Route path="/parent/wishlist" element={<PrivateRoute role="PARENT"><ParentWishlist /></PrivateRoute>} />
+        <Route path="/parent/goals" element={<PrivateRoute role="PARENT"><ParentGoals /></PrivateRoute>} />
+        <Route path="/parent/wishlist" element={<Navigate to="/parent/goals" replace />} />
         <Route path="/parent/approvals" element={<PrivateRoute role="PARENT"><ParentApprovals /></PrivateRoute>} />
         <Route path="/parent/reports" element={<PrivateRoute role="PARENT"><ParentReports /></PrivateRoute>} />
         <Route path="/parent/map" element={<PrivateRoute role="PARENT"><ParentMap /></PrivateRoute>} />

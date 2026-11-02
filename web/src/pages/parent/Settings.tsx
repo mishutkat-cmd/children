@@ -11,7 +11,6 @@ import {
   IconButton,
   CircularProgress,
   Grid,
-  Divider,
 } from '@mui/material'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
@@ -21,10 +20,20 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import { motion } from 'framer-motion'
 import { useAuthStore } from '../../store/authStore'
 import { api } from '../../lib/api'
-import Layout from '../../components/Layout'
-import { colors } from '../../theme'
+import Layout, { PageHeader } from '../../components/Layout'
+import { card } from '../../components/parent/kit'
+import { colors, tokens } from '../../theme'
 import { useCharacters, useUpdateCharacter } from '../../hooks/useCharacters'
 import type { Character } from '../../types/api'
+
+const SECTIONS = [
+  ['money', 'Звёзды и деньги'],
+  ['kids', 'Детское приложение'],
+  ['profile', 'Профиль'],
+  ['password', 'Пароль'],
+  ['account', 'Аккаунт и вход'],
+  ['cleanup', 'Удаление данных'],
+] as const
 
 export default function ParentSettings() {
   const navigate = useNavigate()
@@ -263,41 +272,16 @@ export default function ParentSettings() {
   return (
     <Layout>
       <Box>
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <Box
-            sx={{
-              mb: 4,
-              p: { xs: 3, sm: 4 },
-              background: 'linear-gradient(135deg, rgba(0, 122, 255, 0.95) 0%, rgba(88, 86, 214, 0.95) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: { xs: 3, sm: 4 },
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 20px 60px rgba(0, 122, 255, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
-            }}
-          >
-            <Typography
-              variant="h3"
-              component="h1"
-              sx={{
-                fontWeight: 900,
-                color: 'white',
-                fontSize: { xs: '1.75rem', sm: '2.25rem' },
-                letterSpacing: '-0.03em',
-                textShadow: '0 4px 20px rgba(0,0,0,0.3)',
-              }}
-            >
-              Настройки ⚙️
-            </Typography>
-          </Box>
-        </motion.div>
-
+        <PageHeader title="Настройки" />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '220px minmax(0, 1fr)' }, gap: 3, alignItems: 'start' }}>
+        <Box component="nav" aria-label="Разделы настроек" sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', gap: 0.5, position: 'sticky', top: 28 }}>
+          {SECTIONS.map(([id, label]) => (
+            <Box key={id} component="a" href={`#${id}`} sx={{ px: 1.5, py: 1.25, borderRadius: '10px', fontSize: 14, fontWeight: 600, color: tokens.text2, textDecoration: 'none', '&:hover': { bgcolor: tokens.chip } }}>{label}</Box>
+          ))}
+        </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', '& > div': { scrollMarginTop: 24 } }}>
         {/* Настройка курса конвертации */}
-        <motion.div
+        <motion.div id="money"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.5 }}
@@ -305,26 +289,21 @@ export default function ParentSettings() {
         >
           <Box
             sx={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: '20px',
+              ...card,
               padding: { xs: '20px', sm: '24px' },
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
             }}
           >
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              💰 Курс конвертации баллов в деньги
+              Звёзды и деньги
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
-              Установите, сколько баллов равно 1 гривне (грн)
+              Сколько звёзд равно 1 гривне — для выплат деньгами
             </Typography>
 
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
               <TextField
                 type="number"
-                label="Количество баллов"
+                label="Звёзд"
                 value={settings?.conversionRate || 10}
                 onChange={(e) => {
                   const value = parseInt(e.target.value)
@@ -337,7 +316,7 @@ export default function ParentSettings() {
                 disabled={updateConversionRateMutation.isPending}
               />
               <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                = 1 грн
+                = 1 ₴
               </Typography>
             </Box>
             {updateConversionRateMutation.isPending && (
@@ -356,10 +335,9 @@ export default function ParentSettings() {
         {/* Настройка персонажей */}
         <CharacterSettings />
 
-        <Divider sx={{ my: 4 }} />
 
         {/* Профиль пользователя */}
-        <motion.div
+        <motion.div id="profile"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.5 }}
@@ -367,17 +345,12 @@ export default function ParentSettings() {
         >
           <Box
             sx={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: '20px',
+              ...card,
               padding: { xs: '20px', sm: '24px' },
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
             }}
           >
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              👤 Профиль
+              Профиль
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
               Управление данными вашего профиля
@@ -497,7 +470,7 @@ export default function ParentSettings() {
         </motion.div>
 
         {/* Смена пароля */}
-        <motion.div
+        <motion.div id="password"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.5 }}
@@ -505,17 +478,12 @@ export default function ParentSettings() {
         >
           <Box
             sx={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: '20px',
+              ...card,
               padding: { xs: '20px', sm: '24px' },
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
             }}
           >
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              🔒 Смена пароля
+              Пароль
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
               Введите текущий пароль и новый пароль для смены
@@ -594,25 +562,20 @@ export default function ParentSettings() {
         </motion.div>
 
         {/* Очистка БД */}
-        <motion.div
+        <motion.div id="cleanup"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35, duration: 0.5 }}
         >
           <Box
             sx={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: '20px',
+              ...card,
               padding: { xs: '20px', sm: '24px' },
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
               mb: 3,
             }}
           >
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              🧹 Очистка базы данных
+              Удаление данных
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Удалит из базы данных архивные задачи, награды и осиротевшие записи (выполнения,
@@ -696,24 +659,19 @@ export default function ParentSettings() {
         </motion.div>
 
         {/* Выход */}
-        <motion.div
+        <motion.div id="account"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.5 }}
         >
           <Box
             sx={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: '20px',
+              ...card,
               padding: { xs: '20px', sm: '24px' },
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
             }}
           >
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 2 }}>
-              Аккаунт
+              Аккаунт и вход
             </Typography>
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
               <Button
@@ -739,6 +697,8 @@ export default function ParentSettings() {
             </motion.div>
           </Box>
         </motion.div>
+        </Box>
+        </Box>
       </Box>
     </Layout>
   )
@@ -813,7 +773,7 @@ function CharacterSettings() {
   }
 
   return (
-    <motion.div
+    <motion.div id="kids"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15, duration: 0.5 }}
@@ -821,17 +781,12 @@ function CharacterSettings() {
     >
       <Box
         sx={{
-          background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.9) 100%)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderRadius: '20px',
-          padding: { xs: '20px', sm: '24px' },
-          border: '1px solid rgba(255, 255, 255, 0.3)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
+          ...card,
+              padding: { xs: '20px', sm: '24px' },
         }}
       >
         <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-          🎭 Персонажи для детей
+          Детское приложение: питомцы
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontSize: '0.875rem' }}>
           Настройте 3 персонажа с 3 состояниями сытости каждый. Дети смогут выбрать одного персонажа.
@@ -840,7 +795,7 @@ function CharacterSettings() {
           Для каждого состояния можно загрузить по одному изображению.
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
-          Состояния сытости: <strong>0 баллов</strong>, <strong>1-99 баллов</strong>, <strong>100+ баллов</strong>
+          Состояния сытости: <strong>0 звёзд</strong>, <strong>1–99 звёзд</strong>, <strong>100+ звёзд</strong>
         </Typography>
 
           <Grid container spacing={3}>
@@ -895,7 +850,7 @@ function CharacterSettings() {
 
                       <Grid container spacing={1}>
                         {(['zero', 'low', 'high'] as const).map((state) => {
-                          const stateLabels = { zero: '0 баллов', low: '1-99 баллов', high: '100+ баллов' }
+                          const stateLabels = { zero: '0 звёзд', low: '1–99 звёзд', high: '100+ звёзд' }
                           const imageUrl = 
                             state === 'zero' ? character.imageUrlZero :
                             state === 'low' ? character.imageUrlLow :
