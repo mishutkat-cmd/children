@@ -7,6 +7,8 @@ import { CircularProgress, Box } from '@mui/material'
 // we know which side of the auth gate the user is on.
 const LoginPage = lazy(() => import('./pages/auth/LoginPage'))
 const RegisterPage = lazy(() => import('./pages/auth/RegisterPage'))
+const EntryPage = lazy(() => import('./pages/auth/EntryPage'))
+const JoinPage = lazy(() => import('./pages/auth/JoinPage'))
 
 // Child pages — lazy loaded
 const ChildDashboard = lazy(() => import('./pages/child/Dashboard'))
@@ -61,6 +63,8 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/entry" element={<EntryPage />} />
+        <Route path="/join/:token" element={<JoinPage />} />
 
         <Route path="/child" element={<PrivateRoute role="CHILD"><ChildDashboard /></PrivateRoute>} />
         <Route path="/child/tasks" element={<PrivateRoute role="CHILD"><ChildTasks /></PrivateRoute>} />

@@ -22,6 +22,7 @@ import { useAuthStore } from '../../store/authStore'
 import { api } from '../../lib/api'
 import Layout, { PageHeader } from '../../components/Layout'
 import { card } from '../../components/parent/kit'
+import { FamilyPcCard, InviteCard } from '../../components/parent/access'
 import { colors, tokens } from '../../theme'
 import { useCharacters, useUpdateCharacter } from '../../hooks/useCharacters'
 import type { Character } from '../../types/api'
@@ -29,6 +30,8 @@ import type { Character } from '../../types/api'
 const SECTIONS = [
   ['money', 'Звёзды и деньги'],
   ['kids', 'Детское приложение'],
+  ['adults', 'Семья и взрослые'],
+  ['family-pc', 'Семейный компьютер'],
   ['profile', 'Профиль'],
   ['password', 'Пароль'],
   ['account', 'Аккаунт и вход'],
@@ -334,6 +337,16 @@ export default function ParentSettings() {
 
         {/* Настройка персонажей */}
         <CharacterSettings />
+
+        <Box id="adults" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Пригласить второго взрослого</Typography>
+          <InviteCard />
+        </Box>
+
+        <Box id="family-pc" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Семейный компьютер</Typography>
+          <FamilyPcCard />
+        </Box>
 
 
         {/* Профиль пользователя */}

@@ -85,6 +85,10 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
+    // Дети сами не регистрируются: их заводит родитель и подключает телефон кодом (/pairing).
+    if (dto.role !== 'PARENT') {
+      throw new BadRequestException('Регистрируются только взрослые. Ребёнка добавит мама или папа.');
+    }
     // Проверяем существование пользователя по email или login
     const existingByEmail = dto.email ? await this.db.findFirst('users', { email: dto.email }) : null;
     const existingByLogin = await this.db.findFirst('users', { login: dto.login });
@@ -117,20 +121,6 @@ export class AuthService {
       role: dto.role,
       familyId,
     };
-
-    // Если это ребенок - создаем профиль
-    if (dto.role === 'CHILD') {
-      const childProfileId = crypto.randomUUID();
-      await this.db.create('childProfiles', {
-        id: childProfileId,
-        userId: userId,
-        name: dto.name || dto.login,
-        avatarUrl: null, // При регистрации avatarUrl не передается
-        pointsBalance: 0,
-        moneyBalanceCents: 0,
-        streakState: {},
-      }, childProfileId);
-    }
 
     return this.generateTokens(user);
   }

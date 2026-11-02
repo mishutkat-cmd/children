@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Box, ButtonBase, CircularProgress, Typography } from '@mui/material'
 import ChildLayout from '../../components/ChildLayout'
@@ -7,6 +8,7 @@ import { api } from '../../lib/api'
 import { useCharacters } from '../../hooks/useCharacters'
 import { useChildCompletions, useChildName, useChildSummary, useStreak } from '../../hooks/useChildData'
 import { getCharacterImageUrl } from '../../utils/satiety'
+import SecretPad from '../../components/auth/SecretPad'
 
 const card = { bgcolor: tokens.paper, borderRadius: '22px', boxShadow: `0 2px 0 ${tokens.kidShadow}` }
 const caps = { fontSize: 14, fontWeight: 900, color: tokens.text2, textTransform: 'uppercase', letterSpacing: '0.05em' } as const
@@ -117,6 +119,52 @@ export default function ChildProfile() {
           </Box>
         ))}
       </Box>
+      <SecretCard />
     </ChildLayout>
+  )
+}
+
+/** «Мой секрет»: 3 картинки для входа с семейного компьютера. Придумать и повторить. */
+function SecretCard() {
+  const [open, setOpen] = useState(false)
+  const [first, setFirst] = useState<string[] | null>(null)
+  const [value, setValue] = useState<string[]>([])
+  const [msg, setMsg] = useState('')
+  const save = useMutation({
+    mutationFn: (pictures: string[]) => api.put('/pairing/secret', { pictures }),
+    onSuccess: () => { setOpen(false); setFirst(null); setValue([]); setMsg('Секрет сохранён. Не говори его никому, кроме мамы и папы.') },
+    onError: () => setMsg('Не получилось сохранить. Попробуй ещё раз.'),
+  })
+  const complete = (v: string[]) => {
+    if (!first) {
+      setFirst(v)
+      setTimeout(() => setValue([]), 250)
+      setMsg('')
+    } else if (first.join() === v.join()) {
+      save.mutate(v)
+    } else {
+      setFirst(null)
+      setTimeout(() => setValue([]), 250)
+      setMsg('Не совпало. Придумай заново.')
+    }
+  }
+  return (
+    <Box sx={{ ...card, mt: 2, p: { xs: 2.25, md: 3 }, display: 'flex', flexDirection: 'column', gap: 1.5, alignItems: open ? 'center' : 'stretch' }}>
+      <Typography component="h2" sx={{ fontSize: 20, fontWeight: 900, alignSelf: 'stretch' }}>Мой секрет</Typography>
+      {!open ? (
+        <>
+          <Typography sx={{ fontSize: 15, fontWeight: 700, color: tokens.text2 }}>3 картинки для входа с семейного компьютера. Цифры запоминать не надо.</Typography>
+          {msg && <Typography sx={{ fontSize: 15, fontWeight: 800, color: tokens.done }}>{msg}</Typography>}
+          <ButtonBase onClick={() => { setOpen(true); setMsg('') }} sx={{ alignSelf: 'flex-start', height: 52, px: 3, borderRadius: '18px', bgcolor: tokens.primary, color: '#FFF', fontSize: 17, fontWeight: 800, boxShadow: `0 4px 0 ${tokens.primaryDark}` }}>Придумать секрет</ButtonBase>
+        </>
+      ) : (
+        <>
+          <Typography sx={{ fontSize: 17, fontWeight: 800 }}>{first ? 'Повтори ещё раз' : 'Нажми 3 картинки по порядку'}</Typography>
+          <SecretPad value={value} onChange={setValue} onComplete={complete} disabled={save.isPending} />
+          {msg && <Typography role="alert" sx={{ fontSize: 15, fontWeight: 800, color: tokens.danger }}>{msg}</Typography>}
+          <ButtonBase onClick={() => { setOpen(false); setFirst(null); setValue([]) }} sx={{ minHeight: 44, px: 2, fontSize: 16, fontWeight: 800, color: tokens.text3 }}>Отмена</ButtonBase>
+        </>
+      )}
+    </Box>
   )
 }

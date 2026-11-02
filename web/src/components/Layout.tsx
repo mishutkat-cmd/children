@@ -7,6 +7,7 @@ import { usePendingExchanges } from '../hooks/useExchanges'
 import { tokens } from '../theme'
 import { Icon, type IconName } from './ui'
 import NotificationBell from './NotificationBell'
+import { getFamilyPcToken } from '../lib/familyPc'
 
 type NavItem = { to: string; label: string; icon: IconName; match: (p: string) => boolean; badge?: boolean }
 
@@ -89,7 +90,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </ButtonBase>
         <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'left' }} transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
           <MenuItem onClick={() => { setAnchor(null); onNavigate?.(); navigate('/parent/settings') }}>Настройки и профиль</MenuItem>
-          <MenuItem onClick={() => { setAnchor(null); clearAuth(); navigate('/login') }} sx={{ color: tokens.danger }}>Выйти</MenuItem>
+          <MenuItem onClick={() => { setAnchor(null); clearAuth(); navigate(getFamilyPcToken() ? '/entry' : '/login') }} sx={{ color: tokens.danger }}>Выйти</MenuItem>
         </Menu>
       </Box>
     </Box>

@@ -79,7 +79,8 @@ api.interceptors.response.use(
     // 401 от входа/смены пароля — это «неверный пароль», а не протухшая сессия:
     // разлогинивать и уводить со страницы нельзя, ошибку покажет сама форма.
     const url = error.config?.url || ''
-    const isCredentialCheck = /\/auth\/(login|child-pin-login|change-password|register)\b/.test(url)
+    // Входы без сессии (/pairing: код, секрет, приглашение) тоже отвечают 401 на ошибку ввода.
+    const isCredentialCheck = /\/auth\/(login|child-pin-login|change-password|register)\b|\/pairing\/(claim|family-pc\/|invites\/)/.test(url)
 
     if (error.response?.status === 401 && !isCredentialCheck) {
       if (import.meta.env.DEV) {

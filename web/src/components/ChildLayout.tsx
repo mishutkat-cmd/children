@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { Box, ButtonBase, IconButton, Tooltip } from '@mui/material'
 import { tokens } from '../theme'
 import { useAuthStore } from '../store/authStore'
 import { useChildName, useChildSummary, useStreak } from '../hooks/useChildData'
 import { Icon, KidAvatar, StarBadge, type IconName } from './ui'
+import { FAMILY_PC_IDLE_MS, getFamilyPcToken, isFamilyPcChild, setFamilyPcChild } from '../lib/familyPc'
 
 const NAV: { to: string; label: string; icon: IconName; match: (p: string) => boolean }[] = [
   { to: '/child', label: 'Сегодня', icon: 'home', match: (p) => p === '/child' || p === '/child/' },
@@ -51,9 +52,31 @@ export default function ChildLayout({ children }: { children: ReactNode }) {
   const avatar = (summary as any)?.profile?.avatarUrl
 
   const logout = () => {
+    const pc = isFamilyPcChild()
+    setFamilyPcChild(false)
     clearAuth()
-    navigate('/login')
+    navigate(pc && getFamilyPcToken() ? '/entry' : '/login')
   }
+
+  const logoutRef = useRef(logout)
+  logoutRef.current = logout
+
+  // На семейном компьютере ребёнка выкидывает через 20 минут без действий.
+  useEffect(() => {
+    if (!isFamilyPcChild()) return
+    let timer = window.setTimeout(() => logoutRef.current(), FAMILY_PC_IDLE_MS)
+    const bump = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => logoutRef.current(), FAMILY_PC_IDLE_MS)
+    }
+    const events = ['pointerdown', 'keydown', 'scroll', 'touchstart'] as const
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }))
+    return () => {
+      window.clearTimeout(timer)
+      events.forEach((e) => window.removeEventListener(e, bump))
+    }
+  }, [])
+
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: tokens.bg, color: tokens.text, display: 'flex' }}>

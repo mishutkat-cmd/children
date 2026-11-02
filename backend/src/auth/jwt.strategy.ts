@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { DocStore } from '../db/doc-store.service';
+import { PairingService } from './pairing.service';
 
 export interface JwtPayload {
   sub: string; // userId
@@ -10,6 +11,8 @@ export interface JwtPayload {
   role: string;
   familyId: string;
   scope?: string;
+  /** Сессия подключённого устройства (телефон ребёнка, семейный компьютер) — её можно отозвать. */
+  sid?: string;
 }
 
 @Injectable()
@@ -17,6 +20,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private configService: ConfigService,
     private db: DocStore,
+    private pairing: PairingService,
   ) {
     const jwtSecret = configService.get<string>('JWT_SECRET');
     if (!jwtSecret) {
@@ -34,6 +38,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // Скоуповые токены (токен устройства для геоточек) — не логин.
       if (payload.scope) {
         throw new UnauthorizedException('Scoped token is not accepted here');
+      }
+
+      if (payload.sid && !(await this.pairing.checkSession(payload.sid, payload.sub, payload.familyId))) {
+        throw new UnauthorizedException('Device session revoked');
       }
 
       const user = await this.db.findFirst('users', { id: payload.sub });

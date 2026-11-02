@@ -89,6 +89,10 @@ export const COLLECTIONS: Record<string, string[][]> = {
   familySettings: [['familyId']],
   decayRules: [['familyId']],
   deviceTokens: [['userId', 'deviceId'], ['userId']],
+  // Подключение телефона ребёнка по коду, сессии устройств, приглашения взрослых.
+  pairingCodes: [['code'], ['childUserId']],
+  deviceSessions: [['familyId', 'createdAt'], ['userId']],
+  familyInvites: [['token'], ['familyId']],
   // Geolocation. `locationPoints` is the only collection that grows without
   // bound, so it carries an index on expiresAt for the retention sweep —
   // Firestore expired these through a TTL policy, which SQLite has no

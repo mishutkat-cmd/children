@@ -10,6 +10,7 @@ import { api } from '../../lib/api'
 import { useTasks } from '../../hooks/useTasks'
 import { plural } from '../../components/ChildLayout'
 import { expectedRuns, isAssignedTo, isPlannedOn } from './task-model'
+import { ConnectDialog, DevicesCard } from '../../components/parent/access'
 
 const STATUS = {
   done: { label: 'сделано', color: tokens.done, bg: tokens.doneSoft },
@@ -26,6 +27,7 @@ export default function ParentChild() {
   const { kids, byAnyId, isLoading } = useKids()
   const kid = byAnyId(childId)
   const [bonus, setBonus] = useState<'bonus' | 'penalty' | null>(null)
+  const [connect, setConnect] = useState(false)
   const { data: completions = [] } = useKidCompletions(kid?.userId, 28)
   const { data: tasks = [] } = useTasks('ACTIVE')
   const { data: wishlist = [] } = useQuery<any[]>({
@@ -86,6 +88,7 @@ export default function ParentChild() {
   return (
     <Layout>
       <PageHeader kicker={`Логин ${kid.login}`} title={kid.name}>
+        <Button variant="outlined" onClick={() => setConnect(true)}>Подключить телефон</Button>
         <Button variant="outlined" color="inherit" onClick={() => setBonus('penalty')}>− Списать</Button>
         <Button variant="contained" onClick={() => setBonus('bonus')}>+ Бонус</Button>
       </PageHeader>
@@ -157,15 +160,18 @@ export default function ParentChild() {
             })}
           </Card>
 
+          <DevicesCard kid={kid} />
+
           <Card sx={{ p: 2.25, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Typography component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>Ещё</Typography>
             <Button component={RouterLink} to={`/parent/children/${kid.userId}/badges`} sx={{ justifyContent: 'flex-start' }}>Бейджи</Button>
             <Button component={RouterLink} to="/parent/reports" state={{ childId: kid.userId }} sx={{ justifyContent: 'flex-start' }}>Отчёт за неделю</Button>
-            <Button component={RouterLink} to="/parent/children/manage" sx={{ justifyContent: 'flex-start' }}>Профиль, вход и пароль</Button>
+            <Button component={RouterLink} to="/parent/children/manage" sx={{ justifyContent: 'flex-start' }}>Имя, фото и PIN</Button>
           </Card>
         </Box>
       </Box>
 
+      {connect && <ConnectDialog kid={kid} onClose={() => setConnect(false)} />}
       {bonus && <BonusDialog open onClose={() => setBonus(null)} childId={kid.userId} initialMode={bonus} />}
     </Layout>
   )

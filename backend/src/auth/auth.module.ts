@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { DeviceTokenService } from './device-token.service';
+import { PairingService } from './pairing.service';
+import { PairingController } from './pairing.controller';
 import { MotivationModule } from '../motivation/motivation.module';
 import { LedgerModule } from '../ledger/ledger.module';
 
@@ -28,8 +30,8 @@ import { LedgerModule } from '../ledger/ledger.module';
       },
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, DeviceTokenService],
-  exports: [AuthService, DeviceTokenService],
+  controllers: [AuthController, PairingController],
+  providers: [AuthService, JwtStrategy, DeviceTokenService, PairingService],
+  exports: [AuthService, DeviceTokenService, PairingService],
 })
 export class AuthModule {}
