@@ -9,6 +9,17 @@ import { getCached, setCached } from '../common/cache/family-settings-cache';
 import { queryForDay, startOfToday } from './day-points';
 import * as bcrypt from 'bcryptjs';
 
+/** Поля users, которые никогда не уходят клиенту: хэши PIN/пароля и картинок-секрета, счётчики блокировки. */
+const SECRET_USER_FIELDS = ['passwordHash', 'secretHash', 'secretFails', 'secretLockedUntil'] as const;
+
+type PublicUser<T> = 0 extends 1 & T ? any : Omit<T, (typeof SECRET_USER_FIELDS)[number]>; // строки DocStore — any
+
+export function publicUser<T extends Record<string, any>>(user: T): PublicUser<T> {
+  const out: any = { ...user };
+  for (const f of SECRET_USER_FIELDS) delete out[f];
+  return out;
+}
+
 @Injectable()
 export class ChildrenService {
   constructor(
@@ -32,7 +43,7 @@ export class ChildrenService {
     return Promise.all(
       users.map(async (user) => {
         const profiles = await this.db.findMany('childProfiles', { userId: user.id });
-        return { ...user, childProfile: profiles[0] ?? null };
+        return { ...publicUser(user), childProfile: profiles[0] ?? null };
       }),
     );
   }
@@ -48,7 +59,7 @@ export class ChildrenService {
     const childProfile = profiles.length > 0 ? profiles[0] : null;
 
     return {
-      ...user,
+      ...publicUser(user),
       childProfile,
     };
   }
@@ -80,7 +91,7 @@ export class ChildrenService {
     const profile = await this.db.findFirst('childProfiles', { id: profileId });
 
     return {
-      ...user,
+      ...publicUser(user),
       childProfile: profile,
     };
   }
