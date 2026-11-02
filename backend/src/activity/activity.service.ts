@@ -117,9 +117,12 @@ export class ActivityService {
         if (!profile) return null;
         const usage = await this.db.findMany(COLLECTION, { childId: profile.id, date });
         const totalMs = usage.reduce((sum: number, r: any) => sum + (r.totalMs || 0), 0);
-        const top = usage
+        const apps = usage
           .map((r: any) => ({ appLabel: r.appLabel || r.packageName, totalMs: r.totalMs || 0 }))
-          .sort((a, b) => b.totalMs - a.totalMs)[0];
+          .sort((a, b) => b.totalMs - a.totalMs);
+        const top = apps[0];
+        // Телефон хоть раз присылал статистику — значит, подключён, просто сегодня пусто.
+        const connected = usage.length > 0 || !!(await this.db.findFirst(COLLECTION, { childId: profile.id }));
         return {
           childId: profile.id,
           userId: user.id,
@@ -127,7 +130,10 @@ export class ActivityService {
           avatarUrl: profile.avatarUrl || null,
           totalMs,
           topApp: top ? top.appLabel : null,
+          topApps: apps.slice(0, 3),
           hasData: usage.length > 0,
+          connected,
+          screenGoalMin: profile.screenGoalMin ?? null,
         };
       }),
     );

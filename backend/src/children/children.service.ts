@@ -115,7 +115,7 @@ export class ChildrenService {
       });
     }
 
-    if (dto.name || dto.avatarUrl !== undefined || dto.selectedCharacterId !== undefined || dto.color || dto.age !== undefined || dto.pet) {
+    if (dto.name || dto.avatarUrl !== undefined || dto.selectedCharacterId !== undefined || dto.color || dto.age !== undefined || dto.pet || dto.screenGoalMin !== undefined) {
       const profiles = await this.db.findMany('childProfiles', { userId: id });
       if (profiles.length > 0) {
         const updateData: any = {};
@@ -130,6 +130,7 @@ export class ChildrenService {
         }
         if (dto.color) updateData.color = dto.color;
         if (dto.age !== undefined) updateData.age = dto.age ?? null;
+        if (dto.screenGoalMin !== undefined) updateData.screenGoalMin = dto.screenGoalMin;
         if (dto.pet) updateData.pet = this.cleanPet(dto.pet, profiles[0].pet);
         await this.db.update('childProfiles', profiles[0].id, updateData);
       }

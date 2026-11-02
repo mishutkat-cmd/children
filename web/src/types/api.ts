@@ -332,5 +332,10 @@ export interface ActivitySummaryRow {
   avatarUrl?: string | null
   totalMs: number
   topApp: string | null
+  topApps?: { appLabel: string; totalMs: number }[]
   hasData: boolean
+  /** Телефон хоть раз присылал статистику. */
+  connected?: boolean
+  /** Мягкая цель в минутах в день; телефон ничего не блокирует. */
+  screenGoalMin?: number | null
 }

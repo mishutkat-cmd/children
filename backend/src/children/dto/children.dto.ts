@@ -94,6 +94,13 @@ export class UpdateChildDto {
   @IsOptional()
   age?: number;
 
+  /** Мягкая цель экранного времени в минутах в день; 0 — без цели. Телефон ничего не блокирует. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(600)
+  screenGoalMin?: number;
+
   @ValidateNested()
   @Type(() => PetDto)
   @IsOptional()
