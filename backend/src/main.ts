@@ -113,6 +113,7 @@ async function bootstrap() {
       const backendPrefixes = [
         '/api',
         '/auth',
+        '/pairing',
         '/children',
         '/badges',
         '/tasks',
