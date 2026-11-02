@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { Exchange, CreateExchangeDto } from '../types/api'
+import type { Exchange } from '../types/api'
 
 export const usePendingExchanges = () => {
   return useQuery<Exchange[]>({
@@ -20,21 +20,6 @@ export const useConversionHistory = () => {
       return response.data || []
     },
     staleTime: 30 * 1000,
-  })
-}
-
-export const useCreateExchange = () => {
-  const queryClient = useQueryClient()
-  
-  return useMutation({
-    mutationFn: async (data: CreateExchangeDto) => {
-      const response = await api.post('/exchanges', data)
-      return response.data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pending-exchanges'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-    },
   })
 }
 

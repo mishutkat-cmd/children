@@ -239,7 +239,8 @@ export class UploadController {
     }
     const safeOriginalName = sanitizeFilename(file.originalname, MIME_TO_EXT[sniffed] || 'bin');
 
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    // Имя не должно угадываться: путь к приватному фото — часть его защиты.
+    const uniqueSuffix = `${Date.now()}-${crypto.randomUUID()}`;
     const objectPath = `${folder}/${folder}-${uniqueSuffix}-${safeOriginalName}`;
 
     try {

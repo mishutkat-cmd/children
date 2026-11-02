@@ -487,6 +487,20 @@ export class ChildrenService {
       }
     }
 
+    // 6b. Слежка: геоточки, последняя позиция, аудио (с файлами), экранное время
+    // и токены устройства — после удаления ребёнка ничего из этого храниться не должно,
+    // а телефон не должен продолжать слать координаты.
+    if (childProfileId) {
+      await this.db.deleteMany('locationPoints', { childId: childProfileId });
+      await this.db.deleteMany('childLocations', { childId: childProfileId });
+      const audio = await this.db.findMany('audioRequests', { childId: childProfileId });
+      await this.storageService.deleteFiles(audio.map((a: any) => a.audioUrl).filter(Boolean));
+      await this.db.deleteMany('audioRequests', { childId: childProfileId });
+      await this.db.deleteMany('audioConsent', { childId: childProfileId });
+      await this.db.deleteMany('appUsage', { childId: childProfileId });
+    }
+    await this.db.deleteMany('deviceTokens', { userId });
+
     // 7. Child profile - удаляем если существует
     if (childProfileId) {
       // Удаляем avatar файл из Firebase Storage если есть

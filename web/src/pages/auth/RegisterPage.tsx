@@ -281,7 +281,7 @@ export default function RegisterPage() {
             {loading ? (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 <CircularProgress size={18} sx={{ color: 'white' }} />
-                <span>{t('auth.registering') || 'Регистрация...'}</span>
+                <span>{t('auth.registering')}</span>
               </Box>
             ) : (
               t('auth.register')

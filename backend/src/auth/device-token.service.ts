@@ -145,6 +145,11 @@ export class DeviceTokenService {
     if (record.revokedAt) {
       throw new UnauthorizedException('Device token revoked');
     }
+    // Пользователь удалён (например, родитель удалил ребёнка) — токен мёртв.
+    const owner = await this.db.findFirst('users', { id: payload.sub });
+    if (!owner) {
+      throw new UnauthorizedException('Device token owner no longer exists');
+    }
 
     this.touch(record).catch(() => {});
 

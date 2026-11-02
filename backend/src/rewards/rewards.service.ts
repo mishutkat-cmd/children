@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { CreateRewardDto, UpdateRewardDto } from './dto/rewards.dto';
+import { RequestUser } from '../common/decorators/user.decorator';
 // Enums заменены на строки для SQLite
 type RewardStatus = 'ACTIVE' | 'ARCHIVED';
 
@@ -26,22 +27,51 @@ export class RewardsService {
     return reward;
   }
 
-  async create(familyId: string, dto: CreateRewardDto) {
+  async create(familyId: string, dto: CreateRewardDto, actor: RequestUser) {
     const rewardId = crypto.randomUUID();
     await this.db.create('rewards', {
       id: rewardId,
       familyId,
       ...dto,
+      // Ребёнок заводит только «желание»: денежную стоимость задаёт родитель.
+      ...(actor.role === 'CHILD' && { moneyValueCents: 0 }),
+      createdByUserId: actor.userId,
       status: 'ACTIVE',
     }, rewardId);
     
     return this.db.findFirst('rewards', { id: rewardId });
   }
 
-  async update(id: string, familyId: string, dto: UpdateRewardDto) {
-    await this.findOne(id, familyId);
+  async update(id: string, familyId: string, dto: UpdateRewardDto, actor: RequestUser) {
+    const reward = await this.findOne(id, familyId);
+    if (actor.role === 'CHILD') {
+      await this.assertChildOwnsReward(reward, actor.userId);
+      const { moneyValueCents, ...rest } = dto as any;
+      dto = rest;
+    }
     await this.db.update('rewards', id, dto);
     return this.db.findFirst('rewards', { id });
+  }
+
+  /**
+   * Ребёнок правит только свои желания. Иначе он мог бы выставить любой
+   * родительской награде цену в 1 балл и тут же её обменять.
+   * Старые записи без createdByUserId — только если желание лежит в его вишлисте.
+   */
+  private async assertChildOwnsReward(reward: any, childUserId: string) {
+    if (reward.createdByUserId) {
+      if (reward.createdByUserId !== childUserId) {
+        throw new ForbiddenException('Можно изменять только свои желания');
+      }
+      return;
+    }
+    const profile = await this.db.findFirst('childProfiles', { userId: childUserId });
+    const inOwnWishlist = profile
+      ? await this.db.findFirst('wishlist', { childId: profile.id, rewardId: reward.id })
+      : null;
+    if (!inOwnWishlist) {
+      throw new ForbiddenException('Можно изменять только свои желания');
+    }
   }
 
   async archive(id: string, familyId: string) {

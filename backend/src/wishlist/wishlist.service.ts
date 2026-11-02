@@ -10,7 +10,17 @@ export class WishlistService {
     private storageService: LocalStorageService,
   ) {}
 
-  async findAll(childId: string) {
+  /** Ребёнок (userId) должен быть из этой семьи — иначе родитель читал бы чужие вишлисты. */
+  private async assertChildInFamily(childUserId: string, familyId: string) {
+    const user = await this.db.findFirst('users', { id: childUserId, familyId });
+    if (!user) {
+      throw new NotFoundException('Child not found');
+    }
+    return user;
+  }
+
+  async findAll(childId: string, familyId: string) {
+    await this.assertChildInFamily(childId, familyId);
     const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
@@ -39,14 +49,15 @@ export class WishlistService {
     }));
   }
 
-  async add(childId: string, dto: AddToWishlistDto) {
+  async add(childId: string, familyId: string, dto: AddToWishlistDto) {
+    await this.assertChildInFamily(childId, familyId);
     const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
     const childProfileId = childProfiles[0].id;
 
-    const reward = await this.db.findFirst('rewards', { id: dto.rewardGoalId });
+    const reward = await this.db.findFirst('rewards', { id: dto.rewardGoalId, familyId });
     if (!reward) {
       throw new NotFoundException('Reward not found');
     }
@@ -138,19 +149,23 @@ export class WishlistService {
     await this.db.delete('wishlist', wishlistId);
   }
 
-  async reorder(childId: string, dto: ReorderWishlistDto) {
+  async reorder(childId: string, familyId: string, dto: ReorderWishlistDto) {
     const childProfiles = await this.db.findMany('childProfiles', { userId: childId });
     if (childProfiles.length === 0) {
       throw new NotFoundException('Child not found');
     }
     const childProfileId = childProfiles[0].id;
 
-    const updates = dto.items.map((item) =>
-      this.db.update('wishlist', item.id, { priority: item.priority })
+    // Только свои пункты: id приходят от клиента.
+    const ownIds = new Set(
+      (await this.db.findMany('wishlist', { childId: childProfileId })).map((i: any) => i.id),
     );
+    const updates = dto.items
+      .filter((item) => ownIds.has(item.id))
+      .map((item) => this.db.update('wishlist', item.id, { priority: item.priority }));
 
     await Promise.all(updates);
-    return this.findAll(childId);
+    return this.findAll(childId, familyId);
   }
 
   /** Награды для списка бажань: один запрос вместо findFirst на каждое. */

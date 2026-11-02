@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { BadgesService } from '../badges/badges.service';
 import { LedgerType, computeBalanceDelta, computeTotalEarnedDelta } from './balance-delta';
@@ -42,6 +42,7 @@ export class LedgerService {
     amount: number,
     refId?: string,
     metaJson?: any,
+    opts: { requireSufficientBalance?: boolean; uniqueRef?: boolean } = {},
   ) {
     try {
       const entryId = crypto.randomUUID();
@@ -81,6 +82,22 @@ export class LedgerService {
       // transaction is tied to the connection, so awaiting inside it would let
       // other work interleave between BEGIN and COMMIT.
       this.db.transaction(() => {
+        // Проверки внутри той же транзакции, что и запись: два параллельных
+        // запроса не могут оба пройти проверку и оба списать.
+        if (opts.uniqueRef && refId) {
+          const dup = this.db.findFirstSync('ledgerEntries', { childId, refType, refId, type });
+          if (dup) {
+            throw new BadRequestException('Операция уже проведена');
+          }
+        }
+        if (opts.requireSufficientBalance && delta < 0) {
+          const current = this.db.findFirstSync('childProfiles', { userId: childId });
+          const balance = current?.pointsBalance ?? 0;
+          if (balance + delta < 0) {
+            throw new BadRequestException(`Недостаточно баллов: доступно ${balance}, нужно ${-delta}`);
+          }
+        }
+
         this.db.createSync('ledgerEntries', entryData, entryId);
 
         const profile = this.db.findFirstSync('childProfiles', { userId: childId });

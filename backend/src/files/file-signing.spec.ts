@@ -114,6 +114,18 @@ describe('signing responses on the way out', () => {
   it('handles null, arrays and primitives', () => {
     expect(signDeep(null)).toBeNull();
     expect(signDeep(42)).toBe(42);
-    expect(signDeep([['/api/v1/files/proofs/a.jpg']])[0][0]).toContain('sig=');
+    expect(signDeep({ proofUrl: [['/api/v1/files/proofs/a.jpg']] }).proofUrl[0][0]).toContain('sig=');
+  });
+
+  it('does not sign private paths stored in user-controlled fields', () => {
+    // Иначе любой мог бы записать чужой путь в imageUrl награды и получить подписанную ссылку.
+    const body = signDeep({
+      imageUrl: '/api/v1/files/proofs/foreign.jpg',
+      avatarUrl: '/api/v1/files/audio/x.m4a',
+      list: ['/api/v1/files/proofs/a.jpg'],
+    });
+    expect(body.imageUrl).toBe('/api/v1/files/proofs/foreign.jpg');
+    expect(body.avatarUrl).toBe('/api/v1/files/audio/x.m4a');
+    expect(body.list[0]).toBe('/api/v1/files/proofs/a.jpg');
   });
 });

@@ -22,6 +22,11 @@ const debug = (...args: any[]) => {
   if (isDev) console.log(...args);
 };
 
+// Ребёнок может отметить задание задним числом не дальше недели; в будущее —
+// только в пределах суток (запас на разницу часовых поясов клиента и сервера).
+const CHILD_MAX_BACKDATE_DAYS = 7;
+const MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class CompletionsService {
   constructor(
@@ -32,7 +37,12 @@ export class CompletionsService {
     private badgesService: BadgesService,
   ) {}
 
-  async create(childId: string, familyId: string, dto: CreateCompletionDto) {
+  async create(
+    childId: string,
+    familyId: string,
+    dto: CreateCompletionDto,
+    actor: 'CHILD' | 'PARENT' = 'CHILD',
+  ) {
     try {
       debug('[CompletionsService] create called:', { childId, familyId, taskId: dto.taskId });
       
@@ -75,6 +85,17 @@ export class CompletionsService {
         throw new NotFoundException('Task not found');
       }
 
+      if (dto.performedAt) {
+        const requested = new Date(dto.performedAt).getTime();
+        const now = Date.now();
+        if (Number.isNaN(requested) || requested > now + MAX_FUTURE_MS) {
+          throw new BadRequestException('Нельзя отметить задание будущей датой');
+        }
+        if (actor === 'CHILD' && requested < now - CHILD_MAX_BACKDATE_DAYS * 24 * 60 * 60 * 1000) {
+          throw new BadRequestException(`Отметить задание можно не позднее чем через ${CHILD_MAX_BACKDATE_DAYS} дней`);
+        }
+      }
+
       // Определяем дату выполнения: используем переданную дату или текущую дату
       let targetDate: Date;
       if (dto.performedAt) {
@@ -113,6 +134,19 @@ export class CompletionsService {
           performedAt: existing.performedAt,
         });
         throw new BadRequestException(`Задание уже выполнено ${dateStr}. Можно выполнить только один раз в день.`);
+      }
+
+      // proofUrl приходит от клиента. Чужое фото (уже привязанное к completion
+      // другой семьи) не даём прицепить — иначе получили бы на него подписанную ссылку.
+      const proofUrl = normalizePrivateFileUrl(dto.proofUrl);
+      if (proofUrl) {
+        if (!proofUrl.startsWith('/api/v1/files/proofs/') && proofUrl.startsWith('/api/v1/files/')) {
+          throw new BadRequestException('Недопустимая ссылка на фото');
+        }
+        const foreign = await this.db.findFirst('completions', { proofUrl });
+        if (foreign && foreign.familyId !== familyId) {
+          throw new BadRequestException('Недопустимая ссылка на фото');
+        }
       }
 
       const requiresApproval = task.requiresParentApproval;
@@ -180,7 +214,7 @@ export class CompletionsService {
         // and a signature that go stale, and would stop the stored value from
         // matching the file it names. Signatures are added per response by
         // SignPrivateUrlsInterceptor, never written to the database.
-        proofUrl: normalizePrivateFileUrl(dto.proofUrl),
+        proofUrl,
         status,
         performedAt,
         createdByUserId: createdByUserId ?? null, // null = родитель, userId = ребенок
@@ -578,12 +612,68 @@ export class CompletionsService {
     if (!completion) {
       throw new NotFoundException('Completion not found');
     }
+    if (completion.status === 'REJECTED') {
+      throw new BadRequestException('Completion is already rejected');
+    }
+
+    // Баллы начисляются сразу при выполнении — при отклонении их нужно забрать,
+    // иначе цикл «отправил → отклонили → отправил снова» печатает баллы.
+    const childProfile = await this.db.findFirst('childProfiles', { id: completion.childId });
+    if (childProfile) {
+      const task = await this.db.findFirst('tasks', { id: completion.taskId });
+      await this.reverseCompletionPoints(completion, childProfile.userId, familyId, task?.title, 'COMPLETION_REJECTED');
+    }
 
     await this.db.update('completions', id, {
       status: 'REJECTED',
     });
     
     return this.db.findFirst('completions', { id });
+  }
+
+  /**
+   * Списать ещё не компенсированные баллы за completion (EARN минус уже
+   * сделанные отмены). Идемпотентно: повторный вызов ничего не спишет.
+   */
+  private async reverseCompletionPoints(
+    completion: any,
+    userId: string,
+    familyId: string,
+    taskTitle: string | undefined,
+    reason: 'COMPLETION_CANCELLED' | 'COMPLETION_REJECTED',
+  ) {
+    const entries = await this.db.findMany('ledgerEntries', {
+      childId: userId,
+      refType: 'COMPLETION',
+      refId: completion.id,
+    });
+    const earned = entries
+      .filter((e) => e.type === 'EARN')
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+    const reversed = entries
+      .filter((e) => {
+        if (e.type !== 'ADJUST') return false;
+        try {
+          const meta = typeof e.metaJson === 'string' ? JSON.parse(e.metaJson) : e.metaJson;
+          return meta?.reason === 'COMPLETION_CANCELLED' || meta?.reason === 'COMPLETION_REJECTED';
+        } catch {
+          return false;
+        }
+      })
+      .reduce((sum, e) => sum + Math.abs(e.amount || 0), 0);
+
+    const remaining = earned - reversed;
+    if (remaining > 0) {
+      await this.ledgerService.createEntry(
+        familyId,
+        userId,
+        'ADJUST',
+        'COMPLETION',
+        -remaining,
+        completion.id,
+        { taskTitle: taskTitle || 'Unknown', reason },
+      );
+    }
   }
 
   // Отметить задание как не выполненное (отменить completion)
@@ -669,7 +759,7 @@ export class CompletionsService {
     const cancelledAdjustEntries = adjustEntries.filter(entry => {
       try {
         const meta = typeof entry.metaJson === 'string' ? JSON.parse(entry.metaJson) : entry.metaJson;
-        return meta?.reason === 'COMPLETION_CANCELLED';
+        return meta?.reason === 'COMPLETION_CANCELLED' || meta?.reason === 'COMPLETION_REJECTED';
       } catch {
         return false;
       }

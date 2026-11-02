@@ -1,4 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Headers, NotFoundException } from '@nestjs/common';
+import { timingSafeEqual } from 'crypto';
 import { DocStore } from '../db/doc-store.service';
 import { envFileUsed } from '../config/env';
 import { existsSync } from 'fs';
@@ -143,7 +144,18 @@ export class HealthController {
   }
 
   @Get('diagnostics')
-  getDiagnostics(): Record<string, unknown> {
+  getDiagnostics(@Headers('x-diagnostics-token') token?: string): Record<string, unknown> {
+    // Пути, БД и env-файл наружу не светим: только с DIAGNOSTICS_TOKEN, иначе 404.
+    const expected = process.env.DIAGNOSTICS_TOKEN || '';
+    const given = token || '';
+    if (
+      !expected ||
+      given.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(given), Buffer.from(expected))
+    ) {
+      throw new NotFoundException();
+    }
+
     const fs = require('fs');
     const cwd = process.cwd();
     const portPresent = process.env.PORT !== undefined && process.env.PORT !== '';

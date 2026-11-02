@@ -7,6 +7,7 @@ import CssBaseline from '@mui/material/CssBaseline'
 import App from './App'
 import kidsTheme from './theme'
 import ErrorBoundary from './components/ErrorBoundary'
+import { useAuthStore } from './store/authStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,12 @@ const queryClient = new QueryClient({
       retry: 0,
     },
   },
+})
+
+// Сменился пользователь (выход, вход другим, 401) — кэш прошлого пользователя
+// не должен показаться следующему. Одно место вместо clear() в каждом logout.
+useAuthStore.subscribe((state, prev) => {
+  if (state.user?.id !== prev.user?.id) queryClient.clear()
 })
 
 // Экспортируем queryClient для использования в других местах

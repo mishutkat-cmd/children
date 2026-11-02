@@ -24,7 +24,7 @@ export class WishlistController {
   @Get('child/wishlist')
   @Roles('CHILD')
   findAll(@User() user: RequestUser) {
-    return this.wishlistService.findAll(user.userId);
+    return this.wishlistService.findAll(user.userId, user.familyId);
   }
 
   @Get('parent/wishlist')
@@ -32,7 +32,7 @@ export class WishlistController {
   findAllForParent(@User() user: RequestUser, @Query('childId') childId?: string) {
     if (childId) {
       // Возвращаем wishlist конкретного ребенка
-      return this.wishlistService.findAll(childId);
+      return this.wishlistService.findAll(childId, user.familyId);
     }
     // Возвращаем wishlist всех детей семьи
     return this.wishlistService.findAllForFamily(user.familyId);
@@ -41,7 +41,7 @@ export class WishlistController {
   @Post('parent/wishlist')
   @Roles('PARENT')
   addForChild(@User() user: RequestUser, @Body() dto: AddToWishlistForChildDto) {
-    return this.wishlistService.add(dto.childId, { 
+    return this.wishlistService.add(dto.childId, user.familyId, { 
       rewardGoalId: dto.rewardGoalId,
       year: dto.year,
       status: dto.status,
@@ -51,7 +51,7 @@ export class WishlistController {
   @Post('child/wishlist')
   @Roles('CHILD')
   add(@User() user: RequestUser, @Body() dto: AddToWishlistDto) {
-    return this.wishlistService.add(user.userId, dto);
+    return this.wishlistService.add(user.userId, user.familyId, dto);
   }
 
   @Delete('child/wishlist/:id')
@@ -69,7 +69,7 @@ export class WishlistController {
   @Post('child/wishlist/reorder')
   @Roles('CHILD')
   reorder(@User() user: RequestUser, @Body() dto: ReorderWishlistDto) {
-    return this.wishlistService.reorder(user.userId, dto);
+    return this.wishlistService.reorder(user.userId, user.familyId, dto);
   }
 
   @Patch('parent/wishlist/:id')

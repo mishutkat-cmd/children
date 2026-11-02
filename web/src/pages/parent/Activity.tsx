@@ -14,6 +14,7 @@ import {
 import Layout from '../../components/Layout'
 import { colors } from '../../theme'
 import { useActivitySummary, useChildActivity, useChildActivityHistory } from '../../hooks/useActivity'
+import { formatDateForAPI } from '../../utils/dateUtils'
 
 const fmt = (ms: number) => {
   const min = Math.round(ms / 60000)
@@ -64,7 +65,7 @@ function ActivityDetail({ childId }: { childId: string }) {
 }
 
 export default function ParentActivity() {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = formatDateForAPI(new Date())
   const { data: summary = [], isLoading } = useActivitySummary(today)
   const [selected, setSelected] = useState<string | null>(null)
   const { data: detail } = useChildActivity(selected, today)

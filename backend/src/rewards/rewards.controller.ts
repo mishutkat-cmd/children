@@ -29,7 +29,7 @@ export class RewardsController {
   @UseGuards(RolesGuard)
   @Roles('PARENT', 'CHILD')
   create(@User() user: RequestUser, @Body() dto: CreateRewardDto) {
-    return this.rewardsService.create(user.familyId, dto);
+    return this.rewardsService.create(user.familyId, dto, user);
   }
 
   @Patch(':id')
@@ -40,7 +40,7 @@ export class RewardsController {
     @Param('id') id: string,
     @Body() dto: UpdateRewardDto,
   ) {
-    return this.rewardsService.update(id, user.familyId, dto);
+    return this.rewardsService.update(id, user.familyId, dto, user);
   }
 
   @Post(':id/archive')

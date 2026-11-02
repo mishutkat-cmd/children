@@ -6,6 +6,14 @@ import { signFileUrlFromStored } from './file-signing';
 const PRIVATE_PREFIX = '/api/v1/files/';
 
 /**
+ * Подписываем только поля, которые пишет сервер (или которые проверяются при
+ * записи): proofUrl, audioUrl и `url` из ответа загрузки. Любое другое поле
+ * (imageUrl награды, avatarUrl, title…) пользователь может заполнить чужим
+ * приватным путём — и получить на него подписанную ссылку.
+ */
+const SIGNABLE_KEYS = new Set(['proofUrl', 'audioUrl', 'url']);
+
+/**
  * Sign every private-file URL on its way out of the API.
  *
  * Completions carrying a proofUrl are returned from a dozen places — the
@@ -30,15 +38,18 @@ export class SignPrivateUrlsInterceptor implements NestInterceptor {
  * character, so the walk costs little even on responses with thousands of
  * documents.
  */
-export function signDeep(value: any): any {
+export function signDeep(value: any, key?: string): any {
   if (typeof value === 'string') {
-    return value.charCodeAt(0) === 47 /* '/' */ && value.startsWith(PRIVATE_PREFIX)
+    return key !== undefined &&
+      SIGNABLE_KEYS.has(key) &&
+      value.charCodeAt(0) === 47 /* '/' */ &&
+      value.startsWith(PRIVATE_PREFIX)
       ? signFileUrlFromStored(value)
       : value;
   }
 
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) value[i] = signDeep(value[i]);
+    for (let i = 0; i < value.length; i++) value[i] = signDeep(value[i], key);
     return value;
   }
 
@@ -47,6 +58,6 @@ export function signDeep(value: any): any {
     return value;
   }
 
-  for (const key of Object.keys(value)) value[key] = signDeep(value[key]);
+  for (const k of Object.keys(value)) value[k] = signDeep(value[k], k);
   return value;
 }

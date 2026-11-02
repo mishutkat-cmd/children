@@ -84,16 +84,19 @@ export class ActivityService {
   }
 
   /** Итог экранного времени по дням за последние N дней (для тренда). */
-  async history(familyId: string, childIdOrUserId: string, days = 7) {
+  async history(familyId: string, childIdOrUserId: string, days = 7, endDate = new Date().toISOString().slice(0, 10)) {
     const resolved = await getChildProfileId(this.db, childIdOrUserId, familyId);
     if (!resolved) throw new NotFoundException('Child not found in this family');
     const childId = resolved.childProfileId;
 
     const window = Math.min(Math.max(days, 1), 30);
     const out: { date: string; totalMs: number }[] = [];
+    // Шагаем по календарным дням от endDate (локальный «сегодня» клиента).
+    // Арифметика в UTC над полуночью этой даты — без сдвигов от пояса сервера.
+    const end = new Date(`${endDate}T00:00:00Z`);
     for (let i = window - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+      const d = new Date(end);
+      d.setUTCDate(d.getUTCDate() - i);
       const date = d.toISOString().slice(0, 10);
       const rows = await this.db.findMany(COLLECTION, { childId, date });
       const totalMs = rows.reduce((sum: number, r: any) => sum + (r.totalMs || 0), 0);

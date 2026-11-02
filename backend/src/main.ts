@@ -12,6 +12,10 @@ async function bootstrap() {
     logger: isProd ? ['error', 'warn', 'log'] : ['error', 'warn', 'log', 'debug', 'verbose'],
   });
 
+  // Перед приложением стоит Caddy: доверяем ровно одному хопу, чтобы req.ip
+  // (ключ ThrottlerGuard) был адресом клиента, а не прокси — иначе весь сайт
+  // делит одну корзину лимитов.
+  app.set('trust proxy', 1);
 
   app.useGlobalPipes(
     new ValidationPipe({

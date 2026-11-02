@@ -9,6 +9,7 @@ export interface JwtPayload {
   email?: string;
   role: string;
   familyId: string;
+  scope?: string;
 }
 
 @Injectable()
@@ -30,6 +31,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(payload: JwtPayload) {
     try {
+      // Скоуповые токены (токен устройства для геоточек) — не логин.
+      if (payload.scope) {
+        throw new UnauthorizedException('Scoped token is not accepted here');
+      }
+
       const user = await this.db.findFirst('users', { id: payload.sub });
 
       if (!user) {

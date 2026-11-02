@@ -62,14 +62,17 @@ export class BadgesController {
 
   @Get('parent/child/:childId/badges')
   @Roles('PARENT')
-  getChildBadgesForParent(@User() user: RequestUser, @Param('childId') childId: string) {
+  async getChildBadgesForParent(@User() user: RequestUser, @Param('childId') childId: string) {
+    await this.badgesService.assertChildInFamily(childId, user.familyId);
     return this.badgesService.getChildBadges(childId);
   }
 
   @Post('child/badges/award')
   @Roles('PARENT')
-  awardBadge(@User() user: RequestUser, @Body() dto: AwardBadgeDto & { childId: string }) {
-    return this.badgesService.awardBadge(dto.childId, { badgeId: dto.badgeId });
+  async awardBadge(@User() user: RequestUser, @Body() dto: AwardBadgeDto & { childId: string }) {
+    await this.badgesService.assertChildInFamily(dto.childId, user.familyId);
+    const badge = await this.badgesService.findBadgeVisibleToFamily(dto.badgeId, user.familyId);
+    return this.badgesService.awardBadge(dto.childId, { badgeId: badge.id });
   }
 
   /**

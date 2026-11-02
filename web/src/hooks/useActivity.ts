@@ -1,8 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { ActivitySummaryRow, ChildActivity } from '../types/api'
+import { formatDateForAPI } from '../utils/dateUtils'
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// Локальный календарный день: устройство ребёнка подписывает срезы так же.
+// toISOString() дал бы UTC-дату — вчера/завтра в зависимости от пояса.
+const todayStr = () => formatDateForAPI(new Date())
 
 /** Итог экранного времени по всем детям за день. */
 export const useActivitySummary = (date?: string, enabled = true) => {
@@ -28,9 +31,11 @@ export const useChildActivity = (childId: string | null, date?: string) => {
 
 import type { ActivityHistory } from '../types/api'
 export const useChildActivityHistory = (childId: string | null, days = 7) => {
+  const to = todayStr()
   return useQuery<ActivityHistory>({
-    queryKey: ['activity-history', childId, days],
-    queryFn: async () => (await api.get(`/activity/children/${childId}/history?days=${days}`)).data,
+    // Дата в ключе: вкладка, открытая через полночь, перезапросит новую неделю.
+    queryKey: ['activity-history', childId, days, to],
+    queryFn: async () => (await api.get(`/activity/children/${childId}/history?days=${days}&to=${to}`)).data,
     enabled: !!childId,
     staleTime: 60_000,
   })

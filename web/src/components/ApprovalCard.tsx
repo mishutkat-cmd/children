@@ -160,7 +160,7 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
                   boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                 },
               }}
-              onClick={() => window.open(completion.proofUrl, '_blank')}
+              onClick={() => window.open(completion.proofUrl, '_blank', 'noopener,noreferrer')}
               onError={(e: any) => {
                 e.target.style.display = 'none'
               }}

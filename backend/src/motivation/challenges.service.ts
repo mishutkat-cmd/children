@@ -317,6 +317,8 @@ export class ChallengesService {
           challengeTitle: challenge.title,
           challengeId: challenge.id,
         },
+        // Параллельные проверки не должны начислить награду дважды.
+        { uniqueRef: true },
       );
     }
 

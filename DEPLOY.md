@@ -216,12 +216,14 @@ TLS Caddy получает сам у Let's Encrypt — отдельной нас
   живой процесс от неспособного прочитать ни одного документа
 - **GET `/diagnostics`** — `cwd`, `portPresent`, `envFileUsed`, `database` (путь,
   число документов, **доступность на запись**), `uploads`, `secretsPathsExist`,
-  `frontendConfiguredPathExists`, `mode` (port/socket)
+  `frontendConfiguredPathExists`, `mode` (port/socket). Закрыт: нужен заголовок
+  `X-Diagnostics-Token` со значением `DIAGNOSTICS_TOKEN` из env; без него (или если
+  переменная не задана) — 404
 - **GET `/frontend/status`** — найден ли SPA build, какие пути проверены
 
 ```bash
 curl https://children.evolvenext.net/health
-curl https://children.evolvenext.net/diagnostics
+curl -H "X-Diagnostics-Token: $DIAGNOSTICS_TOKEN" https://children.evolvenext.net/diagnostics
 curl https://children.evolvenext.net/frontend/status
 ```
 

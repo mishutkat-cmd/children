@@ -28,17 +28,9 @@ export const useChildSummary = (id: string) => {
     queryKey: ['child-summary', id],
     queryFn: async () => {
       if (!id) return null
-      try {
-        const response = await api.get(`/children/${id}/summary`)
-        return response.data
-      } catch (error: any) {
-        // Логируем только в development
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Failed to fetch child summary:', error)
-        }
-        // Возвращаем null вместо ошибки
-        return null
-      }
+      // Ошибку не глотаем: иначе 500 выглядит как «нет данных», а retry бесполезен.
+      const response = await api.get(`/children/${id}/summary`)
+      return response.data
     },
     enabled: !!id,
     retry: 1,
@@ -52,20 +44,13 @@ export const useChildrenStatistics = (date?: Date) => {
   return useQuery<ChildStatistics[]>({
     queryKey: ['children-statistics', dateString],
     queryFn: async () => {
-      try {
-        const url = dateString 
-          ? `/children/statistics/points-money?date=${dateString}`
-          : '/children/statistics/points-money'
-        const response = await api.get(url)
-        return response.data || []
-      } catch (error: any) {
-        // Логируем только в development
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Failed to fetch children statistics:', error)
-        }
-        // Возвращаем пустой массив вместо ошибки
-        return []
-      }
+      // Ошибку не глотаем: пустой массив вместо ошибки прятал падение сервера
+      // за «детей нет» и сбрасывал выбранную вкладку в Tasks.
+      const url = dateString
+        ? `/children/statistics/points-money?date=${dateString}`
+        : '/children/statistics/points-money'
+      const response = await api.get(url)
+      return response.data || []
     },
     retry: 1,
     staleTime: 30 * 1000,

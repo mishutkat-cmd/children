@@ -76,7 +76,12 @@ api.interceptors.response.use(
       return api(cfg)
     }
 
-    if (error.response?.status === 401) {
+    // 401 от входа/смены пароля — это «неверный пароль», а не протухшая сессия:
+    // разлогинивать и уводить со страницы нельзя, ошибку покажет сама форма.
+    const url = error.config?.url || ''
+    const isCredentialCheck = /\/auth\/(login|child-pin-login|change-password|register)\b/.test(url)
+
+    if (error.response?.status === 401 && !isCredentialCheck) {
       if (import.meta.env.DEV) {
         console.warn('401 Unauthorized - редирект на /login')
       }

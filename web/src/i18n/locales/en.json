@@ -52,6 +52,7 @@
     "backendNotRunning": "Backend not running! Run: cd backend && npm run start:dev",
     "noAccount": "Don't have an account?",
     "register": "Sign up",
+    "registering": "Registering...",
     "registerTitle": "Sign up",
     "email": "Email",
     "name": "Name",
@@ -119,7 +120,10 @@
     "audio": {
       "listen": "Listen to surroundings",
       "waiting": "Waiting for the child to allow…",
-      "recordingFrom": "Recording from {{name}}"
+      "recordingFrom": "Recording from {{name}}",
+      "denied": "The child declined the recording",
+      "expired": "The child did not respond in time",
+      "failed": "Could not send the request"
     }
   },
   "achievement": {

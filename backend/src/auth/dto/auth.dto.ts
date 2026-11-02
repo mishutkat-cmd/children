@@ -18,10 +18,6 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   name?: string;
-
-  @IsString()
-  @IsOptional()
-  familyId?: string;
 }
 
 export class LoginDto {
@@ -51,10 +47,7 @@ export class UpdateProfileDto {
   @IsOptional()
   email?: string;
 
-  @IsString()
-  @IsOptional()
-  @MinLength(6)
-  password?: string;
+  // Пароль здесь не меняется: только через /auth/change-password с текущим паролем.
 
   @IsString()
   @IsOptional()

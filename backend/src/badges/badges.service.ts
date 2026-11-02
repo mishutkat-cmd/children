@@ -371,6 +371,24 @@ export class BadgesService {
     return { success: true };
   }
 
+  /** Бейдж семьи или системный (без familyId) — чужой семейный бейдж не выдаём. */
+  async findBadgeVisibleToFamily(badgeId: string, familyId: string) {
+    const badge = await this.db.findFirst('badges', { id: badgeId });
+    if (!badge || (badge.familyId && badge.familyId !== familyId)) {
+      throw new NotFoundException('Badge not found');
+    }
+    return badge;
+  }
+
+  /** Для родительских ручек: ребёнок и бейдж должны быть из семьи родителя. */
+  async assertChildInFamily(childId: string, familyId: string) {
+    const { userId } = await this.resolveChildProfile(childId);
+    const user = await this.db.findFirst('users', { id: userId, familyId });
+    if (!user) {
+      throw new NotFoundException(`Child profile not found for id: ${childId}`);
+    }
+  }
+
   async getChildBadges(childId: string) {
     const { childProfileId } = await this.resolveChildProfile(childId);
 

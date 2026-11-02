@@ -27,6 +27,12 @@ export class ExchangesService {
     const childProfileId = child.id;
     const userId = child.userId;
 
+    // Родитель передаёт childId в теле — он должен быть из его семьи.
+    const childUser = await this.db.findFirst('users', { id: userId, familyId });
+    if (!childUser) {
+      throw new NotFoundException(`Child not found: ${childId}`);
+    }
+
     let pointsSpent = 0;
     let rewardGoal = null;
 
@@ -90,16 +96,10 @@ export class ExchangesService {
       ...(status === 'APPROVED' && { approvedAt: new Date() }),
     };
     
-    try {
-      await this.db.create('exchanges', exchangeData, exchangeId);
-    } catch (error: any) {
-      console.error('[ExchangesService] Error creating exchange:', error.message);
-      throw error;
-    }
-
-    // Для конвертации в деньги - сразу списываем баллы и обновляем баланс денег
+    // Для конвертации в деньги - сразу списываем баллы. Списание идёт ДО
+    // записи обмена: баланс проверяется атомарно в транзакции ledger, и при
+    // нехватке баллов не остаётся «одобренного» обмена без списания.
     if (dto.cashCents && status === 'APPROVED') {
-      // Списываем баллы через ledger
       await this.ledgerService.createEntry(
         familyId,
         userId,
@@ -111,10 +111,22 @@ export class ExchangesService {
           cashCents: dto.cashCents,
           reason: 'POINTS_TO_MONEY_CONVERSION',
         },
+        { requireSufficientBalance: true, uniqueRef: true },
       );
-      
-      // Обновляем общую сумму заработанных денег ребенка
-      const currentMoneyEarned = (child.moneyBalanceCents || 0) + dto.cashCents;
+    }
+
+    try {
+      await this.db.create('exchanges', exchangeData, exchangeId);
+    } catch (error: any) {
+      console.error('[ExchangesService] Error creating exchange:', error.message);
+      throw error;
+    }
+
+    if (dto.cashCents && status === 'APPROVED') {
+      // Перечитываем профиль: между началом запроса и этим местом мог пройти
+      // другой обмен, и сумма из устаревшей копии затёрла бы его.
+      const freshChild = await this.db.findFirst('childProfiles', { id: childProfileId });
+      const currentMoneyEarned = (freshChild?.moneyBalanceCents || 0) + dto.cashCents;
       await this.db.update('childProfiles', childProfileId, {
         moneyBalanceCents: currentMoneyEarned,
       });
@@ -203,22 +215,15 @@ export class ExchangesService {
       throw new BadRequestException('Exchange is not pending');
     }
 
-    await this.db.update('exchanges', id, {
-      status: 'APPROVED',
-      decidedAt: new Date(),
-    });
-
-    const updated = await this.db.findFirst('exchanges', { id });
-
-    // Create ledger entry (spend points)
     // Получаем userId из childProfile для ledger
     const childProfile = await this.db.findFirst('childProfiles', { id: exchange.childId });
     if (!childProfile) {
       throw new NotFoundException('Child profile not found');
     }
     const userId = childProfile.userId;
-    
-    // exchange.childId это childProfileId, но для ledger нужен userId
+
+    // Сначала списание (атомарно: баланс не уйдёт в минус, повторное
+    // одобрение того же обмена не спишет дважды), потом статус.
     await this.ledgerService.createEntry(
       familyId,
       userId,
@@ -230,9 +235,15 @@ export class ExchangesService {
         rewardGoalId: exchange.rewardId,
         cashCents: exchange.cashCents,
       },
+      { requireSufficientBalance: true, uniqueRef: true },
     );
 
-    return updated;
+    await this.db.update('exchanges', id, {
+      status: 'APPROVED',
+      decidedAt: new Date(),
+    });
+
+    return this.db.findFirst('exchanges', { id });
   }
 
   async reject(id: string, familyId: string) {

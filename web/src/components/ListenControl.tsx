@@ -20,6 +20,8 @@ export default function ListenControl({ childId, childName }: { childId: string;
   const [requestId, setRequestId] = useState<string | null>(null)
   const { data: request } = useAudioRequest(requestId)
   const notifiedRef = useRef<string | null>(null)
+  // Почему кнопка снова «Послушать»: отказ, тайм-аут или ошибка запроса.
+  const [notice, setNotice] = useState<string | null>(null)
 
   const audioUrl =
     request?.status === 'READY' && request.audioUrl ? `${API_BASE_URL}${request.audioUrl}` : null
@@ -28,14 +30,20 @@ export default function ListenControl({ childId, childName }: { childId: string;
     if (!request || notifiedRef.current === request.id) return
     if (request.status === 'DENIED' || request.status === 'EXPIRED') {
       notifiedRef.current = request.id
+      setNotice(t(request.status === 'DENIED' ? 'parent.audio.denied' : 'parent.audio.expired'))
       setRequestId(null)
     }
-  }, [request])
+  }, [request, t])
 
   const start = async () => {
-    const created = await requestAudio.mutateAsync({ childId })
-    notifiedRef.current = null
-    setRequestId(created.id)
+    setNotice(null)
+    try {
+      const created = await requestAudio.mutateAsync({ childId })
+      notifiedRef.current = null
+      setRequestId(created.id)
+    } catch (error: any) {
+      setNotice(error?.response?.data?.message || t('parent.audio.failed'))
+    }
   }
 
   const waiting = !!requestId && (request?.status === 'PENDING' || requestAudio.isPending)
@@ -64,14 +72,21 @@ export default function ListenControl({ childId, childName }: { childId: string;
   }
 
   return (
-    <Button
-      size="small"
-      startIcon={requestAudio.isPending ? <CircularProgress size={14} /> : <MicIcon />}
-      onClick={start}
-      disabled={requestAudio.isPending}
-      sx={{ mt: 1 }}
-    >
-      {t('parent.audio.listen')}
-    </Button>
+    <Box>
+      <Button
+        size="small"
+        startIcon={requestAudio.isPending ? <CircularProgress size={14} /> : <MicIcon />}
+        onClick={start}
+        disabled={requestAudio.isPending}
+        sx={{ mt: 1 }}
+      >
+        {t('parent.audio.listen')}
+      </Button>
+      {notice && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          {notice}
+        </Typography>
+      )}
+    </Box>
   )
 }

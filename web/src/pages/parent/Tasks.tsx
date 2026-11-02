@@ -77,6 +77,12 @@ import {
 } from '../../hooks'
 import type { Task, Challenge, ChildStatistics } from '../../types/api'
 
+// Выбранный в календаре день отправляем как локальный полдень: локальная
+// полночь в toISOString() для UTC+N — это уже предыдущие сутки, и сервер
+// записывал отметку на вчера.
+const localNoonISO = (d: Date) =>
+  new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0).toISOString()
+
 const EMOJI_OPTIONS = [
   // Учёба
   '📝', '📚', '✏️', '📖', '🎓', '🔬', '🧮', '📐', '🖊️', '📊',
@@ -539,8 +545,10 @@ export default function ParentTasks() {
         // Сохраняем валидное значение
         localStorage.setItem('tasks-tab-index', String(tabIndex))
       }
-    } else {
-      // Если childrenStats еще не загружены или пусты, сбрасываем на 0
+    } else if (childrenStats) {
+      // Загружено, но детей нет — сбрасываем на «Все дети». Пока данные
+      // не пришли (undefined), ничего не трогаем: иначе сохранённая вкладка
+      // затиралась бы при каждой загрузке страницы.
       if (tabIndex !== 0) {
         if (process.env.NODE_ENV === 'development') {
           console.warn('[Tasks] childrenStats not loaded, resetting tabIndex to 0')
@@ -1508,7 +1516,7 @@ export default function ParentTasks() {
                           if (!selectedChildId) return
                           setMarkingTaskId(task.id)
                           createCompletionForChild.mutate(
-                            { taskId: task.id, childId: selectedChildId, performedAt: selectedDate ? selectedDate.toISOString() : undefined },
+                            { taskId: task.id, childId: selectedChildId, performedAt: selectedDate ? localNoonISO(selectedDate) : undefined },
                             {
                               // Инвалидацию делает сама мутация (useCompletions),
                               // здесь достаточно снять спиннер с кнопки.
@@ -1521,7 +1529,7 @@ export default function ParentTasks() {
                           if (!selectedChildId) return
                           setNotCompletingTaskId(task.id)
                           markAsNotCompleted.mutate(
-                            { taskId: task.id, childId: selectedChildId, date: selectedDate ? selectedDate.toISOString() : undefined },
+                            { taskId: task.id, childId: selectedChildId, date: selectedDate ? localNoonISO(selectedDate) : undefined },
                             {
                               onSuccess: () => setNotCompletingTaskId(null),
                               onError: () => setNotCompletingTaskId(null),

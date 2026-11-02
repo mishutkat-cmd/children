@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DocStore } from '../db/doc-store.service';
+import { LocalStorageService } from '../files/local-storage.service';
 
 /**
  * Age-based retention.
@@ -27,7 +28,10 @@ import { DocStore } from '../db/doc-store.service';
 export class RetentionService {
   private readonly logger = new Logger(RetentionService.name);
 
-  constructor(private readonly db: DocStore) {}
+  constructor(
+    private readonly db: DocStore,
+    @Optional() private readonly storage?: LocalStorageService,
+  ) {}
 
   static windowDays(variable: string, fallback = 0): number {
     const raw = process.env[variable];
@@ -46,7 +50,38 @@ export class RetentionService {
   async sweep(): Promise<{ notifications: number; completions: number }> {
     const notifications = await this.sweepNotifications();
     const completions = await this.sweepCompletions();
+    // Аудио и экранное время получают expiresAt при записи (7 и 30 дней) —
+    // этот sweep выполняет обещание, которое даёт родителю/ребёнку интерфейс.
+    await this.sweepExpiredAudio();
+    await this.sweepExpired('appUsage');
     return { notifications, completions };
+  }
+
+  async sweepExpiredAudio(): Promise<number> {
+    try {
+      const expired = await this.db.findMany('audioRequests', { expiresAt: { lt: new Date() } });
+      if (!expired.length) return 0;
+      if (this.storage) {
+        await this.storage.deleteFiles(expired.map((r: any) => r.audioUrl).filter(Boolean));
+      }
+      const removed = await this.db.deleteMany('audioRequests', { expiresAt: { lt: new Date() } });
+      this.logger.log(`[retention] removed ${removed} expired audio request(s)`);
+      return removed;
+    } catch (error: any) {
+      this.logger.error(`[retention] audio sweep failed: ${error?.message}`);
+      return 0;
+    }
+  }
+
+  async sweepExpired(collection: string): Promise<number> {
+    try {
+      const removed = await this.db.deleteMany(collection, { expiresAt: { lt: new Date() } });
+      if (removed > 0) this.logger.log(`[retention] removed ${removed} expired ${collection} row(s)`);
+      return removed;
+    } catch (error: any) {
+      this.logger.error(`[retention] ${collection} sweep failed: ${error?.message}`);
+      return 0;
+    }
   }
 
   async sweepNotifications(dryRun = false): Promise<number> {

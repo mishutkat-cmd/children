@@ -52,6 +52,7 @@
     "backendNotRunning": "Backend не запущено! Запустіть: cd backend && npm run start:dev",
     "noAccount": "Немає облікового запису?",
     "register": "Зареєструватися",
+    "registering": "Реєстрація...",
     "registerTitle": "Реєстрація",
     "email": "Email",
     "name": "Ім'я",
@@ -122,7 +123,10 @@
     "audio": {
       "listen": "Послухати, що навколо",
       "waiting": "Чекаємо згоди дитини…",
-      "recordingFrom": "Запис від {{name}}"
+      "recordingFrom": "Запис від {{name}}",
+      "denied": "Дитина не дозволила запис",
+      "expired": "Дитина не відповіла вчасно",
+      "failed": "Не вдалося надіслати запит"
     }
   },
   "achievement": {

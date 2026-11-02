@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { DocStore } from '../db/doc-store.service';
@@ -16,6 +16,11 @@ import { LoginDto, RegisterDto, ChildPinLoginDto, UpdateProfileDto, ChangePasswo
  */
 const BCRYPT_COST = 12;
 
+// Блокировка подбора по аккаунту (поверх лимита по IP): PIN из 4 цифр иначе
+// перебирается с ротацией адресов. Память процесса — сбрасывается рестартом, этого достаточно.
+const LOCKOUT_MAX_FAILURES = 10;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+
 /**
  * Detect whether a stored hash uses a cost lower than BCRYPT_COST.
  * bcryptjs.getRounds() returns the cost factor encoded in the hash;
@@ -32,6 +37,30 @@ function needsRehash(hash: string): boolean {
 
 @Injectable()
 export class AuthService {
+  private readonly failedLogins = new Map<string, { count: number; firstAt: number }>();
+
+  private assertNotLocked(userId: string) {
+    const entry = this.failedLogins.get(userId);
+    if (!entry) return;
+    if (Date.now() - entry.firstAt > LOCKOUT_WINDOW_MS) {
+      this.failedLogins.delete(userId);
+      return;
+    }
+    if (entry.count >= LOCKOUT_MAX_FAILURES) {
+      throw new HttpException('Слишком много неудачных попыток. Попробуйте через 15 минут.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+  }
+
+  private recordFailedLogin(userId: string) {
+    const now = Date.now();
+    const entry = this.failedLogins.get(userId);
+    if (!entry || now - entry.firstAt > LOCKOUT_WINDOW_MS) {
+      this.failedLogins.set(userId, { count: 1, firstAt: now });
+    } else {
+      entry.count++;
+    }
+  }
+
   constructor(
     private db: DocStore,
     private jwtService: JwtService,
@@ -65,7 +94,9 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_COST);
-    const familyId = dto.familyId || crypto.randomUUID();
+    // Публичная регистрация всегда создаёт новую семью: familyId от клиента
+    // не принимаем, иначе любой (в т.ч. ребёнок) мог бы вступить в чужую семью родителем.
+    const familyId = crypto.randomUUID();
     const userId = crypto.randomUUID();
 
     // Создаем пользователя в Firestore
@@ -128,16 +159,6 @@ export class AuthService {
 
       if (!user) {
         console.error('[AuthService] User not found');
-        // Проверяем, есть ли вообще пользователи в базе
-        try {
-          const allUsers = await this.db.findMany('users', {}, {}, 5);
-          console.log('[AuthService] Total users in database:', allUsers.length);
-          if (allUsers.length > 0) {
-            console.log('[AuthService] Sample users:', allUsers.map(u => ({ id: u.id, login: u.login, email: u.email })));
-          }
-        } catch (err: any) {
-          console.error('[AuthService] Error checking users:', err.message);
-        }
         throw new UnauthorizedException('Invalid credentials');
       }
 
@@ -149,13 +170,16 @@ export class AuthService {
       }
 
       console.log('[AuthService] Comparing password...');
+      this.assertNotLocked(user.id);
       const isValid = await bcrypt.compare(dto.password, user.passwordHash);
       if (!isValid) {
+        this.recordFailedLogin(user.id);
         console.error('[AuthService] Invalid password');
         throw new UnauthorizedException('Invalid credentials');
       }
 
       console.log('[AuthService] Password valid');
+      this.failedLogins.delete(user.id);
 
       // Transparent cost upgrade for legacy 10-round hashes.
       void this.maybeRehashPassword(user.id, dto.password, user.passwordHash);
@@ -175,7 +199,7 @@ export class AuthService {
     } catch (error: any) {
       console.error('[AuthService] Login error:', error.message);
       console.error('[AuthService] Error stack:', error.stack);
-      if (error instanceof UnauthorizedException) {
+      if (error instanceof HttpException) {
         throw error;
       }
       throw new UnauthorizedException('Login failed: ' + error.message);
@@ -209,13 +233,16 @@ export class AuthService {
       throw new UnauthorizedException('PIN не установлен. Обратитесь к родителю.');
     }
 
+    this.assertNotLocked(user.id);
     const pinValid = await bcrypt.compare(dto.pin, user.passwordHash);
     if (!pinValid) {
+      this.recordFailedLogin(user.id);
       console.error('[AuthService] Invalid PIN');
       throw new UnauthorizedException('Неверный PIN');
     }
 
     console.log('[AuthService] PIN verified successfully');
+    this.failedLogins.delete(user.id);
     void this.maybeRehashPassword(user.id, dto.pin, user.passwordHash);
 
     // Apply decay on child login. Balance-sync (updateChildBalance) used
@@ -254,10 +281,6 @@ export class AuthService {
       updateData.email = dto.email;
     }
 
-    // Обновляем пароль
-    if (dto.password) {
-      updateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_COST);
-    }
 
     // Обновляем avatarUrl (для родителя хранится в users, для ребенка в childProfiles)
     if (dto.avatarUrl !== undefined) {
@@ -297,7 +320,8 @@ export class AuthService {
     // Проверяем текущий пароль
     const isValid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
     if (!isValid) {
-      throw new UnauthorizedException('Current password is incorrect');
+      // 400, а не 401: это ошибка ввода, сессия при этом валидна (клиент на 401 разлогинивает).
+      throw new BadRequestException('Current password is incorrect');
     }
 
     // Обновляем пароль

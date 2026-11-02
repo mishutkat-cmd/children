@@ -102,7 +102,9 @@ export class CompletionsController {
         taskId: dto.taskId,
         note: dto.note,
         proofUrl: dto.proofUrl,
-      });
+        // Родитель отмечает задание за выбранный в календаре день — раньше дата терялась.
+        performedAt: dto.performedAt,
+      }, 'PARENT');
       return result;
     } catch (error) {
       console.error('Error creating completion for child:', error);

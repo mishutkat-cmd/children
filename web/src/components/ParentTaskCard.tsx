@@ -449,7 +449,7 @@ const ParentTaskCardInner: React.FC<ParentTaskCardProps> = ({
                         boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                       },
                     }}
-                    onClick={() => window.open(pendingCompletion.proofUrl, '_blank')}
+                    onClick={() => window.open(pendingCompletion.proofUrl, '_blank', 'noopener,noreferrer')}
                   />
                 </Box>
               )}
