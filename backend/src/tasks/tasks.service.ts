@@ -153,6 +153,9 @@ export class TasksService {
         assignedTo: dto.assignedTo || 'ALL',
         requiresProof: dto.requiresProof || false,
         requiresParentApproval: dto.requiresParentApproval !== false, // По умолчанию true
+        timeOfDay: dto.timeOfDay ?? null,
+        time: dto.time ?? null,
+        remind: dto.remind ?? false,
         status: 'ACTIVE',
       };
       
@@ -222,6 +225,9 @@ export class TasksService {
       }
       if (dto.assignedTo !== undefined) updateData.assignedTo = dto.assignedTo || 'ALL';
       if (dto.requiresProof !== undefined) updateData.requiresProof = dto.requiresProof || false;
+      if (dto.timeOfDay !== undefined) updateData.timeOfDay = dto.timeOfDay || null;
+      if (dto.time !== undefined) updateData.time = dto.time || null;
+      if (dto.remind !== undefined) updateData.remind = !!dto.remind;
       if (dto.requiresParentApproval !== undefined) updateData.requiresParentApproval = dto.requiresParentApproval !== false;
       
       await this.db.update('tasks', id, updateData);

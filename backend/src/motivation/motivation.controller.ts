@@ -46,6 +46,12 @@ export class MotivationController {
     return this.motivationService.updateConversionRate(user.familyId, dto.conversionRate);
   }
 
+  @Patch('preferences')
+  @Roles('PARENT')
+  updatePreferences(@User() user: RequestUser, @Body() dto: { petRules?: Record<string, unknown>; notifPrefs?: Record<string, unknown> }) {
+    return this.motivationService.updatePreferences(user.familyId, dto ?? {});
+  }
+
   @Patch('decay-rule')
   @Roles('PARENT')
   updateDecayRule(@User() user: RequestUser, @Body() dto: UpdateDecayRuleDto) {

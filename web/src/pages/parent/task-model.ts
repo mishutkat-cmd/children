@@ -96,3 +96,24 @@ export function isPlannedOn(t: { frequency?: string; daysOfWeek?: unknown }, dat
   const days = parseDays(t.daysOfWeek)
   return days.length === 0 || days.includes(date.getDay())
 }
+
+export type Slot = 'MORNING' | 'DAY' | 'EVENING'
+export const SLOTS: { id: Slot; label: string; hint: string }[] = [
+  { id: 'MORNING', label: 'Утро', hint: 'до 12:00' },
+  { id: 'DAY', label: 'День', hint: 'после школы' },
+  { id: 'EVENING', label: 'Вечер', hint: 'после 18' },
+]
+
+/** Часть дня задания: явная, по точному времени, иначе день (задания «в любое время» показываем днём). */
+export function slotOf(t: { timeOfDay?: string | null; time?: string | null }): Slot {
+  if (t.timeOfDay === 'MORNING' || t.timeOfDay === 'DAY' || t.timeOfDay === 'EVENING') return t.timeOfDay
+  const h = t.time ? Number(t.time.slice(0, 2)) : NaN
+  if (!Number.isNaN(h)) return h < 12 ? 'MORNING' : h < 18 ? 'DAY' : 'EVENING'
+  return 'DAY'
+}
+
+/** Сейчас утро, день или вечер. */
+export function currentSlot(now = new Date()): Slot {
+  const h = now.getHours()
+  return h < 12 ? 'MORNING' : h < 18 ? 'DAY' : 'EVENING'
+}

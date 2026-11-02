@@ -2,6 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { UpdateDecayRuleDto, CreateStreakRuleDto, UpdateStreakRuleDto, CreateCharacterDto, UpdateCharacterDto } from './dto/motivation.dto';
 import { invalidateFamilySettingsCache } from '../common/cache/family-settings-cache';
+import { PET_RULE_DEFAULTS } from '../children/dto/children.dto';
+
+/** Что присылать родителю (страница уведомлений). */
+export const NOTIF_PREF_DEFAULTS: Record<string, boolean> = {
+  completions: true, exchanges: true, wishes: true, badges: true, streaks: true, location: true, weeklyReport: false, quietNight: true,
+};
 
 @Injectable()
 export class MotivationService {
@@ -16,7 +22,27 @@ export class MotivationService {
       decayRule: decayRule || null,
       streakRules,
       conversionRate: familySettings?.conversionRate || 10, // По умолчанию 10 баллов = 1 грн
+      petRules: { ...PET_RULE_DEFAULTS, ...(familySettings?.petRules || {}) },
+      notifPrefs: { ...NOTIF_PREF_DEFAULTS, ...(familySettings?.notifPrefs || {}) },
     };
+  }
+
+  /** Переключатели семьи: правила питомцев и что присылать родителю. Только известные булевы ключи. */
+  async updatePreferences(familyId: string, dto: { petRules?: Record<string, unknown>; notifPrefs?: Record<string, unknown> }) {
+    const pick = (src: Record<string, unknown> | undefined, defaults: Record<string, boolean>) =>
+      Object.fromEntries(Object.entries(src || {}).filter(([k, v]) => k in defaults && typeof v === 'boolean'));
+    const existing = await this.db.findFirst('familySettings', { familyId });
+    const patch: any = {};
+    if (dto.petRules) patch.petRules = { ...(existing?.petRules || {}), ...pick(dto.petRules, PET_RULE_DEFAULTS) };
+    if (dto.notifPrefs) patch.notifPrefs = { ...(existing?.notifPrefs || {}), ...pick(dto.notifPrefs, NOTIF_PREF_DEFAULTS) };
+    if (existing) {
+      await this.db.update('familySettings', existing.id, patch);
+    } else {
+      const id = crypto.randomUUID();
+      await this.db.create('familySettings', { id, familyId, conversionRate: 10, ...patch }, id);
+    }
+    invalidateFamilySettingsCache(familyId);
+    return this.getSettings(familyId);
   }
 
   async updateConversionRate(familyId: string, conversionRate: number) {

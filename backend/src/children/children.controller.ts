@@ -14,7 +14,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { User, RequestUser } from '../common/decorators/user.decorator';
-import { CreateChildDto, UpdateChildDto, CreateParentDto } from './dto/children.dto';
+import { CreateChildDto, UpdateChildDto, UpdateMyPetDto, CreateParentDto } from './dto/children.dto';
 
 @Controller('children')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,6 +44,12 @@ export class ChildrenController {
   @Roles('CHILD')
   updateMyProfile(@User() user: RequestUser, @Body() dto: UpdateChildDto) {
     return this.childrenService.update(user.userId, user.familyId, dto);
+  }
+
+  @Patch('child/pet')
+  @Roles('CHILD')
+  updateMyPet(@User() user: RequestUser, @Body() dto: UpdateMyPetDto) {
+    return this.childrenService.updateMyPet(user.userId, user.familyId, dto.pet);
   }
 
   // Эти эндпоинты должны быть ДО :id, иначе они будут перехвачены параметром

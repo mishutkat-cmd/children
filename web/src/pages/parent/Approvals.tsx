@@ -112,7 +112,7 @@ export default function ParentApprovals() {
             const kid = byAnyId(ex.child?.userId || ex.childId)
             return (
               <Card key={ex.id} sx={{ p: '16px 18px', display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-                <KidDot name={kid?.name || ex.child?.name} index={kid?.index ?? 0} />
+                <KidDot name={kid?.name || ex.child?.name} index={kid?.index ?? 0} pet={kid?.pet} />
                 <Box sx={{ flex: 1, minWidth: 200 }}>
                   <Typography sx={{ fontWeight: 600 }}>{kid?.name || ex.child?.name}: «{ex.rewardGoal?.title || 'награда'}»</Typography>
                   <Typography sx={{ fontSize: 13, color: tokens.text3 }}>{whenLabel(ex.createdAt)} · {formatNumber(ex.pointsSpent || 0)} звёзд</Typography>
@@ -157,7 +157,7 @@ export default function ParentApprovals() {
                       <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{c.task?.title}</Typography>
                       <Typography sx={{ fontSize: 13, color: tokens.text3 }}>{whenLabel(c.performedAt)}{c.proofUrl ? ' · с фото' : ''} · {c.pointsAwarded ?? c.task?.points} звёзд</Typography>
                     </Box>
-                    <KidDot name={kid?.name} index={kid?.index ?? 0} size={28} />
+                    <KidDot name={kid?.name} index={kid?.index ?? 0} pet={kid?.pet} size={28} />
                   </Box>
                 </Box>
               )
@@ -167,7 +167,7 @@ export default function ParentApprovals() {
           {active && (
             <Card sx={{ gridColumn: { md: 'span 3' }, p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.75, position: { md: 'sticky' }, top: { md: 28 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <KidDot name={kidOf(active)?.name} index={kidOf(active)?.index ?? 0} size={44} />
+                <KidDot name={kidOf(active)?.name} index={kidOf(active)?.index ?? 0} pet={kidOf(active)?.pet} size={44} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography component="h2" sx={{ fontSize: 20, fontWeight: 700 }}>{active.task?.title}</Typography>
                   <Typography sx={{ fontSize: 13, color: tokens.text3 }}>

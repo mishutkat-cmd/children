@@ -11,6 +11,7 @@ class FakeDb {
   async update(c: string, id: string, patch: any) { this.t(c).set(id, { ...this.t(c).get(id), ...patch }); }
   async findMany(c: string, where: any = {}) { return [...this.t(c).values()].filter((r) => Object.entries(where).every(([k, v]) => r[k] === v)); }
   async findFirst(c: string, where: any) { return (await this.findMany(c, where))[0] ?? null; }
+  async count(c: string, where: any = {}) { return (await this.findMany(c, where)).length; }
 }
 
 const SECRETS = ['passwordHash', 'secretHash', 'secretFails', 'secretLockedUntil'];

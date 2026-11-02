@@ -6,6 +6,8 @@ import {
   IsEnum,
   IsArray,
   Min,
+  IsIn,
+  Matches,
 } from 'class-validator';
 
 export class CreateTaskDto {
@@ -47,6 +49,20 @@ export class CreateTaskDto {
   @IsBoolean()
   @IsOptional()
   requiresParentApproval?: boolean;
+
+  /** Когда делать: утро / после школы / вечер. Пусто — в любое время. */
+  @IsIn(['MORNING', 'DAY', 'EVENING'])
+  @IsOptional()
+  timeOfDay?: 'MORNING' | 'DAY' | 'EVENING' | null;
+
+  /** Точное время «ЧЧ:ММ», если задано. */
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  time?: string | null;
+
+  @IsBoolean()
+  @IsOptional()
+  remind?: boolean;
 }
 
 export class UpdateTaskDto {
@@ -91,6 +107,20 @@ export class UpdateTaskDto {
   @IsString()
   @IsOptional()
   assignedTo?: string;
+
+  /** Когда делать: утро / после школы / вечер. Пусто — в любое время. */
+  @IsIn(['MORNING', 'DAY', 'EVENING'])
+  @IsOptional()
+  timeOfDay?: 'MORNING' | 'DAY' | 'EVENING' | null;
+
+  /** Точное время «ЧЧ:ММ», если задано. */
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  time?: string | null;
+
+  @IsBoolean()
+  @IsOptional()
+  remind?: boolean;
 }
 
 export class AssignTaskDto {

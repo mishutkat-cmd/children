@@ -4,6 +4,7 @@ import { Box, Button, Dialog, DialogContent, MenuItem, TextField, ToggleButton, 
 import { api } from '../../lib/api'
 import { tokens } from '../../theme'
 import { useChildren } from '../../hooks/useChildren'
+import { PetArt, type Pet, type PetMood } from '../../lib/pets'
 
 /** Мелкие детали веба родителя по макетам PW_*. */
 
@@ -14,38 +15,50 @@ export function Card({ children, sx }: { children: ReactNode; sx?: SxProps<Theme
   return <Box sx={{ ...card, ...(sx as object) }}>{children}</Box>
 }
 
-/** Пастельные пары для детей: порядок постоянный, чтобы цвет ребёнка не прыгал между экранами. */
-const KID_COLORS = [
-  { bg: '#FFE3CF', ink: '#B4461A', bar: '#BFD0FF', barOn: tokens.primary },
-  { bg: '#D8F1E4', ink: '#0F6E40', bar: '#BFE6D1', barOn: tokens.done },
-  { bg: '#EFE8FF', ink: tokens.reviewInk, bar: '#D9CCF7', barOn: tokens.review },
-  { bg: '#FFF3D6', ink: '#7A4E00', bar: '#F8DFA6', barOn: tokens.star },
-]
-export const kidColor = (i: number) => KID_COLORS[((i % KID_COLORS.length) + KID_COLORS.length) % KID_COLORS.length]
+/** Цвет ребёнка хранится у него (childProfile.color); ключи совпадают с бэкендом (KID_COLORS). */
+export const KID_PALETTE = [
+  { key: 'peach', label: 'Персик', bg: '#FFE3CF', ink: '#B4461A', strong: '#C25A1B', bar: '#FFC9A6', barOn: '#C25A1B' },
+  { key: 'mint', label: 'Мята', bg: '#D8F1E4', ink: '#0F6E40', strong: '#13804B', bar: '#BFE6D1', barOn: tokens.done },
+  { key: 'lilac', label: 'Сирень', bg: '#EFE8FF', ink: tokens.reviewInk, strong: tokens.review, bar: '#D9CCF7', barOn: tokens.review },
+  { key: 'sun', label: 'Солнце', bg: '#FFF3D6', ink: '#7A4E00', strong: '#C47F0A', bar: '#F8DFA6', barOn: tokens.star },
+  { key: 'sky', label: 'Небо', bg: '#DCEBFF', ink: '#1D3A99', strong: tokens.primary, bar: '#BFD0FF', barOn: tokens.primary },
+  { key: 'rose', label: 'Роза', bg: '#FFE0E8', ink: '#9C1F48', strong: '#D23F6E', bar: '#FFC2D2', barOn: '#D23F6E' },
+] as const
+export type KidColorKey = (typeof KID_PALETTE)[number]['key']
+export const kidColor = (i: number) => KID_PALETTE[((i % KID_PALETTE.length) + KID_PALETTE.length) % KID_PALETTE.length]
 
-export function KidDot({ name, index, src, size = 40 }: { name?: string; index: number; src?: string | null; size?: number }) {
+/** Кружок ребёнка: питомец на фоне цвета ребёнка, без питомца — первая буква имени. */
+export function KidDot({ name, index, src, size = 40, pet, mood }: { name?: string; index: number; src?: string | null; size?: number; pet?: Pet | null; mood?: PetMood }) {
   const c = kidColor(index)
   return (
     <Box component="span" sx={{ flex: `0 0 ${size}px`, width: size, height: size, borderRadius: '50%', bgcolor: c.bg, color: c.ink, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: size * 0.4, overflow: 'hidden' }}>
-      {src ? <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (name || '?')[0].toUpperCase()}
+      {pet ? <PetArt pet={pet} size={Math.round(size * 0.74)} mood={mood} /> : src ? <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (name || '?')[0].toUpperCase()}
     </Box>
   )
 }
 
-/** Дети семьи в удобном виде: userId, profileId, имя, баланс, аватар, индекс цвета. */
+/** Дети семьи в удобном виде: userId, profileId, имя, баланс, цвет, питомец. `index` — номер цвета в KID_PALETTE. */
 export function useKids() {
   const q = useChildren()
   const kids = useMemo(
     () =>
-      ((q.data as any[]) || []).map((c, i) => ({
-        userId: c.id as string,
-        profileId: (c.childProfile?.id ?? c.id) as string,
-        name: (c.childProfile?.name || c.login || 'Ребёнок') as string,
-        login: c.login as string,
-        balance: (c.childProfile?.pointsBalance ?? 0) as number,
-        avatarUrl: c.childProfile?.avatarUrl as string | null,
-        index: i,
-      })),
+      ((q.data as any[]) || []).map((c, i) => {
+        const p = c.childProfile || {}
+        const colorIndex = KID_PALETTE.findIndex((k) => k.key === p.color)
+        return {
+          userId: c.id as string,
+          profileId: (p.id ?? c.id) as string,
+          name: (p.name || c.login || 'Ребёнок') as string,
+          login: c.login as string,
+          balance: (p.pointsBalance ?? 0) as number,
+          totalEarned: (p.totalEarned ?? 0) as number,
+          avatarUrl: p.avatarUrl as string | null,
+          age: (p.age ?? null) as number | null,
+          pet: (p.pet ?? null) as Pet | null,
+          approvedCount: (c.approvedCount ?? 0) as number,
+          index: colorIndex >= 0 ? colorIndex : i,
+        }
+      }),
     [q.data],
   )
   const byAnyId = (id?: string) => kids.find((k) => k.userId === id || k.profileId === id)

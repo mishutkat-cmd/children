@@ -4,7 +4,7 @@ import { StreakService } from '../motivation/streak.service';
 import { DecayService } from '../motivation/decay.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LocalStorageService } from '../files/local-storage.service';
-import { CreateChildDto, UpdateChildDto, CreateParentDto } from './dto/children.dto';
+import { CreateChildDto, UpdateChildDto, CreateParentDto, KID_COLORS, PetDto, PET_OUTFIT_PRICE, PET_RULE_DEFAULTS } from './dto/children.dto';
 import { getCached, setCached } from '../common/cache/family-settings-cache';
 import { queryForDay, startOfToday } from './day-points';
 import * as bcrypt from 'bcryptjs';
@@ -43,7 +43,10 @@ export class ChildrenService {
     return Promise.all(
       users.map(async (user) => {
         const profiles = await this.db.findMany('childProfiles', { userId: user.id });
-        return { ...publicUser(user), childProfile: profiles[0] ?? null };
+        const profile = profiles[0] ?? null;
+        // Сколько дел одобрено за всё время — от этого растёт питомец.
+        const approvedCount = profile ? await this.db.count('completions', { childId: profile.id, status: 'APPROVED' }) : 0;
+        return { ...publicUser(user), childProfile: profile, approvedCount };
       }),
     );
   }
@@ -67,10 +70,14 @@ export class ChildrenService {
   async create(familyId: string, dto: CreateChildDto) {
     const userId = crypto.randomUUID();
     const profileId = crypto.randomUUID();
+    // Логин ребёнку больше не нужен (вход по коду, картинкам или PIN), но поле уникально.
+    const login = dto.login?.trim() || `kid-${userId.slice(0, 8)}`;
+    if (await this.db.findFirst('users', { login })) throw new ConflictException('Такой логин уже занят');
+    const color = dto.color || (await this.freeColor(familyId));
 
     await this.db.create('users', {
       id: userId,
-      login: dto.login,
+      login,
       role: 'CHILD',
       familyId,
       passwordHash: dto.pin ? await this.hashPin(dto.pin) : null,
@@ -85,6 +92,9 @@ export class ChildrenService {
       moneyBalanceCents: 0,
       streakState: {},
       selectedCharacterId: null, // По умолчанию нет выбранного персонажа
+      color,
+      age: dto.age ?? null,
+      pet: dto.pet ? this.cleanPet(dto.pet) : null,
     }, profileId);
 
     const user = await this.db.findFirst('users', { id: userId });
@@ -105,7 +115,7 @@ export class ChildrenService {
       });
     }
 
-    if (dto.name || dto.avatarUrl !== undefined || dto.selectedCharacterId !== undefined) {
+    if (dto.name || dto.avatarUrl !== undefined || dto.selectedCharacterId !== undefined || dto.color || dto.age !== undefined || dto.pet) {
       const profiles = await this.db.findMany('childProfiles', { userId: id });
       if (profiles.length > 0) {
         const updateData: any = {};
@@ -118,11 +128,57 @@ export class ChildrenService {
         if (dto.selectedCharacterId !== undefined) {
           updateData.selectedCharacterId = dto.selectedCharacterId || null;
         }
+        if (dto.color) updateData.color = dto.color;
+        if (dto.age !== undefined) updateData.age = dto.age ?? null;
+        if (dto.pet) updateData.pet = this.cleanPet(dto.pet, profiles[0].pet);
         await this.db.update('childProfiles', profiles[0].id, updateData);
       }
     }
 
     return this.findOne(id, familyId);
+  }
+
+  /** Первый цвет палитры, которого ещё нет у детей семьи. */
+  private async freeColor(familyId: string): Promise<string> {
+    const kids = await this.findAll(familyId);
+    const used = new Set(kids.map((k: any) => k.childProfile?.color).filter(Boolean));
+    return KID_COLORS.find((c) => !used.has(c)) ?? KID_COLORS[kids.length % KID_COLORS.length];
+  }
+
+  private cleanPet(pet: PetDto, prev?: any) {
+    const kindChanged = !prev || prev.kind !== pet.kind;
+    return {
+      kind: pet.kind,
+      name: (pet.name ?? prev?.name ?? '').trim().slice(0, 20) || null,
+      tint: pet.tint ?? prev?.tint ?? null,
+      outfit: pet.outfit ?? prev?.outfit ?? 'none',
+      kindChangedAt: kindChanged ? new Date().toISOString() : prev?.kindChangedAt ?? null,
+    };
+  }
+
+  /**
+   * Ребёнок меняет питомца сам. Наряд надевается, только если хватает заработанных звёзд
+   * (звёзды не списываются). Сменить зверька — не чаще раза в неделю, если родитель не запретил.
+   */
+  async updateMyPet(userId: string, familyId: string, pet: PetDto) {
+    const child = await this.findOne(userId, familyId);
+    const profile: any = child.childProfile;
+    if (!profile) throw new NotFoundException('Child profile not found');
+    const rules = { ...PET_RULE_DEFAULTS, ...((await this.getFamilySettingsCached(familyId))?.petRules || {}) };
+    const prev = profile.pet;
+    if (prev && prev.kind !== pet.kind) {
+      if (!rules.kidCanSwitch) throw new ForbiddenException('Сменить зверька может только родитель');
+      const last = prev.kindChangedAt ? new Date(prev.kindChangedAt).getTime() : 0;
+      if (Date.now() - last < 7 * 24 * 3600 * 1000) throw new ForbiddenException('Зверька можно менять раз в неделю');
+    }
+    const outfit = pet.outfit ?? prev?.outfit ?? 'none';
+    if (outfit !== 'none') {
+      if (!rules.outfits) throw new ForbiddenException('Наряды выключены');
+      const need = PET_OUTFIT_PRICE[outfit] ?? 0;
+      if ((profile.totalEarned ?? 0) < need) throw new ForbiddenException('Этот наряд ещё не открыт');
+    }
+    await this.db.update('childProfiles', profile.id, { pet: this.cleanPet({ ...pet, outfit }, prev) });
+    return this.findOne(userId, familyId);
   }
 
   async getSummary(childId: string, familyId: string) {

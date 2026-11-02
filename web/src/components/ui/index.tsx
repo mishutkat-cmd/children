@@ -87,6 +87,7 @@ type IconName =
   | 'home' | 'check' | 'gift' | 'trophy' | 'user' | 'users' | 'bell' | 'plus' | 'eye' | 'flame' | 'chevron' | 'chevronDown'
   | 'list' | 'chart' | 'map' | 'clock' | 'settings' | 'logout' | 'search' | 'x' | 'camera' | 'star' | 'more' | 'speaker'
   | 'inbox' | 'edit' | 'trash' | 'lock' | 'phone' | 'calendar' | 'flag' | 'wallet'
+  | 'sun' | 'moon' | 'cloud' | 'medal' | 'monitor' | 'qr' | 'grid' | 'columns' | 'shield' | 'chevronLeft' | 'filter' | 'sparkle'
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /></>,
@@ -121,10 +122,22 @@ const PATHS: Record<IconName, ReactNode> = {
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
   flag: <path d="M4 22V4M4 4h13l-2 4 2 4H4" />,
   wallet: <><path d="M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 7V6a2 2 0 0 1 2-2h11M17 13.5h.01" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+  moon: <path d="M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z" />,
+  cloud: <path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.4A4 4 0 1 1 17 18z" />,
+  medal: <><circle cx="12" cy="15" r="6" /><path d="M8.5 10 6 3h4l2 4 2-4h4l-2.5 7" /></>,
+  monitor: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
+  qr: <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2" />,
+  grid: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
+  columns: <path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v13h-4z" />,
+  shield: <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z" />,
+  chevronLeft: <path d="m15 6-6 6 6 6" />,
+  filter: <path d="M3 5h18l-7 8v6l-4-2v-4z" />,
+  sparkle: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />,
 }
 
 export function Icon({ name, size = 24, stroke = 2.2, style }: { name: IconName; size?: number; stroke?: number; style?: CSSProperties }) {
-  const filled = name === 'flame' || name === 'star'
+  const filled = name === 'flame' || name === 'star' || name === 'sparkle'
   return (
     <svg
       width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0, ...style }}

@@ -48,7 +48,7 @@ export default function ParentGoals() {
           const kid = byAnyId(ex.child?.userId || ex.childId)
           return (
             <Card key={ex.id} sx={{ p: '16px 18px', display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: { xs: 'wrap', sm: 'nowrap' }, borderColor: '#F5D48A', bgcolor: '#FFFBF0' }}>
-              <KidDot name={kid?.name || ex.child?.name} index={kid?.index ?? 0} />
+              <KidDot name={kid?.name || ex.child?.name} index={kid?.index ?? 0} pet={kid?.pet} />
               <Typography sx={{ flex: 1, minWidth: 200, fontSize: 14 }}>
                 <b>{kid?.name || ex.child?.name} хочет «{ex.rewardGoal?.title || 'награду'}» · {formatNumber(ex.pointsSpent || 0)} звёзд</b>
                 {kid && <><br /><Box component="span" sx={{ color: tokens.text3 }}>После обмена останется {formatNumber(Math.max(0, kid.balance - (ex.pointsSpent || 0)))} звёзд</Box></>}
@@ -62,7 +62,7 @@ export default function ParentGoals() {
           const kid = byAnyId(r.createdByUserId)
           return (
             <Card key={r.id} sx={{ p: '16px 18px', display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: { xs: 'wrap', sm: 'nowrap' }, borderColor: '#D9CCF7', bgcolor: '#FAF7FF' }}>
-              <KidDot name={kid?.name} index={kid?.index ?? 0} />
+              <KidDot name={kid?.name} index={kid?.index ?? 0} pet={kid?.pet} />
               <Typography sx={{ flex: 1, minWidth: 200, fontSize: 14 }}>
                 <b>{kid ? `${kid.name} просит` : 'Новое желание:'} «{r.title}» — поставьте цену</b>
                 <br /><Box component="span" sx={{ color: tokens.text3 }}>Пока цены нет, обменять звёзды на это нельзя</Box>
@@ -79,7 +79,7 @@ export default function ParentGoals() {
           return (
             <Card key={k.userId} sx={{ p: 2.25 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 1.5 }}>
-                <KidDot name={k.name} index={k.index} src={k.avatarUrl} />
+                <KidDot name={k.name} index={k.index} src={k.avatarUrl} pet={k.pet} />
                 <Typography sx={{ flex: 1, fontSize: 18, fontWeight: 700 }}>{k.name}</Typography>
                 <StarAmount value={k.balance} size={16} weight={700} />
               </Box>
