@@ -1,715 +1,225 @@
-import { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import {
-  Typography,
-  Button,
-  Box,
-  TextField,
-  Alert,
-  Avatar,
-  IconButton,
-  CircularProgress,
-} from '@mui/material'
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
-import LogoutIcon from '@mui/icons-material/Logout'
-import { motion } from 'framer-motion'
-import { useAuthStore } from '../../store/authStore'
-import { api } from '../../lib/api'
+import { useEffect, useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Box, Button, TextField, Typography } from '@mui/material'
 import Layout, { PageHeader } from '../../components/Layout'
-import { card } from '../../components/parent/kit'
-import { FamilyPcCard, InviteCard } from '../../components/parent/access'
-import { colors, tokens } from '../../theme'
+import { Card, KidDot, useKids } from '../../components/parent/kit'
+import { FamilyPcCard } from '../../components/parent/access'
 import PetSettings from '../../components/parent/PetSettings'
+import NotifPrefs from '../../components/parent/NotifPrefs'
+import { Icon, formatNumber, type IconName } from '../../components/ui'
+import { tokens } from '../../theme'
+import { api } from '../../lib/api'
 
 const SECTIONS = [
-  ['money', 'Звёзды и деньги'],
-  ['kids', 'Детское приложение'],
-  ['adults', 'Семья и взрослые'],
-  ['family-pc', 'Семейный компьютер'],
-  ['profile', 'Профиль'],
-  ['password', 'Пароль'],
-  ['account', 'Аккаунт и вход'],
-  ['cleanup', 'Удаление данных'],
+  ['family', 'Семья', 'users'],
+  ['money', 'Звёзды и деньги', 'star'],
+  ['kids-app', 'Детское приложение', 'sparkle'],
+  ['notifications', 'Уведомления', 'bell'],
+  ['data', 'Данные', 'shield'],
 ] as const
 
-export default function ParentSettings() {
-  const navigate = useNavigate()
-  const clearAuth = useAuthStore((state) => state.clearAuth)
-  const user = useAuthStore((state) => state.user)
-  const queryClient = useQueryClient()
-
-  // Состояния для форм
-  const [login, setLogin] = useState(user?.id ? '' : '')
-  const [email, setEmail] = useState(user?.email || '')
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-
-  const { data: settings, isLoading } = useQuery({
-    queryKey: ['motivation-settings'],
-    queryFn: async () => {
-      const response = await api.get('/motivation/settings')
-      return response.data
-    },
-  })
-
-  // Загружаем данные пользователя
-  const { data: userData } = useQuery({
-    queryKey: ['user-profile', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return null
-      const response = await api.get('/auth/profile')
-      return response.data
-    },
-    enabled: !!user?.id,
-  })
-
-  // Обновляем форму при загрузке данных пользователя
+/** Какой раздел сейчас на экране — для подсветки в меню. */
+function useActiveSection() {
+  const [active, setActive] = useState<string>(SECTIONS[0][0])
   useEffect(() => {
-    if (userData) {
-      setLogin(userData.login || '')
-      setEmail(userData.email || '')
-      setAvatarUrl(userData.avatarUrl || null)
-      // Обновляем avatarUrl в authStore
-      if (userData.avatarUrl !== undefined) {
-        const authState = useAuthStore.getState()
-        if (authState.user) {
-          authState.setAuth(
-            authState.token || '',
-            {
-              ...authState.user,
-              avatarUrl: userData.avatarUrl || null,
-            }
-          )
-        }
-      }
+    const els = SECTIONS.map(([id]) => document.getElementById(id)).filter(Boolean) as HTMLElement[]
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+        if (visible) setActive(visible.target.id)
+      },
+      { rootMargin: '-10% 0px -60% 0px' },
+    )
+    els.forEach((el) => io.observe(el))
+    // Последний раздел короткий и не доезжает до верха — внизу страницы подсвечиваем его.
+    const onScroll = () => {
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) setActive(SECTIONS[SECTIONS.length - 1][0])
     }
-  }, [userData])
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { io.disconnect(); window.removeEventListener('scroll', onScroll) }
+  }, [])
+  return [active, setActive] as const
+}
 
-  const updateConversionRateMutation = useMutation({
-    mutationFn: async (conversionRate: number) => {
-      return api.patch('/motivation/conversion-rate', { conversionRate })
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['motivation-settings'] })
-    },
-  })
+function Group({ id, title, sub, children }: { id: string; title: string; sub: string; children: React.ReactNode }) {
+  return (
+    <Box component="section" id={id} aria-labelledby={`${id}-title`} sx={{ scrollMarginTop: 24, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+      <Box>
+        <Typography id={`${id}-title`} component="h2" sx={{ fontSize: 20, fontWeight: 700 }}>{title}</Typography>
+        <Typography sx={{ fontSize: 14, color: tokens.text3 }}>{sub}</Typography>
+      </Box>
+      {children}
+    </Box>
+  )
+}
 
-  // Очистка БД от архивных и осиротевших данных
-  const [cleanupPreview, setCleanupPreview] = useState<any>(null)
-  const [cleanupResult, setCleanupResult] = useState<any>(null)
-  const cleanupPreviewMutation = useMutation({
-    mutationFn: async () => {
-      const res = await api.get('/ledger/parent/cleanup-preview')
-      return res.data
-    },
-    onSuccess: (data) => {
-      setCleanupResult(null)
-      setCleanupPreview(data)
-    },
+function LinkRow({ icon, title, sub, to, action }: { icon: IconName | React.ReactNode; title: string; sub: React.ReactNode; to: string; action?: string }) {
+  return (
+    <Box component={RouterLink} to={to} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5, px: 0.5, color: 'inherit', textDecoration: 'none', borderTop: `1px solid ${tokens.line}`, '&:first-of-type': { borderTop: 0 }, '&:hover .go': { color: tokens.primary } }}>
+      {typeof icon === 'string' ? <Box sx={{ flex: '0 0 40px', height: 40, borderRadius: '12px', bgcolor: tokens.chip, color: tokens.text2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={icon as IconName} size={20} /></Box> : icon}
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{title}</Typography>
+        <Typography sx={{ fontSize: 13, color: tokens.text3 }}>{sub}</Typography>
+      </Box>
+      <Box className="go" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: tokens.text3, fontSize: 14, fontWeight: 600 }}>{action}<Icon name="chevron" size={18} /></Box>
+    </Box>
+  )
+}
+
+/** Настройки (V_Settings_B): группы с меню-якорями, опасное — отдельной карточкой. */
+export default function ParentSettings() {
+  const { kids } = useKids()
+  const [active, setActive] = useActiveSection()
+  const { data: adults = [] } = useQuery<any[]>({ queryKey: ['family-adults'], queryFn: async () => (await api.get('/auth/family')).data || [] })
+
+  return (
+    <Layout>
+      <PageHeader kicker="Всё в одном месте" title="Настройки" />
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '220px minmax(0, 1fr)' }, gap: 3, alignItems: 'start' }}>
+        <Box component="nav" aria-label="Разделы настроек" sx={{ display: { xs: 'flex', md: 'flex' }, flexDirection: { xs: 'row', md: 'column' }, flexWrap: 'wrap', gap: 0.5, position: { md: 'sticky' }, top: 28 }}>
+          {SECTIONS.map(([id, label, icon]) => (
+            <Box key={id} component="a" href={`#${id}`} aria-current={active === id ? 'true' : undefined}
+              onClick={(e: React.MouseEvent) => { e.preventDefault(); setActive(id); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); history.replaceState(null, '', `#${id}`) }}
+              sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1.1, borderRadius: '10px', fontSize: 14, fontWeight: 600, textDecoration: 'none',
+                color: active === id ? tokens.primaryInk : tokens.text2, bgcolor: active === id ? tokens.primarySoft : 'transparent', '&:hover': { bgcolor: active === id ? tokens.primarySoft : tokens.chip } }}>
+              <Icon name={icon} size={18} />{label}
+            </Box>
+          ))}
+        </Box>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+          <Group id="family" title="Семья" sub="Кто в семье и что может">
+            <Card sx={{ px: 2, py: 0.5 }}>
+              <LinkRow icon={<Box sx={{ display: 'flex' }}>{kids.slice(0, 3).map((k, i) => <Box key={k.userId} sx={{ ml: i ? -1.5 : 0 }}><KidDot name={k.name} index={k.index} pet={k.pet} size={40} /></Box>)}</Box>}
+                title="Дети" sub={kids.length ? `${kids.map((k) => k.name).join(', ')} · имя, возраст, вход, питомец` : 'Добавьте первого ребёнка'} to="/parent/children" />
+              <LinkRow icon="users" title="Взрослые" sub={adults.length ? adults.map((a) => `${a.login}${a.isOwner ? ' (владелец)' : ''}`).join(', ') : '—'} to="/parent/account" action="Пригласить" />
+              <LinkRow icon="user" title="Мой аккаунт" sub="Фото, логин, почта, пароль, устройства" to="/parent/account" />
+            </Card>
+          </Group>
+
+          <Group id="money" title="Звёзды и деньги" sub="Курс, по которому звёзды меняются на деньги">
+            <RateCard />
+          </Group>
+
+          <Group id="kids-app" title="Детское приложение" sub="Питомцы и что видит ребёнок">
+            <Card sx={{ p: { xs: 2, md: 2.5 } }}>
+              <Typography component="h3" sx={{ fontSize: 17, fontWeight: 700, mb: 1.5 }}>Питомцы</Typography>
+              <PetSettings />
+            </Card>
+            <Card sx={{ p: { xs: 2, md: 2.5 } }}>
+              <Typography component="h3" sx={{ fontSize: 17, fontWeight: 700, mb: 1 }}>Семейный компьютер</Typography>
+              <FamilyPcCard />
+            </Card>
+          </Group>
+
+          <Group id="notifications" title="Уведомления" sub="О чём сообщать в колокольчике">
+            <Card sx={{ p: { xs: 2, md: 2.5 } }}><NotifPrefs /></Card>
+          </Group>
+
+          <Group id="data" title="Данные" sub="Очистка архива — действие необратимое">
+            <CleanupCard />
+          </Group>
+        </Box>
+      </Box>
+    </Layout>
+  )
+}
+
+function RateCard() {
+  const qc = useQueryClient()
+  const { kids } = useKids()
+  const { data: settings } = useQuery<any>({ queryKey: ['motivation-settings'], queryFn: async () => (await api.get('/motivation/settings')).data })
+  const rate: number = settings?.conversionRate || 10
+  const [value, setValue] = useState('')
+  const [editing, setEditing] = useState(false)
+  const save = useMutation({
+    mutationFn: (conversionRate: number) => api.patch('/motivation/conversion-rate', { conversionRate }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['motivation-settings'] }); setEditing(false) },
   })
-  const cleanupRunMutation = useMutation({
+  const richest = [...kids].sort((a, b) => b.balance - a.balance)[0]
+  return (
+    <Card sx={{ p: { xs: 2, md: 2.5 }, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+      <Box sx={{ flex: 1, minWidth: 240 }}>
+        <Typography sx={{ fontSize: 15, fontWeight: 600 }}>Курс для выплат деньгами</Typography>
+        <Typography sx={{ fontSize: 22, fontWeight: 700, my: 0.5 }}>{rate} звёзд = 1 ₴</Typography>
+        {richest && richest.balance > 0 && (
+          <Typography sx={{ fontSize: 13, color: tokens.text3 }}>{richest.name} сейчас может обменять {formatNumber(richest.balance)} звёзд на {formatNumber(Math.floor(richest.balance / rate))} ₴</Typography>
+        )}
+      </Box>
+      {editing ? (
+        <Box component="form" onSubmit={(e) => { e.preventDefault(); const n = Number(value); if (n > 0) save.mutate(n) }} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <TextField size="small" type="number" label="Звёзд за 1 ₴" value={value} onChange={(e) => setValue(e.target.value)} inputProps={{ min: 1 }} sx={{ width: 140 }} autoFocus />
+          <Button type="submit" variant="contained" disabled={!(Number(value) > 0) || save.isPending}>Сохранить</Button>
+          <Button onClick={() => setEditing(false)}>Отмена</Button>
+        </Box>
+      ) : (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="outlined" component={RouterLink} to="/parent/conversion">Выплаты</Button>
+          <Button variant="outlined" onClick={() => { setValue(String(rate)); setEditing(true) }}>Изменить курс</Button>
+        </Box>
+      )}
+    </Card>
+  )
+}
+
+const CLEANUP_ROWS: [string, string][] = [
+  ['archivedTasks', 'Архивные задания'],
+  ['archivedRewards', 'Архивные награды'],
+  ['orphanedTaskAssignments', 'Назначения удалённых заданий'],
+  ['orphanedCompletions', 'Выполнения удалённых заданий'],
+  ['orphanedWishlistItems', 'Желания без награды'],
+  ['orphanedExchanges', 'Обмены без награды'],
+  ['orphanedLedgerEntries', 'Записи звёзд без источника'],
+  ['orphanedNotifications', 'Уведомления без источника'],
+  ['orphanedChildBadges', 'Бейджи удалённых наград'],
+]
+
+/** Опасное действие отдельно: сначала показываем, что удалится, потом спрашиваем. */
+function CleanupCard() {
+  const qc = useQueryClient()
+  const [preview, setPreview] = useState<any>(null)
+  const [result, setResult] = useState<any>(null)
+  const check = useMutation({ mutationFn: async () => (await api.get('/ledger/parent/cleanup-preview')).data, onSuccess: (d) => { setResult(null); setPreview(d) } })
+  const run = useMutation({
     mutationFn: async () => {
       const res = await api.post('/ledger/parent/cleanup')
       if (res.data?.success === false) throw new Error(res.data.error || 'Очистка не удалась')
       return res.data
     },
-    onSuccess: (data) => {
-      setCleanupResult(data)
-      setCleanupPreview(null)
-      // Инвалидируем всё, что могло измениться
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['rewards'] })
-      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
-      queryClient.invalidateQueries({ queryKey: ['children-statistics'] })
-      queryClient.invalidateQueries({ queryKey: ['family-penalties'] })
-      queryClient.invalidateQueries({ queryKey: ['family-bonuses'] })
-      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    onSuccess: (d) => {
+      setResult(d)
+      setPreview(null)
+      for (const key of ['tasks', 'rewards', 'wishlist', 'parent-wishlist', 'children', 'notifications']) qc.invalidateQueries({ queryKey: [key] })
     },
   })
-
-  // Мутация для обновления профиля
-  const updateProfileMutation = useMutation({
-    mutationFn: async (data: { login?: string; email?: string; avatarUrl?: string | null }) => {
-      try {
-        const response = await api.patch('/auth/profile', data)
-        return response.data
-      } catch (error: any) {
-        console.error('[Settings] Update profile API error:', error)
-        const errorMessage = error?.response?.data?.message || error?.message || 'Ошибка при обновлении профиля'
-        throw new Error(errorMessage)
-      }
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] })
-      queryClient.invalidateQueries({ queryKey: ['user-profile', user?.id] })
-      // Обновляем данные пользователя в store
-      if (user && data) {
-        const authState = useAuthStore.getState()
-        authState.setAuth(
-          authState.token || '',
-          {
-            ...user,
-            email: data.email || user.email,
-            avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : user.avatarUrl,
-          }
-        )
-      }
-    },
-  })
-
-  // Мутация для смены пароля
-  const changePasswordMutation = useMutation({
-    mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
-      return api.post('/auth/change-password', data)
-    },
-    onSuccess: () => {
-      alert('Пароль успешно изменен!')
-      setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
-    },
-    onError: (error: any) => {
-      alert(error?.response?.data?.message || 'Ошибка при смене пароля')
-    },
-  })
-
-  // Мутация для загрузки аватара
-  const uploadAvatarMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData()
-      formData.append('file', file)
-      const response = await api.post('/upload/avatar', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      })
-      return response.data
-    },
-    onSuccess: (data) => {
-      setAvatarUrl(data.url)
-      updateProfileMutation.mutate({ avatarUrl: data.url })
-    },
-    onError: (error: any) => {
-      alert(error?.response?.data?.message || 'Ошибка при загрузке фото')
-    },
-  })
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      uploadAvatarMutation.mutate(file)
-    }
-  }
-
-  const handleUpdateProfile = () => {
-    // Валидация
-    if (!login || login.trim().length < 3) {
-      alert('Логин должен быть не менее 3 символов')
-      return
-    }
-    if (!email || !email.includes('@')) {
-      alert('Введите корректный email')
-      return
-    }
-
-    const updates: any = {}
-    if (login && login.trim() !== userData?.login) {
-      updates.login = login.trim()
-    }
-    if (email && email.trim() !== userData?.email) {
-      updates.email = email.trim()
-    }
-    
-    if (Object.keys(updates).length === 0) {
-      alert('Нет изменений для сохранения')
-      return
-    }
-
-    updateProfileMutation.mutate(updates, {
-      onError: (error: any) => {
-        const errorMessage = error?.response?.data?.message || error?.message || 'Ошибка при обновлении профиля'
-        console.error('[Settings] Update profile error:', error)
-        alert(errorMessage)
-      },
-    })
-  }
-
-  const handleChangePassword = () => {
-    if (newPassword !== confirmPassword) {
-      alert('Новые пароли не совпадают')
-      return
-    }
-    if (newPassword.length < 6) {
-      alert('Пароль должен быть не менее 6 символов')
-      return
-    }
-    changePasswordMutation.mutate({
-      currentPassword,
-      newPassword,
-    })
-  }
-
-  const handleLogout = () => {
-    clearAuth()
-    navigate('/login')
-  }
-
-  if (isLoading) {
-    return (
-      <Layout>
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-          <CircularProgress size={60} sx={{ color: colors.primary.main }} />
-        </Box>
-      </Layout>
-    )
-  }
-
+  const data = result || preview
+  const rows = data ? CLEANUP_ROWS.map(([k, label]) => [label, Number(data[k]) || 0] as const).filter(([, v]) => v > 0) : []
+  const total = rows.reduce((s, [, v]) => s + v, 0)
   return (
-    <Layout>
-      <Box>
-        <PageHeader title="Настройки" />
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '220px minmax(0, 1fr)' }, gap: 3, alignItems: 'start' }}>
-        <Box component="nav" aria-label="Разделы настроек" sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', gap: 0.5, position: 'sticky', top: 28 }}>
-          {SECTIONS.map(([id, label]) => (
-            <Box key={id} component="a" href={`#${id}`} sx={{ px: 1.5, py: 1.25, borderRadius: '10px', fontSize: 14, fontWeight: 600, color: tokens.text2, textDecoration: 'none', '&:hover': { bgcolor: tokens.chip } }}>{label}</Box>
-          ))}
-        </Box>
-        <Box sx={{ display: 'flex', flexDirection: 'column', '& > div': { scrollMarginTop: 24 } }}>
-        {/* Настройка курса конвертации */}
-        <motion.div id="money"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1, duration: 0.5 }}
-          style={{ marginBottom: '24px' }}
-        >
-          <Box
-            sx={{
-              ...card,
-              padding: { xs: '20px', sm: '24px' },
-            }}
-          >
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              Звёзды и деньги
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
-              Сколько звёзд равно 1 гривне — для выплат деньгами
-            </Typography>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-              <TextField
-                type="number"
-                label="Звёзд"
-                value={settings?.conversionRate || 10}
-                onChange={(e) => {
-                  const value = parseInt(e.target.value)
-                  if (value > 0) {
-                    updateConversionRateMutation.mutate(value)
-                  }
-                }}
-                inputProps={{ min: 1 }}
-                sx={{ width: 200 }}
-                disabled={updateConversionRateMutation.isPending}
-              />
-              <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                = 1 ₴
-              </Typography>
-            </Box>
-            {updateConversionRateMutation.isPending && (
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                Сохранение...
-              </Typography>
-            )}
-            {updateConversionRateMutation.isSuccess && (
-              <Alert severity="success" sx={{ mt: 1, borderRadius: 2 }}>
-                Курс обновлен!
-              </Alert>
-            )}
-          </Box>
-        </motion.div>
-
-        <Box id="pets" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>Питомцы</Typography>
-          <PetSettings />
-        </Box>
-
-        <Box id="adults" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Пригласить второго взрослого</Typography>
-          <InviteCard />
-        </Box>
-
-        <Box id="family-pc" sx={{ ...card, p: { xs: '20px', sm: '24px' }, mb: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Семейный компьютер</Typography>
-          <FamilyPcCard />
-        </Box>
-
-
-        {/* Профиль пользователя */}
-        <motion.div id="profile"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.5 }}
-          style={{ marginBottom: '24px' }}
-        >
-          <Box
-            sx={{
-              ...card,
-              padding: { xs: '20px', sm: '24px' },
-            }}
-          >
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              Профиль
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
-              Управление данными вашего профиля
-            </Typography>
-
-            {/* Фото профиля */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, mb: 3 }}>
-              <Box sx={{ position: 'relative' }}>
-                <Avatar
-                  src={avatarUrl || undefined}
-                  sx={{
-                    width: 100,
-                    height: 100,
-                    bgcolor: colors.primary.main,
-                    fontSize: '2.5rem',
-                  }}
-                >
-                  {user?.email?.[0]?.toUpperCase() || 'U'}
-                </Avatar>
-                <IconButton
-                  color="primary"
-                  aria-label="upload picture"
-                  component="label"
-                  sx={{
-                    position: 'absolute',
-                    bottom: 0,
-                    right: 0,
-                    bgcolor: 'white',
-                    border: `2px solid ${colors.primary.main}`,
-                    '&:hover': {
-                      bgcolor: colors.primary.light,
-                    },
-                  }}
-                  disabled={uploadAvatarMutation.isPending}
-                >
-                  {uploadAvatarMutation.isPending ? (
-                    <CircularProgress size={20} />
-                  ) : (
-                    <PhotoCameraIcon />
-                  )}
-                  <input
-                    hidden
-                    accept="image/*"
-                    type="file"
-                    onChange={handleAvatarUpload}
-                  />
-                </IconButton>
-              </Box>
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Нажмите на иконку камеры, чтобы загрузить новое фото профиля
-                </Typography>
-              </Box>
-            </Box>
-
-            {/* Имя (login) */}
-            <Box sx={{ mb: 3 }}>
-              <TextField
-                fullWidth
-                label="Имя пользователя (логин)"
-                value={login}
-                onChange={(e) => setLogin(e.target.value)}
-                disabled={updateProfileMutation.isPending}
-                sx={{ mb: 2 }}
-              />
-            </Box>
-
-            {/* Email */}
-            <Box sx={{ mb: 3 }}>
-              <TextField
-                fullWidth
-                type="email"
-                label="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={updateProfileMutation.isPending}
-                sx={{ mb: 2 }}
-              />
-            </Box>
-
-            {/* Кнопка сохранения */}
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                variant="contained"
-                onClick={handleUpdateProfile}
-                disabled={updateProfileMutation.isPending || (!login && !email)}
-                fullWidth
-                sx={{
-                  mb: 2,
-                  py: 1.5,
-                  fontWeight: 700,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
-                  '&:hover': {
-                    background: 'linear-gradient(135deg, #764BA2 0%, #667EEA 100%)',
-                    boxShadow: '0 6px 16px rgba(102, 126, 234, 0.4)',
-                  },
-                }}
-              >
-                {updateProfileMutation.isPending ? 'Сохранение...' : '💾 Сохранить изменения'}
-              </Button>
-            </motion.div>
-
-            {updateProfileMutation.isSuccess && (
-              <Alert severity="success" sx={{ mt: 1, borderRadius: 2 }}>
-                Профиль обновлен!
-              </Alert>
-            )}
-            {updateProfileMutation.isError && (
-              <Alert severity="error" sx={{ mt: 1, borderRadius: 2 }}>
-                {updateProfileMutation.error?.message || 'Ошибка при обновлении профиля'}
-              </Alert>
-            )}
-          </Box>
-        </motion.div>
-
-        {/* Смена пароля */}
-        <motion.div id="password"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.5 }}
-          style={{ marginBottom: '24px' }}
-        >
-          <Box
-            sx={{
-              ...card,
-              padding: { xs: '20px', sm: '24px' },
-            }}
-          >
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              Пароль
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: '0.875rem' }}>
-              Введите текущий пароль и новый пароль для смены
-            </Typography>
-
-            <Box sx={{ mb: 2 }}>
-              <TextField
-                fullWidth
-                type="password"
-                label="Текущий пароль"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                disabled={changePasswordMutation.isPending}
-                sx={{ mb: 2 }}
-              />
-              <TextField
-                fullWidth
-                type="password"
-                label="Новый пароль"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                disabled={changePasswordMutation.isPending}
-                sx={{ mb: 2 }}
-              />
-              <TextField
-                fullWidth
-                type="password"
-                label="Подтвердите новый пароль"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                disabled={changePasswordMutation.isPending}
-                sx={{ mb: 2 }}
-              />
-            </Box>
-
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleChangePassword}
-                disabled={
-                  changePasswordMutation.isPending ||
-                  !currentPassword ||
-                  !newPassword ||
-                  !confirmPassword
-                }
-                fullWidth
-                sx={{
-                  py: 1.5,
-                  fontWeight: 700,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
-                  '&:hover': {
-                    background: 'linear-gradient(135deg, #764BA2 0%, #667EEA 100%)',
-                    boxShadow: '0 6px 16px rgba(102, 126, 234, 0.4)',
-                  },
-                }}
-              >
-                {changePasswordMutation.isPending ? 'Смена пароля...' : '🔒 Изменить пароль'}
-              </Button>
-            </motion.div>
-
-            {changePasswordMutation.isSuccess && (
-              <Alert severity="success" sx={{ mt: 2, borderRadius: 2 }}>
-                Пароль успешно изменен!
-              </Alert>
-            )}
-            {changePasswordMutation.isError && (
-              <Alert severity="error" sx={{ mt: 2, borderRadius: 2 }}>
-                Ошибка при смене пароля. Проверьте текущий пароль.
-              </Alert>
-            )}
-          </Box>
-        </motion.div>
-
-        {/* Очистка БД */}
-        <motion.div id="cleanup"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35, duration: 0.5 }}
-        >
-          <Box
-            sx={{
-              ...card,
-              padding: { xs: '20px', sm: '24px' },
-              mb: 3,
-            }}
-          >
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 1 }}>
-              Удаление данных
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Удалит из базы данных архивные задачи, награды и осиротевшие записи (выполнения,
-              wishlist, ledger, уведомления и бейджи), которые уже не отображаются в интерфейсе.
-              Балансы детей будут пересчитаны.
-            </Typography>
-
-            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
-              <Button
-                variant="outlined"
-                onClick={() => cleanupPreviewMutation.mutate()}
-                disabled={cleanupPreviewMutation.isPending || cleanupRunMutation.isPending}
-                sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
-              >
-                {cleanupPreviewMutation.isPending ? 'Считаем…' : 'Что будет удалено?'}
-              </Button>
-              {cleanupPreview && (
-                <Button
-                  variant="contained"
-                  color="error"
-                  onClick={() => {
-                    if (window.confirm('Удалить все архивные и осиротевшие записи? Это действие необратимо.')) {
-                      cleanupRunMutation.mutate()
-                    }
-                  }}
-                  disabled={cleanupRunMutation.isPending}
-                  sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
-                >
-                  {cleanupRunMutation.isPending ? 'Удаляем…' : 'Удалить'}
-                </Button>
-              )}
-            </Box>
-
-            {(cleanupPreview || cleanupResult) && (() => {
-              const data = cleanupResult || cleanupPreview
-              const rows: Array<[string, number]> = [
-                ['Архивные задачи', data.archivedTasks || 0],
-                ['Архивные награды', data.archivedRewards || 0],
-                ['Осиротевшие назначения задач', data.orphanedTaskAssignments || 0],
-                ['Осиротевшие выполнения', data.orphanedCompletions || 0],
-                ['Осиротевшие желания', data.orphanedWishlistItems || 0],
-                ['Осиротевшие обмены', data.orphanedExchanges || 0],
-                ['Осиротевшие записи леджера', data.orphanedLedgerEntries || 0],
-                ['Осиротевшие уведомления', data.orphanedNotifications || 0],
-                ['Осиротевшие бейджи детей', data.orphanedChildBadges || 0],
-              ]
-              const total = rows.reduce((s, [, v]) => s + v, 0)
-              return (
-                <Box sx={{ p: 2, borderRadius: 2, bgcolor: cleanupResult ? '#E8F5E9' : '#FFF8E1', border: '1px solid', borderColor: cleanupResult ? '#A5D6A7' : '#FFE082' }}>
-                  <Typography sx={{ fontWeight: 700, mb: 1 }}>
-                    {cleanupResult ? `✅ Удалено: ${total}` : `Будет удалено: ${total}`}
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    {rows.filter(([, v]) => v > 0).map(([label, v]) => (
-                      <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem' }}>
-                        <Typography variant="body2" color="text.secondary">{label}</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{v}</Typography>
-                      </Box>
-                    ))}
-                    {total === 0 && (
-                      <Typography variant="body2" color="text.secondary">
-                        Нечего удалять — база уже чистая.
-                      </Typography>
-                    )}
-                  </Box>
-                </Box>
-              )
-            })()}
-
-            {cleanupPreviewMutation.isError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {(cleanupPreviewMutation.error as any)?.response?.data?.error || 'Ошибка предпросмотра'}
-              </Alert>
-            )}
-            {cleanupRunMutation.isError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {(cleanupRunMutation.error as Error)?.message || 'Ошибка очистки'}
-              </Alert>
-            )}
-          </Box>
-        </motion.div>
-
-        {/* Выход */}
-        <motion.div id="account"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.5 }}
-        >
-          <Box
-            sx={{
-              ...card,
-              padding: { xs: '20px', sm: '24px' },
-            }}
-          >
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, mb: 2 }}>
-              Аккаунт и вход
-            </Typography>
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                variant="outlined"
-                color="error"
-                onClick={handleLogout}
-                startIcon={<LogoutIcon />}
-                fullWidth
-                sx={{
-                  py: 1.5,
-                  fontWeight: 700,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  borderWidth: 2,
-                  '&:hover': {
-                    borderWidth: 2,
-                    bgcolor: `${colors.error.main}10`,
-                  },
-                }}
-              >
-                Выйти из аккаунта
-              </Button>
-            </motion.div>
-          </Box>
-        </motion.div>
-        </Box>
+    <Card sx={{ p: { xs: 2, md: 2.5 }, borderColor: '#F3C2BE', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+        <Box sx={{ flex: '0 0 40px', height: 40, borderRadius: '12px', bgcolor: tokens.dangerSoft, color: tokens.danger, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="trash" size={20} /></Box>
+        <Box>
+          <Typography sx={{ fontSize: 15, fontWeight: 600 }}>Очистить архив</Typography>
+          <Typography sx={{ fontSize: 13, color: tokens.text3 }}>Удалит архивные задания и награды и всё, что от них осталось. Балансы детей пересчитаются. Отменить нельзя.</Typography>
         </Box>
       </Box>
-    </Layout>
+      {data && (
+        <Box sx={{ p: 1.5, borderRadius: '12px', bgcolor: result ? tokens.doneSoft : tokens.bg }}>
+          <Typography sx={{ fontSize: 14, fontWeight: 700, mb: rows.length ? 0.75 : 0 }}>{total === 0 ? 'Удалять нечего — архив пуст' : result ? `Удалено записей: ${total}` : `Будет удалено записей: ${total}`}</Typography>
+          {rows.map(([label, v]) => (
+            <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: tokens.text2 }}><span>{label}</span><b>{v}</b></Box>
+          ))}
+        </Box>
+      )}
+      {(check.isError || run.isError) && <Typography role="alert" sx={{ fontSize: 14, color: tokens.danger }}>{(run.error as Error)?.message || 'Не получилось посчитать'}</Typography>}
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <Button variant="outlined" disabled={check.isPending || run.isPending} onClick={() => check.mutate()}>{check.isPending ? 'Считаем…' : 'Что удалится?'}</Button>
+        {preview && total > 0 && (
+          <Button variant="contained" color="error" disabled={run.isPending} onClick={() => window.confirm(`Удалить ${total} записей? Это необратимо.`) && run.mutate()}>{run.isPending ? 'Удаляем…' : 'Удалить'}</Button>
+        )}
+      </Box>
+    </Card>
   )
 }

@@ -90,7 +90,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <Icon name="chevronDown" size={18} />
         </ButtonBase>
         <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'left' }} transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
-          <MenuItem onClick={() => { setAnchor(null); onNavigate?.(); navigate('/parent/settings') }}>Настройки и профиль</MenuItem>
+          <MenuItem onClick={() => { setAnchor(null); onNavigate?.(); navigate('/parent/account') }}>Мой аккаунт</MenuItem>
+          <MenuItem onClick={() => { setAnchor(null); onNavigate?.(); navigate('/parent/settings') }}>Настройки</MenuItem>
           <MenuItem onClick={() => { setAnchor(null); clearAuth(); navigate(getFamilyPcToken() ? '/entry' : '/login') }} sx={{ color: tokens.danger }}>Выйти</MenuItem>
         </Menu>
       </Box>

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Patch, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Patch, Get, UseGuards, ForbiddenException } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { DeviceTokenService } from './device-token.service';
@@ -80,6 +80,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async changePassword(@User() user: RequestUser, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user.userId, dto);
+  }
+
+  /** Взрослые семьи для страницы «Мой аккаунт»: кто владелец, кто приглашён. */
+  @Get('family')
+  @UseGuards(JwtAuthGuard)
+  async getFamily(@User() user: RequestUser) {
+    if (user.role !== 'PARENT') throw new ForbiddenException();
+    return this.authService.getFamilyAdults(user.familyId, user.userId);
   }
 
   @Get('profile')

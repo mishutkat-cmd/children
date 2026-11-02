@@ -323,6 +323,23 @@ export class AuthService {
     return { success: true };
   }
 
+  async getFamilyAdults(familyId: string, userId: string) {
+    const users = await this.db.findMany('users', { familyId, role: 'PARENT' });
+    const time = (u: any) => new Date(u.createdAt ?? 0).getTime();
+    return users
+      .sort((a: any, b: any) => time(a) - time(b))
+      .map((u: any, i: number) => ({
+        id: u.id,
+        login: u.login,
+        email: u.email ?? null,
+        avatarUrl: u.avatarUrl ?? null,
+        createdAt: u.createdAt ?? null,
+        isYou: u.id === userId,
+        // Первый взрослый создал семью.
+        isOwner: i === 0,
+      }));
+  }
+
   async getProfile(userId: string) {
     const user = await this.db.findFirst('users', { id: userId });
     if (!user) {
