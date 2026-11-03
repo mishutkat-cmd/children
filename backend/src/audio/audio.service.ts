@@ -1,13 +1,14 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { LocalStorageService } from '../files/local-storage.service';
 import { getChildProfileId } from '../db/doc-helpers';
+import { PushService } from '../push/push.service';
 
 const COLLECTION = 'audioRequests';
 const CONSENT_COLLECTION = 'audioConsent';
 
 /** Сколько ребёнку даётся на ответ, прежде чем запрос считается просроченным. */
-const CONSENT_WINDOW_MS = 3 * 60 * 1000;
+const CONSENT_WINDOW_MS = 5 * 60 * 1000;
 /** Сколько хранится сама запись, потом её убирает retention-свип. */
 const AUDIO_RETENTION_DAYS = 7;
 export const DEFAULT_DURATION_SEC = 30;
@@ -24,6 +25,7 @@ export class AudioService {
   constructor(
     private db: DocStore,
     private storage: LocalStorageService,
+    @Optional() private push?: PushService,
   ) {}
 
   // ── Родитель ────────────────────────────────────────────────
@@ -51,6 +53,17 @@ export class AudioService {
       },
       id,
     );
+
+    // Без push ребёнок увидит запрос, только если приложение уже открыто, —
+    // а окно согласия всего несколько минут. Ответ родителю не ждёт отправки.
+    void this.push
+      ?.sendToUser(resolved.userId, {
+        title: 'Родитель просит послушать',
+        body: 'Открой приложение, чтобы разрешить или отказаться.',
+        data: { type: 'AUDIO_REQUEST', requestId: id },
+        channelId: 'listen',
+      })
+      .catch(() => {});
 
     return this.present(await this.db.get(COLLECTION, id));
   }
@@ -185,6 +198,7 @@ export class AudioService {
     return {
       id: row.id,
       childId: row.childId,
+      childUserId: row.childUserId ?? null,
       status,
       autoConsent: this.consentFor(row.childId),
       durationSec: row.durationSec ?? DEFAULT_DURATION_SEC,

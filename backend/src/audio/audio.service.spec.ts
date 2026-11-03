@@ -36,6 +36,16 @@ describe('AudioService — согласие и владение', () => {
     svc = new AudioService(db as any, makeStorage());
   });
 
+  it('сразу шлёт ребёнку push, чтобы он успел ответить', async () => {
+    const push = { sendToUser: jest.fn(async () => 1) };
+    const withPush = new AudioService(db as any, makeStorage(), push as any);
+    const req = await withPush.createRequest('f1', 'parent1', 'childUser', 30);
+    expect(push.sendToUser).toHaveBeenCalledWith(
+      'childUser',
+      expect.objectContaining({ data: { type: 'AUDIO_REQUEST', requestId: req.id }, channelId: 'listen' }),
+    );
+  });
+
   it('создаёт запрос в статусе PENDING на профиль ребёнка', async () => {
     const req = await svc.createRequest('f1', 'parent1', 'childUser', 30);
     expect(req.status).toBe('PENDING');
@@ -65,8 +75,8 @@ describe('AudioService — согласие и владение', () => {
 
   it('просроченный без ответа запрос ребёнку уже не показывается', async () => {
     const req = await svc.createRequest('f1', 'parent1', 'childUser', 30);
-    // Сдвигаем время создания на 5 минут назад.
-    db.rows.get(req.id).createdAt = new Date(Date.now() - 5 * 60 * 1000);
+    // Сдвигаем время создания за окно согласия (5 минут).
+    db.rows.get(req.id).createdAt = new Date(Date.now() - 6 * 60 * 1000);
     expect(await svc.pendingForChild('childUser', 'f1')).toBeNull();
     expect((await svc.getOne('f1', req.id)).status).toBe('EXPIRED');
   });

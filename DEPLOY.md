@@ -227,6 +227,11 @@ curl -H "X-Diagnostics-Token: $DIAGNOSTICS_TOKEN" https://children.evolvenext.ne
 curl https://children.evolvenext.net/frontend/status
 ```
 
+Push (запрос «послушать» на телефон ребёнка): в env задать
+`FCM_SERVICE_ACCOUNT_FILE` — путь к JSON-ключу сервисного аккаунта Firebase-проекта
+`childrenevolvenext` (файл не в git, права 600). Без переменной push выключен,
+в логе одно предупреждение при первой попытке отправки.
+
 PM2:
 
 ```bash

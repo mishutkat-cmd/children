@@ -114,6 +114,7 @@ async function bootstrap() {
         '/api',
         '/auth',
         '/pairing',
+        '/push',
         '/children',
         '/badges',
         '/tasks',

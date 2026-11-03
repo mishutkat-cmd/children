@@ -90,6 +90,8 @@ export const COLLECTIONS: Record<string, string[][]> = {
   familySettings: [['familyId']],
   decayRules: [['familyId']],
   deviceTokens: [['userId', 'deviceId'], ['userId']],
+  // FCM-токены телефонов для push (id = sha256 токена).
+  pushTokens: [['userId']],
   // Подключение телефона ребёнка по коду, сессии устройств, приглашения взрослых.
   pairingCodes: [['code'], ['childUserId']],
   deviceSessions: [['familyId', 'createdAt'], ['userId']],
