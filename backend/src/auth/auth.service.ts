@@ -261,7 +261,13 @@ export class AuthService {
       updateData.login = dto.login;
     }
 
-    // Обновляем email
+    // Обновляем email. Смена почты — с текущим паролем: иначе чужая открытая
+    // сессия могла бы переписать почту и потом увести аккаунт через неё.
+    if (dto.email && dto.email !== user.email) {
+      const ok =
+        !!dto.currentPassword && !!user.passwordHash && (await bcrypt.compare(dto.currentPassword, user.passwordHash));
+      if (!ok) throw new BadRequestException('Чтобы сменить почту, введите текущий пароль');
+    }
     if (dto.email) {
       // Проверяем, что email не занят другим пользователем
       const existingByEmail = await this.db.findFirst('users', { email: dto.email });

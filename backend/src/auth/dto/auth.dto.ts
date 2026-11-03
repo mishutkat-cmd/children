@@ -47,6 +47,11 @@ export class UpdateProfileDto {
   @IsOptional()
   email?: string;
 
+  /** Обязателен при смене почты: почта — канал восстановления доступа. */
+  @IsString()
+  @IsOptional()
+  currentPassword?: string;
+
   // Пароль здесь не меняется: только через /auth/change-password с текущим паролем.
 
   @IsString()

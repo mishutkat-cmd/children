@@ -64,6 +64,7 @@ export default function ParentAccount() {
   const [editing, setEditing] = useState(false)
   const [login, setLogin] = useState('')
   const [email, setEmail] = useState('')
+  const [emailPw, setEmailPw] = useState('')
   const [pwOpen, setPwOpen] = useState(false)
   const [pw, setPw] = useState({ current: '', next: '', repeat: '' })
   const [inviting, setInviting] = useState(false)
@@ -81,6 +82,7 @@ export default function ParentAccount() {
       qc.invalidateQueries({ queryKey: ['family-adults'] })
       syncStore({ email: data?.email, avatarUrl: data?.avatarUrl, login: data?.login })
       setEditing(false)
+      setEmailPw('')
       setMsg({ ok: true, text: 'Сохранено' })
     },
     onError: (e: any) => setMsg({ ok: false, text: e?.response?.data?.message || 'Не получилось сохранить' }),
@@ -106,7 +108,11 @@ export default function ParentAccount() {
     if (email && !email.includes('@')) return setMsg({ ok: false, text: 'Проверьте почту' })
     const patch: Record<string, string> = {}
     if (login.trim() !== me?.login) patch.login = login.trim()
-    if (email.trim() !== (me?.email || '')) patch.email = email.trim()
+    if (email.trim() !== (me?.email || '')) {
+      if (!emailPw) return setMsg({ ok: false, text: 'Чтобы сменить почту, введите текущий пароль' })
+      patch.email = email.trim()
+      patch.currentPassword = emailPw
+    }
     if (Object.keys(patch).length === 0) return setEditing(false)
     saveProfile.mutate(patch)
   }
@@ -137,6 +143,9 @@ export default function ParentAccount() {
           <Box component="form" onSubmit={(e) => { e.preventDefault(); submitProfile() }} sx={{ flex: 1, minWidth: 240, display: 'flex', gap: 1.25, flexWrap: 'wrap', alignItems: 'center' }}>
             <TextField size="small" label="Логин" value={login} onChange={(e) => setLogin(e.target.value)} autoFocus />
             <TextField size="small" label="Почта" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            {email.trim() !== (me?.email || '') && (
+              <TextField size="small" type="password" label="Текущий пароль" autoComplete="current-password" value={emailPw} onChange={(e) => setEmailPw(e.target.value)} helperText="Нужен, чтобы сменить почту" />
+            )}
             <Button type="submit" variant="contained" disabled={saveProfile.isPending}>Сохранить</Button>
             <Button onClick={() => setEditing(false)}>Отмена</Button>
           </Box>

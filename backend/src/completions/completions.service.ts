@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, HttpException } from '@nestjs/common';
 import { DocStore } from '../db/doc-store.service';
 import { normalizePrivateFileUrl } from '../files/file-signing';
 import { LedgerService } from '../ledger/ledger.service';
@@ -83,6 +83,17 @@ export class CompletionsService {
 
       if (!task) {
         throw new NotFoundException('Task not found');
+      }
+
+      // Ребёнок отмечает только своё: то же правило, что у ежедневного
+      // планировщика (assignedTo ALL или явное назначение). Родитель может
+      // отметить за любого ребёнка семьи.
+      if (actor === 'CHILD' && task.assignedTo && task.assignedTo !== 'ALL') {
+        const assignment = await this.db.findFirst('taskAssignments', {
+          taskId: task.id,
+          childId: { in: [childProfileId, userId] },
+        });
+        if (!assignment) throw new ForbiddenException('Это задание назначено другому ребёнку');
       }
 
       if (dto.performedAt) {
@@ -310,7 +321,7 @@ export class CompletionsService {
       return completionWithTask;
     } catch (error) {
       console.error('Error in CompletionsService.create:', error);
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
       throw new BadRequestException(`Failed to create completion: ${error.message}`);
