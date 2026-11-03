@@ -7,6 +7,7 @@ import { usePendingExchanges } from '../hooks/useExchanges'
 import { tokens } from '../theme'
 import { Icon, type IconName } from './ui'
 import NotificationBell from './NotificationBell'
+import { Brand } from './Brand'
 import { getFamilyPcToken } from '../lib/familyPc'
 
 type NavItem = { to: string; label: string; icon: IconName; match: (p: string) => boolean; badge?: boolean }
@@ -70,7 +71,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <Box sx={{ width: 240, height: '100%', boxSizing: 'border-box', p: '24px 16px', display: 'flex', flexDirection: 'column', gap: 0.5, bgcolor: tokens.paper, overflowY: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5, ml: 1.5 }}>
-        <Typography sx={{ flex: 1, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>Звёздочки</Typography>
+        <Brand size={30} fontSize={18} />
       </Box>
       <Box component="nav" aria-label="Разделы" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
         {MAIN.map((i) => <NavLink key={i.to} item={i} pathname={pathname} count={i.badge ? pending : undefined} onClick={onNavigate} />)}
@@ -113,7 +114,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: { xs: 'flex', md: 'none' }, alignItems: 'center', gap: 1, px: 1, pt: 'calc(env(safe-area-inset-top, 0px) + 6px)', pb: 0.75, bgcolor: tokens.paper, borderBottom: `1px solid ${tokens.line}`, position: 'sticky', top: 0, zIndex: 1100 }}>
           <IconButton onClick={() => setOpen(true)} aria-label="Меню"><Icon name="list" /></IconButton>
-          <Typography sx={{ flex: 1, fontSize: 17, fontWeight: 800 }}>Звёздочки</Typography>
+          <Box sx={{ flex: 1, minWidth: 0 }}><Brand size={28} fontSize={17} /></Box>
           {pending > 0 && (
             <ButtonBase component={RouterLink} to="/parent/approvals" sx={{ height: 36, px: 1.5, borderRadius: '18px', bgcolor: tokens.reviewSoft, color: tokens.review, fontSize: 13, fontWeight: 700 }}>
               Проверка · {pending}

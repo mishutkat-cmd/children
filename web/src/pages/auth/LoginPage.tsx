@@ -6,7 +6,7 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useAuthStore } from '../../store/authStore'
 import { api } from '../../lib/api'
 import { tokens } from '../../theme'
-import { StarIcon } from '../../components/ui'
+import { Brand } from '../../components/Brand'
 import { getFamilyPcToken, setFamilyPcChild } from '../../lib/familyPc'
 
 /** Вход (AW_Login): слева о приложении, справа вход взрослого и дверь «Я ребёнок». */
@@ -44,17 +44,14 @@ export default function LoginPage() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: tokens.bg, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
       <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', justifyContent: 'center', gap: 2, p: 8, bgcolor: tokens.primary, color: '#fff' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ width: 48, height: 48, borderRadius: '14px', bgcolor: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><StarIcon size={28} /></Box>
-          <Typography sx={{ fontSize: 22, fontWeight: 800 }}>Звёздочки</Typography>
-        </Box>
+        <Box sx={{ display: 'flex' }}><Box sx={{ p: '6px', pr: 2.25, borderRadius: '18px', bgcolor: '#FFFFFF' }}><Brand size={44} kid fontSize={24} color={tokens.text} /></Box></Box>
         <Typography component="h1" sx={{ fontSize: 40, fontWeight: 800, lineHeight: 1.15, maxWidth: 460 }}>Домашние дела, которые дети делают сами</Typography>
         <Typography sx={{ fontSize: 17, color: '#D3DEFF', maxWidth: 440, lineHeight: 1.5 }}>Задания, проверка и награды на компьютере. Детям — своё приложение на телефоне или вход с семейного компьютера.</Typography>
       </Box>
 
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, sm: 4 } }}>
         <Box sx={{ width: '100%', maxWidth: 400, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          <Box sx={{ display: { xs: 'flex', md: 'none' }, alignItems: 'center', gap: 1 }}><StarIcon size={24} /><Typography sx={{ fontSize: 20, fontWeight: 800 }}>Звёздочки</Typography></Box>
+          <Box sx={{ display: { xs: 'flex', md: 'none' } }}><Brand size={32} kid fontSize={22} /></Box>
           <Box>
             <Typography component="h2" sx={{ fontSize: 26, fontWeight: 700 }}>{mode === 'pin' ? 'Вход по PIN' : 'Вход для взрослых'}</Typography>
             <Typography sx={{ fontSize: 15, color: tokens.text2, mt: 0.5 }}>{mode === 'pin' ? 'Для старших детей: логин и PIN из 4 цифр, который задал родитель.' : 'Логин или почта и пароль.'}</Typography>

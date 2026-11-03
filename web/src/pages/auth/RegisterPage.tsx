@@ -4,7 +4,7 @@ import { Box, Button, CircularProgress, TextField, Typography } from '@mui/mater
 import { useAuthStore } from '../../store/authStore'
 import { api } from '../../lib/api'
 import { tokens } from '../../theme'
-import { StarIcon } from '../../components/ui'
+import { Brand } from '../../components/Brand'
 import { setFamilyPcChild } from '../../lib/familyPc'
 
 /** Каркас страниц взрослого входа: по центру, с логотипом. */
@@ -12,7 +12,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: tokens.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, sm: 4 } }}>
       <Box sx={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><StarIcon size={24} /><Typography sx={{ fontSize: 20, fontWeight: 800 }}>Звёздочки</Typography></Box>
+        <Brand size={32} kid fontSize={22} />
         {children}
       </Box>
     </Box>

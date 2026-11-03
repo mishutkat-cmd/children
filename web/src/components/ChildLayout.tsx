@@ -5,6 +5,7 @@ import { tokens } from '../theme'
 import { useAuthStore } from '../store/authStore'
 import { useChildName, useChildSummary, useStreak } from '../hooks/useChildData'
 import { Icon, KidAvatar, StarBadge, type IconName } from './ui'
+import { Brand } from './Brand'
 import { FAMILY_PC_IDLE_MS, getFamilyPcToken, isFamilyPcChild, setFamilyPcChild } from '../lib/familyPc'
 
 const NAV: { to: string; label: string; icon: IconName; match: (p: string) => boolean }[] = [
@@ -88,6 +89,7 @@ export default function ChildLayout({ children }: { children: ReactNode }) {
           position: 'sticky', top: 0, height: '100dvh', boxSizing: 'border-box',
         }}
       >
+        <Box sx={{ px: 1, mb: 1.5 }}><Brand size={32} kid fontSize={22} /></Box>
         <Box
           sx={{ bgcolor: tokens.paper, borderRadius: '22px', boxShadow: `0 2px 0 ${tokens.kidShadow}`, p: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', mb: 1.5 }}
         >
