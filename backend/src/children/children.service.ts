@@ -573,6 +573,7 @@ export class ChildrenService {
     }
     await this.db.deleteMany('deviceTokens', { userId });
     await this.db.deleteMany('pushTokens', { userId });
+    if (childProfileId) await this.db.deleteMany('moneyEntries', { childId: childProfileId });
 
     // 7. Child profile - удаляем если существует
     if (childProfileId) {

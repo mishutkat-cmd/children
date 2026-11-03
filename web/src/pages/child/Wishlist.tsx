@@ -7,6 +7,8 @@ import { tokens } from '../../theme'
 import { api } from '../../lib/api'
 import { useChildSummary, useChildWishlist, useFamilyRewards } from '../../hooks/useChildData'
 import { allGoals, mainGoal, type Goal } from './goals-model'
+import { Piggybank } from '../../components/Piggybank'
+import { formatUah, parseUah, usePiggybank } from '../../hooks/usePiggybank'
 
 const TILES = [
   { bg: tokens.reviewSoft, color: tokens.review },
@@ -34,6 +36,9 @@ export default function ChildGoals() {
   const { data: rewards = [] } = useFamilyRewards()
   const balance = summary?.pointsBalance ?? 0
   const main = mainGoal(wishlist, balance)
+  // Цель с ценой в гривнах копится деньгами — и прогресс показываем в гривнах.
+  const { data: piggy } = usePiggybank()
+  const mainMoney = main ? piggy?.goals.find((g) => g.rewardId === main.rewardId && g.priceCents) : undefined
   const goals = allGoals(wishlist, rewards, balance).filter((g) => g.rewardId !== main?.rewardId)
   const [proposeOpen, setProposeOpen] = useState(false)
   const [confirm, setConfirm] = useState<Goal | null>(null)
@@ -90,9 +95,13 @@ export default function ChildGoals() {
           <Box sx={{ flex: 1, width: '100%' }}>
             <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#F5C25A' }}>Главная цель</Typography>
             <Typography component="h2" sx={{ mt: 0.5, fontSize: { xs: 26, md: 32 }, fontWeight: 900, overflowWrap: 'anywhere' }}>{main.title}</Typography>
-            <Box sx={{ mt: 1.75 }}><Bar value={main.percent} color={tokens.star} height={18} track="#3A3F55" /></Box>
+            <Box sx={{ mt: 1.75 }}>
+              <Bar value={mainMoney ? Math.min(100, Math.round((mainMoney.savedCents / mainMoney.priceCents!) * 100)) : main.percent} color={tokens.star} height={18} track="#3A3F55" />
+            </Box>
             <Typography sx={{ mt: 1.25, fontSize: 17, fontWeight: 700, color: '#C9CEDD' }}>
-              {main.needsPrice
+              {mainMoney
+                ? `${formatUah(mainMoney.savedCents)} из ${formatUah(mainMoney.priceCents!)} в копилке`
+                : main.needsPrice
                 ? 'Ждём, когда родители поставят цену'
                 : `${formatNumber(Math.min(balance, main.cost))} из ${formatNumber(main.cost)}${etaLabel(main.left, perDay)}`}
             </Typography>
@@ -142,6 +151,8 @@ export default function ChildGoals() {
           )
         })}
       </Box>
+      <Piggybank kid />
+
       {!isLoading && !main && goals.length === 0 && (
         <Box sx={{ bgcolor: tokens.paper, borderRadius: '22px', p: 3, textAlign: 'center', fontSize: 18, fontWeight: 700, color: tokens.text2 }}>
           Целей пока нет. Нажми «Я хочу…» и расскажи, о чём мечтаешь.
@@ -169,6 +180,7 @@ export default function ChildGoals() {
 function ProposeDialog({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: (title: string) => void }) {
   const [title, setTitle] = useState('')
   const [imageUrl, setImageUrl] = useState('')
+  const [uah, setUah] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -195,10 +207,12 @@ function ProposeDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
     setBusy(true)
     setErr('')
     try {
-      const reward = (await api.post('/rewards', { title: t, type: 'ITEM', ...(imageUrl && { imageUrl }) })).data
+      const cents = parseUah(uah)
+      const reward = (await api.post('/rewards', { title: t, type: 'ITEM', ...(imageUrl && { imageUrl }), ...(cents && { moneyValueCents: cents }) })).data
       await api.post('/wishlist/child/wishlist', { rewardGoalId: reward.id })
       setTitle('')
       setImageUrl('')
+      setUah('')
       onDone(t)
     } catch (e: any) {
       setErr(e?.response?.data?.message || 'Не получилось отправить')
@@ -211,8 +225,9 @@ function ProposeDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 3 }}>
         <Typography variant="h4" component="h2">Я хочу…</Typography>
-        <Typography sx={{ color: tokens.text2 }}>Напиши, о чём мечтаешь. Сколько звёзд это стоит, решат родители.</Typography>
+        <Typography sx={{ color: tokens.text2 }}>Напиши, о чём мечтаешь. Если знаешь цену — копи на неё деньги в копилке. Сколько звёзд это стоит, решат родители.</Typography>
         <TextField autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Например: велосипед" inputProps={{ maxLength: 80, 'aria-label': 'Что хочешь' }} />
+        <TextField value={uah} onChange={(e) => setUah(e.target.value)} label="Сколько стоит, грн (если знаешь)" inputProps={{ inputMode: 'decimal' }} />
         <Button component="label" variant="outlined" disabled={busy} startIcon={<Icon name="camera" />}>
           {imageUrl ? 'Картинка добавлена ✓' : 'Добавить картинку'}
           <input hidden type="file" accept="image/*" onChange={(e) => upload(e.target.files?.[0])} />

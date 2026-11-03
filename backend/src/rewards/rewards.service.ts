@@ -55,8 +55,8 @@ export class RewardsService {
 
   async create(familyId: string, dto: CreateRewardDto, actor: RequestUser) {
     const isChild = actor.role === 'CHILD';
-    if (!isChild && !dto.costPoints) {
-      throw new BadRequestException('Укажите цену в звёздах');
+    if (!isChild && !dto.costPoints && !(dto.moneyValueCents && dto.moneyValueCents > 0)) {
+      throw new BadRequestException('Укажите цену в звёздах или в гривнах');
     }
     if (!isChild && dto.ownerChildId) {
       const owner = await this.db.findFirst('users', { id: dto.ownerChildId, familyId, role: 'CHILD' });
@@ -79,7 +79,10 @@ export class RewardsService {
       scope,
       ownerChildId: isChild ? actor.userId : scope === 'PERSONAL' ? dto.ownerChildId : null,
       // Ребёнок только предлагает желание: цену в звёздах и деньгах ставит родитель.
-      ...(isChild && { costPoints: 0, moneyValueCents: 0, needsPrice: true }),
+      // Цену в гривнах ребёнок может назвать сам: копит он свои деньги, а
+      // звёздную цену (для обмена звёзд на награду) всё равно ставит родитель.
+      ...(isChild && { costPoints: 0, moneyValueCents: dto.moneyValueCents ?? 0, needsPrice: true }),
+      ...(!isChild && this.starPriceFromMoney(familyId, dto)),
       createdByUserId: actor.userId,
       status: 'ACTIVE',
     }, rewardId);
@@ -91,13 +94,26 @@ export class RewardsService {
     const reward = await this.findOne(id, familyId);
     if (actor.role === 'CHILD') {
       await this.assertChildOwnsReward(reward, actor.userId);
-      const { moneyValueCents, costPoints, scope, ownerChildId, ...rest } = dto as any;
+      const { costPoints, scope, ownerChildId, ...rest } = dto as any;
       dto = rest;
-    } else if (dto.costPoints) {
-      (dto as any).needsPrice = false;
+    } else {
+      Object.assign(dto, this.starPriceFromMoney(familyId, dto));
+      if (dto.costPoints) (dto as any).needsPrice = false;
     }
     await this.db.update('rewards', id, dto);
     return this.db.findFirst('rewards', { id });
+  }
+
+  /**
+   * Родитель назвал цену в гривнах, а в звёздах нет — считаем звёзды по курсу
+   * семьи, чтобы цель можно было и копить деньгами, и получить за звёзды.
+   */
+  private starPriceFromMoney(familyId: string, dto: { costPoints?: number; moneyValueCents?: number }) {
+    if (dto.costPoints || !(dto.moneyValueCents && dto.moneyValueCents > 0)) return {};
+    const s = this.db.findFirstSync('familySettings', { familyId });
+    const raw = typeof s?.conversionRate === 'string' ? parseFloat(s.conversionRate) : s?.conversionRate;
+    const rate = raw > 0 ? raw : 10;
+    return { costPoints: Math.max(1, Math.round((dto.moneyValueCents / 100) * rate)), needsPrice: false };
   }
 
   /**

@@ -7,10 +7,12 @@ import { Card, KidDot, kidColor, useKidCompletions, useKids, type Kid } from '..
 import { Bar, Icon, StarIcon, formatNumber } from '../../components/ui'
 import { tokens } from '../../theme'
 import { api } from '../../lib/api'
+import { Piggybank } from '../../components/Piggybank'
+import { parseUah } from '../../hooks/usePiggybank'
 import { useApproveExchange, usePendingExchanges, useRejectExchange } from '../../hooks/useExchanges'
 
 type Scope = 'SHOP' | 'PERSONAL' | 'FAMILY'
-type Reward = { id: string; title: string; costPoints: number; needsPrice?: boolean; type: string; imageUrl?: string; description?: string; createdByUserId?: string; createdAt?: string; scope?: Scope; ownerChildId?: string; familyBaseline?: Record<string, number> | null }
+type Reward = { id: string; title: string; costPoints: number; moneyValueCents?: number; needsPrice?: boolean; type: string; imageUrl?: string; description?: string; createdByUserId?: string; createdAt?: string; scope?: Scope; ownerChildId?: string; familyBaseline?: Record<string, number> | null }
 type WishItem = { id: string; childId: string; isFavorite?: boolean; createdAt?: string; rewardGoal: Reward; child?: { id: string; name: string } }
 type Tab = string | 'family'
 type DialogState = { reward?: Reward; kid?: Kid; scope?: Scope } | null
@@ -113,7 +115,10 @@ export default function ParentGoals() {
           </Box>
 
           {current && tab !== 'family' ? (
-            <KidGoals key={current.userId} kid={current} goals={goalsOf(current)} requests={requestsOf(current)} onEdit={(r) => setDialog({ reward: r })} onDone={refresh} />
+            <>
+              <KidGoals key={current.userId} kid={current} goals={goalsOf(current)} requests={requestsOf(current)} onEdit={(r) => setDialog({ reward: r })} onDone={refresh} />
+              <Piggybank key={`pb-${current.userId}`} childId={current.userId} childName={current.name} />
+            </>
           ) : (
             <FamilyGoals goals={family} kids={kids} onEdit={(r) => setDialog({ reward: r })} onAdd={() => setDialog({ scope: 'FAMILY' })} />
           )}
@@ -397,20 +402,21 @@ function RewardDialog({ state, kids, shop, onClose, onDone }: { state: NonNullab
   const [forKid, setForKid] = useState(state.kid?.userId || reward?.ownerChildId || kids[0]?.userId || '')
   const [title, setTitle] = useState(reward?.title || '')
   const [price, setPrice] = useState(reward?.costPoints ? String(reward.costPoints) : '')
+  const [uah, setUah] = useState(reward?.moneyValueCents ? String(reward.moneyValueCents / 100) : '')
   const [existing, setExisting] = useState('')
   const [error, setError] = useState('')
 
   const save = useMutation({
     mutationFn: async () => {
       if (reward) {
-        await api.patch(`/rewards/${reward.id}`, { title: title.trim(), costPoints: Number(price) })
+        await api.patch(`/rewards/${reward.id}`, { title: title.trim(), ...prices() })
         return
       }
       if (scope === 'PERSONAL' && existing) {
         await api.post('/wishlist/parent/wishlist', { childId: forKid, rewardGoalId: existing })
         return
       }
-      const created = (await api.post('/rewards', { title: title.trim(), costPoints: Number(price), type: scope === 'FAMILY' ? 'EVENT' : 'ITEM', scope, ...(scope === 'PERSONAL' && { ownerChildId: forKid }) })).data
+      const created = (await api.post('/rewards', { title: title.trim(), ...prices(), type: scope === 'FAMILY' ? 'EVENT' : 'ITEM', scope, ...(scope === 'PERSONAL' && { ownerChildId: forKid }) })).data
       if (scope === 'PERSONAL') await api.post('/wishlist/parent/wishlist', { childId: forKid, rewardGoalId: created.id })
     },
     onSuccess: () => { onDone(); onClose() },
@@ -418,9 +424,14 @@ function RewardDialog({ state, kids, shop, onClose, onDone }: { state: NonNullab
   })
   const archive = useMutation({ mutationFn: () => api.post(`/rewards/${reward!.id}/archive`), onSuccess: () => { onDone(); onClose() } })
 
+  // Звёзды пустые, а гривны есть — сервер посчитает звёзды по курсу семьи.
+  const prices = () => {
+    const cents = parseUah(uah)
+    return { ...(Number(price) > 0 && { costPoints: Number(price) }), ...(cents && { moneyValueCents: cents }) }
+  }
   const submit = () => {
     if (!existing && !title.trim()) return setError('Как называется?')
-    if (!existing && !(Number(price) > 0)) return setError('Укажите цену в звёздах')
+    if (!existing && !(Number(price) > 0) && !parseUah(uah)) return setError('Укажите цену в звёздах или в гривнах')
     setError('')
     save.mutate()
   }
@@ -456,7 +467,10 @@ function RewardDialog({ state, kids, shop, onClose, onDone }: { state: NonNullab
         {!existing && (
           <>
             <TextField label="Название" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus inputProps={{ maxLength: 80 }} placeholder={scope === 'FAMILY' ? 'Аквапарк всей семьёй' : scope === 'SHOP' ? '+30 минут мультиков' : 'LEGO Technic'} />
-            <TextField label="Цена в звёздах" type="number" value={price} onChange={(e) => setPrice(e.target.value)} inputProps={{ min: 1 }} />
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField label="Цена в звёздах" type="number" value={price} onChange={(e) => setPrice(e.target.value)} inputProps={{ min: 1 }} sx={{ flex: 1 }} />
+              <TextField label="Цена в гривнах" value={uah} onChange={(e) => setUah(e.target.value)} inputProps={{ inputMode: 'decimal' }} sx={{ flex: 1 }} helperText="для копилки" />
+            </Box>
           </>
         )}
         <Typography sx={{ fontSize: 13, color: tokens.text3 }}>

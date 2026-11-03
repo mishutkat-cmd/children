@@ -92,6 +92,8 @@ export const COLLECTIONS: Record<string, string[][]> = {
   deviceTokens: [['userId', 'deviceId'], ['userId']],
   // FCM-токены телефонов для push (id = sha256 токена).
   pushTokens: [['userId']],
+  // Копилка в гривнах: наличные, обмен звёзд, отложенное на цели.
+  moneyEntries: [['childId', 'createdAt'], ['childId', 'rewardId']],
   // Подключение телефона ребёнка по коду, сессии устройств, приглашения взрослых.
   pairingCodes: [['code'], ['childUserId']],
   deviceSessions: [['familyId', 'createdAt'], ['userId']],

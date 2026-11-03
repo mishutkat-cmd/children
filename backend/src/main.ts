@@ -115,6 +115,7 @@ async function bootstrap() {
         '/auth',
         '/pairing',
         '/push',
+        '/piggybank',
         '/children',
         '/badges',
         '/tasks',

@@ -20,6 +20,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { LocationsModule } from './locations/locations.module';
 import { AudioModule } from './audio/audio.module';
 import { PushModule } from './push/push.module';
+import { PiggybankModule } from './piggybank/piggybank.module';
 import { ActivityModule } from './activity/activity.module';
 import { RetentionModule } from './retention/retention.module';
 import { StorageKvModule } from './storage-kv/storage-kv.module';
@@ -49,6 +50,7 @@ import { StorageKvModule } from './storage-kv/storage-kv.module';
     NotificationsModule,
     LocationsModule,
     PushModule,
+    PiggybankModule,
     AudioModule,
     ActivityModule,
     RetentionModule,
