@@ -34,11 +34,18 @@ describe('PiggybankService', () => {
     expect(s.walletCents).toBe(15000);
   });
 
-  it('converts stars to hryvnias at the family rate', async () => {
+  it('converts stars to hryvnias and puts them straight onto the main goal', async () => {
     const s = await svc.convert(kid, 250);
-    expect(s.walletCents).toBe(2500); // 250 звёзд / 10 = 25 грн
-    expect(s.pointsBalance).toBe(50);
+    expect(s.pointsBalance).toBe(50); // 250 звёзд списались
+    expect(s.walletCents).toBe(0); // деньги не свободные — ушли на цель
+    expect(s.goals[0].savedCents).toBe(2500); // 250 звёзд / 10 = 25 грн на «Лего»
     await expect(svc.convert(kid, 100)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('keeps converted money free in the wallet when asked', async () => {
+    const s = await svc.convert(kid, 250, undefined, true);
+    expect(s.walletCents).toBe(2500);
+    expect(s.goals[0].savedCents).toBe(0);
   });
 
   it('moves money onto a goal and back, never below zero', async () => {

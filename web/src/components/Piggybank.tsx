@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Box, Button, ButtonBase, CircularProgress, Dialog, DialogContent, TextField, Typography } from '@mui/material'
+import { Box, Button, ButtonBase, Checkbox, CircularProgress, Dialog, DialogContent, FormControlLabel, TextField, Typography } from '@mui/material'
 import { Bar, Icon, IconTile, StarAmount, formatNumber } from './ui'
 import { fonts, tokens } from '../theme'
 import { formatUah, parseUah, usePiggybank, type MoneyEntry, type MoneyGoal } from '../hooks/usePiggybank'
@@ -148,12 +148,15 @@ function MoneyDialog({ dlg, onClose, pb, kid }: { dlg: Dlg; onClose: () => void;
   const [value, setValue] = useState('')
   const [note, setNote] = useState('')
   const [err, setErr] = useState('')
+  const [keep, setKeep] = useState(false)
   const data = pb.data!
-  const close = () => { setValue(''); setNote(''); setErr(''); onClose() }
+  const close = () => { setValue(''); setNote(''); setErr(''); setKeep(false); onClose() }
   if (!dlg || !data) return <Dialog open={false} />
 
   const busy = pb.cash.isPending || pb.convert.isPending || pb.allocate.isPending || pb.setPrice.isPending
   const fail = (e: any) => setErr(errText(e, 'Не получилось'))
+  // Цель, на которую по умолчанию уходит обмен (как на сервере).
+  const convertTarget = data.goals.find((g) => !g.bought && g.priceCents != null && g.isFavorite) || data.goals.find((g) => !g.bought && g.priceCents != null) || null
 
   let title = ''
   let hint = ''
@@ -165,12 +168,13 @@ function MoneyDialog({ dlg, onClose, pb, kid }: { dlg: Dlg; onClose: () => void;
     title = 'Обменять звёзды на гривны'
     label = 'Сколько звёзд'
     const pts = Math.floor(Number(value) || 0)
-    hint = `Есть ${formatNumber(data.pointsBalance)} звёзд. ${data.conversionRate} звёзд = 1 грн.`
+    const base = `Есть ${formatNumber(data.pointsBalance)} звёзд. ${data.conversionRate} звёзд = 1 грн.`
+    hint = convertTarget && !keep ? `${base} Деньги пойдут на цель «${convertTarget.title}».` : `${base} Деньги останутся свободными в кошельке.`
     preview = pts > 0 ? `Получишь ${formatUah(Math.floor((pts * 100) / data.conversionRate))}` : ''
     submit = () => {
       if (pts < data.conversionRate) return setErr(`Нужно хотя бы ${data.conversionRate} звёзд`)
       if (pts > data.pointsBalance) return setErr('Столько звёзд нет')
-      pb.convert.mutate(pts, { onSuccess: close, onError: fail })
+      pb.convert.mutate({ points: pts, keepInWallet: keep || !convertTarget }, { onSuccess: close, onError: fail })
     }
   } else if (dlg.kind === 'cash') {
     title = dlg.sign > 0 ? (kid ? 'Сколько у тебя денег?' : 'Добавить деньги') : 'Потратил(а) деньги'
@@ -218,6 +222,12 @@ function MoneyDialog({ dlg, onClose, pb, kid }: { dlg: Dlg; onClose: () => void;
           inputProps={{ inputMode: 'decimal' }}
           helperText={preview || ' '}
         />
+        {dlg.kind === 'convert' && convertTarget && (
+          <FormControlLabel
+            control={<Checkbox checked={keep} onChange={(e) => setKeep(e.target.checked)} />}
+            label="Оставить деньги в кошельке — на «потратить»"
+          />
+        )}
         {dlg.kind === 'cash' && (
           <TextField label="За что (необязательно)" value={note} onChange={(e) => setNote(e.target.value)} inputProps={{ maxLength: 120 }} placeholder={dlg.sign > 0 ? 'Бабушка подарила' : 'Мороженое'} />
         )}

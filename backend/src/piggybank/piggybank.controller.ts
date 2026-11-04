@@ -30,7 +30,7 @@ export class PiggybankController {
   @Post('convert')
   @HttpCode(HttpStatus.OK)
   convert(@User() user: RequestUser, @Body() dto: ConvertDto) {
-    return this.piggybank.convert(user, dto.points, dto.childId);
+    return this.piggybank.convert(user, dto.points, dto.childId, dto.keepInWallet);
   }
 
   @Post('allocate')

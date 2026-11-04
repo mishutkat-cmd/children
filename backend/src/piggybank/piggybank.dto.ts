@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min, NotEquals } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, NotEquals } from 'class-validator';
 
 /** Наличные: плюс — пришли (подарили, накопил), минус — потратил. */
 export class CashDto {
@@ -29,6 +29,11 @@ export class ConvertDto {
   @IsString()
   @IsOptional()
   childId?: string;
+
+  /** Оставить обменянные деньги свободными в кошельке, а не класть на цель. */
+  @IsBoolean()
+  @IsOptional()
+  keepInWallet?: boolean;
 }
 
 /** Отложить на цель (плюс) или вернуть из цели в кошелёк (минус). */

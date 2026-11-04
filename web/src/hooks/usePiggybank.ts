@@ -69,7 +69,8 @@ export const usePiggybank = (childId?: string) => {
     onSuccess,
   })
   const convert = useMutation({
-    mutationFn: async (points: number) => (await api.post('/piggybank/convert', body({ points }))).data,
+    mutationFn: async (v: { points: number; keepInWallet?: boolean }) =>
+      (await api.post('/piggybank/convert', body({ points: v.points, keepInWallet: v.keepInWallet }))).data,
     onSuccess,
   })
   const allocate = useMutation({

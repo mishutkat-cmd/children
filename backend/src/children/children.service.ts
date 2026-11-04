@@ -279,9 +279,20 @@ export class ChildrenService {
         const pointsBalance = profile?.pointsBalance || 0;
         const accumulatedCents = Math.round((pointsBalance / conversionRate) * 100);
         const alreadyPaidCents = activeWishlistItem.moneySpent || 0;
+        // 3. Деньги, отложенные на эту цель в копилке (наличные + обменянные
+        //    звёзды). Обмен списывает звёзды, но перекладывает их сюда — поэтому
+        //    прогресс не падает, а «осталось» уменьшается. Обмен в копилке идёт
+        //    без rewardId, значит с moneySpent не пересекается (двойного счёта нет).
+        const piggyRows = childProfileId
+          ? await this.db.findMany('moneyEntries', { childId: childProfileId, rewardId: reward.id })
+          : [];
+        const piggySavedCents = piggyRows.reduce(
+          (s: number, r: any) => s + (r.kind === 'ALLOCATE' || r.kind === 'PURCHASE' ? r.amountCents : 0),
+          0,
+        );
         const rewardCostCents = Math.round((reward.costPoints / conversionRate) * 100);
         const moneySpentOnThis = Math.min(
-          accumulatedCents + alreadyPaidCents,
+          accumulatedCents + alreadyPaidCents + Math.max(0, piggySavedCents),
           rewardCostCents,
         );
         const remainingCents = Math.max(0, rewardCostCents - moneySpentOnThis);
@@ -297,6 +308,7 @@ export class ChildrenService {
           moneySpentOnThis,
           remainingCents,
           progressPercent,
+          piggySavedCents: Math.max(0, piggySavedCents),
         };
       }
     }
@@ -319,14 +331,14 @@ export class ChildrenService {
         ? {
             current: profile?.pointsBalance || 0,
             target: wishlistGoal.rewardGoal.costPoints,
-            percentage: Math.min(
-              100,
-              Math.round(((profile?.pointsBalance || 0) / wishlistGoal.rewardGoal.costPoints) * 100),
-            ),
+            // Общий прогресс цели в процентах — звёзды + отложенные деньги, а не
+            // только звёзды. Иначе обмен звёзд на деньги «обнулял» бы полоску.
+            percentage: wishlistGoal.progressPercent || 0,
             availableMoneyCents: wishlistGoal.availableMoneyCents || 0,
             moneySpentOnThis: wishlistGoal.moneySpentOnThis || 0,
             remainingCents: wishlistGoal.remainingCents || 0,
             progressPercent: wishlistGoal.progressPercent || 0,
+            piggySavedCents: wishlistGoal.piggySavedCents || 0,
           }
         : null,
       character,

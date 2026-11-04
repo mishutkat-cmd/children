@@ -133,12 +133,27 @@ export class PiggybankService {
   /**
    * Звёзды → гривны. Списание звёзд идёт через обычный обмен (ExchangesService
    * с cashCents): та же проверка баланса, та же история обменов у родителя.
+   *
+   * Обменянные гривны по умолчанию сразу идут на главную цель (ту, на которую
+   * ребёнок копит) — так прогресс не обнуляется: звёзд стало меньше, но на цели
+   * отложено ровно столько же. Остаток сверх цены цели остаётся свободным в
+   * кошельке. keepInWallet — ребёнок захотел оставить деньги себе «на потратить».
    */
-  async convert(actor: RequestUser, points: number, childId?: string) {
+  async convert(actor: RequestUser, points: number, childId?: string, keepInWallet = false) {
     const child = await this.resolveChild(actor, childId);
     const rate = this.rate(actor.familyId);
     const cents = Math.floor((points * 100) / rate);
     if (cents < 1) throw new BadRequestException(`Слишком мало звёзд: ${rate} звёзд = 1 грн`);
+    // Куда отложить обмен: главная цель с ценой (избранная, иначе первая), где ещё есть куда.
+    let target: { rewardId: string; room: number } | null = null;
+    if (!keepInWallet) {
+      const active = (await this.moneyGoals(child, actor.familyId)).filter((g) => !g.bought && g.priceCents != null);
+      const pick = active.find((g) => g.isFavorite) || active[0];
+      if (pick) {
+        const room = Math.max(0, (pick.priceCents as number) - pick.savedCents);
+        if (room > 0) target = { rewardId: pick.rewardId, room };
+      }
+    }
     const exchange: any = await this.exchanges.create(child.userId, actor.familyId, { cashCents: cents });
     this.db.transaction(() => {
       this.addSync(actor.familyId, child, actor, {
@@ -147,6 +162,10 @@ export class PiggybankService {
         points: exchange?.pointsSpent ?? points,
         exchangeId: exchange?.id ?? null,
       });
+      if (target) {
+        const toGoal = Math.min(cents, target.room);
+        if (toGoal > 0) this.addSync(actor.familyId, child, actor, { kind: 'ALLOCATE', amountCents: toGoal, rewardId: target.rewardId });
+      }
     });
     return this.summary(actor, child.userId);
   }

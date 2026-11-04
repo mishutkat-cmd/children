@@ -35,11 +35,15 @@ export default function ChildGoals() {
   const { data: wishlist = [], isLoading } = useChildWishlist()
   const { data: rewards = [] } = useFamilyRewards()
   const balance = summary?.pointsBalance ?? 0
-  const main = mainGoal(wishlist, balance)
-  // Цель с ценой в гривнах копится деньгами — и прогресс показываем в гривнах.
+  // Деньги из копилки учитываем в прогрессе цели: обмен звёзд на деньги не
+  // обнуляет полоску, а копить звёзд нужно меньше.
   const { data: piggy } = usePiggybank()
-  const mainMoney = main ? piggy?.goals.find((g) => g.rewardId === main.rewardId && g.priceCents) : undefined
-  const goals = allGoals(wishlist, rewards, balance).filter((g) => g.rewardId !== main?.rewardId)
+  const moneyOf = (id: string) => {
+    const g = piggy?.goals.find((x) => x.rewardId === id)
+    return g ? { savedCents: g.savedCents, priceCents: g.priceCents, rate: piggy!.conversionRate } : undefined
+  }
+  const main = mainGoal(wishlist, balance, moneyOf)
+  const goals = allGoals(wishlist, rewards, balance, moneyOf).filter((g) => g.rewardId !== main?.rewardId)
   const [proposeOpen, setProposeOpen] = useState(false)
   const [confirm, setConfirm] = useState<Goal | null>(null)
   const [notice, setNotice] = useState('')
@@ -96,18 +100,27 @@ export default function ChildGoals() {
             <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#F5C25A' }}>Главная цель</Typography>
             <Typography component="h2" sx={{ mt: 0.5, fontSize: { xs: 26, md: 32 }, fontWeight: 900, overflowWrap: 'anywhere' }}>{main.title}</Typography>
             <Box sx={{ mt: 1.75 }}>
-              <Bar value={mainMoney ? Math.min(100, Math.round((mainMoney.savedCents / mainMoney.priceCents!) * 100)) : main.percent} color={tokens.star} height={18} track="#3A3F55" />
+              <Bar value={main.percent} color={tokens.star} height={18} track="#3A3F55" />
             </Box>
             <Typography sx={{ mt: 1.25, fontSize: 17, fontWeight: 700, color: '#C9CEDD' }}>
-              {mainMoney
-                ? `${formatUah(mainMoney.savedCents)} из ${formatUah(mainMoney.priceCents!)} в копилке`
-                : main.needsPrice
+              {main.needsPrice
                 ? 'Ждём, когда родители поставят цену'
-                : `${formatNumber(Math.min(balance, main.cost))} из ${formatNumber(main.cost)}${etaLabel(main.left, perDay)}`}
+                : main.left > 0
+                ? `${formatNumber(main.collected)} из ${formatNumber(main.cost)}${etaLabel(main.left, perDay)}`
+                : 'Хватает!'}
             </Typography>
+            {main.savedCents > 0 && (
+              <Typography sx={{ mt: 0.5, fontSize: 15, fontWeight: 700, color: '#9FE3B6' }}>
+                💰 {formatUah(main.savedCents)} отложено деньгами{main.priceCents ? ` из ${formatUah(main.priceCents)}` : ''}
+              </Typography>
+            )}
           </Box>
           {!main.needsPrice && main.left === 0 && (
-            <Button variant="contained" size="large" onClick={() => setConfirm(main)} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>Хочу!</Button>
+            main.priceCents != null ? (
+              <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#F5C25A', alignSelf: { xs: 'stretch', sm: 'center' }, maxWidth: { sm: 160 } }}>Отметь покупку в копилке ниже 👇</Typography>
+            ) : (
+              <Button variant="contained" size="large" onClick={() => setConfirm(main)} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>Хочу!</Button>
+            )
           )}
         </Box>
       )}
@@ -142,8 +155,15 @@ export default function ChildGoals() {
                   <Typography sx={{ fontSize: 15, fontWeight: 700, color: g.left === 0 ? tokens.done : tokens.text3 }}>
                     {g.left === 0 ? 'Хватает!' : `ещё ${formatNumber(g.left)}`}
                   </Typography>
+                  {g.savedCents > 0 && (
+                    <Typography sx={{ fontSize: 13, fontWeight: 700, color: tokens.done }}>💰 {formatUah(g.savedCents)} отложено</Typography>
+                  )}
                   {g.left === 0 && (
-                    <Button variant="contained" onClick={() => setConfirm(g)} sx={{ mt: 'auto' }}>Хочу!</Button>
+                    g.priceCents != null ? (
+                      <Typography sx={{ mt: 'auto', fontSize: 13, fontWeight: 700, color: tokens.text3 }}>Отметь покупку в копилке ↓</Typography>
+                    ) : (
+                      <Button variant="contained" onClick={() => setConfirm(g)} sx={{ mt: 'auto' }}>Хочу!</Button>
+                    )
                   )}
                 </>
               )}

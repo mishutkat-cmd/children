@@ -85,8 +85,10 @@ function KidHero({ kid, today, pending, completions }: { kid: Kid; today?: { com
   const total = today?.totalTasks ?? 0
   const goal: any = (summary as any)?.activeGoal
   const progress: any = (summary as any)?.goalProgress
-  const left = progress ? Math.max(0, (progress.target ?? 0) - (progress.current ?? 0)) : 0
   const pct = progress ? Math.min(100, progress.percentage ?? 0) : 0
+  // «Ещё N звёзд» считаем от общего прогресса (звёзды + отложенные деньги),
+  // иначе после обмена звёзд на деньги цифра расходилась бы с полоской.
+  const left = progress ? Math.max(0, Math.round((progress.target ?? 0) * (100 - pct) / 100)) : 0
 
   return (
     <ButtonBase

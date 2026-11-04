@@ -14,6 +14,7 @@ import {
   useChildWishlist,
 } from '../../hooks/useChildData'
 import { mainGoal } from './goals-model'
+import { usePiggybank } from '../../hooks/usePiggybank'
 
 const card = { bgcolor: tokens.paper, borderRadius: '22px', boxShadow: `0 2px 0 ${tokens.kidShadow}` }
 
@@ -34,7 +35,12 @@ export default function ChildDashboard() {
   const sorted = [...tasks].sort((a, b) => Number(taskState(a) !== 'todo') - Number(taskState(b) !== 'todo'))
   // Сытость питомца = доля сделанных сегодня дел (отправленные на проверку тоже кормят).
   const satiety = tasks.length ? Math.round((doneCount / tasks.length) * 100) : null
-  const goal = mainGoal(wishlist, balance)
+  const { data: piggy } = usePiggybank()
+  const moneyOf = (id: string) => {
+    const g = piggy?.goals.find((x) => x.rewardId === id)
+    return g ? { savedCents: g.savedCents, priceCents: g.priceCents, rate: piggy!.conversionRate } : undefined
+  }
+  const goal = mainGoal(wishlist, balance, moneyOf)
   const challenge = challenges.find((c: any) => c.progress && c.progress.current < c.progress.target) || challenges[0]
   const dateLabel = today.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
 
