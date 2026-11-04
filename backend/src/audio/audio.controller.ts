@@ -81,6 +81,14 @@ export class AudioController {
     return this.audioService.deny(user.userId, user.familyId, id);
   }
 
+  /** Ребёнок разрешил, но записать не вышло (нет доступа к микрофону и т.п.). */
+  @Post('requests/:id/fail')
+  @Roles('CHILD')
+  @HttpCode(HttpStatus.OK)
+  fail(@User() user: RequestUser, @Param('id') id: string) {
+    return this.audioService.fail(user.userId, user.familyId, id);
+  }
+
   @Post('requests/:id/audio')
   @Roles('CHILD')
   @HttpCode(HttpStatus.OK)

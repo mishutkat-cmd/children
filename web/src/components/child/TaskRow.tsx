@@ -44,7 +44,7 @@ export function TaskRow({ task, onDone, disabled }: { task: any; onDone: (task: 
             </IconTile>
           </Box>
         ))}
-        <Box component="b" sx={{ flex: 1, minWidth: 0, fontSize: { xs: 17, md: 19 }, color: done ? tokens.text3 : tokens.text, overflowWrap: 'break-word', hyphens: 'auto' }}>
+        <Box component="b" sx={{ flex: 1, minWidth: 0, fontSize: { xs: 17, md: 19 }, color: done ? tokens.text3 : tokens.text, overflowWrap: 'break-word' }}>
           {task.title}
         </Box>
       </ButtonBase>

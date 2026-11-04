@@ -3,7 +3,7 @@ import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Box, Button, ButtonBase, CircularProgress, Typography } from '@mui/material'
 import Layout, { PageHeader } from '../../components/Layout'
-import { BonusDialog, Card, KidDot, card, dayKey, kidColor, labelCaps, useKidCompletions, useKids, weekAndStreak, type Kid } from '../../components/parent/kit'
+import { BonusDialog, Card, KidDot, card, dayKey, kidColor, useKidCompletions, useKids, weekAndStreak, type Kid } from '../../components/parent/kit'
 import { Icon, StarIcon, categoryStyle, formatNumber, type IconName } from '../../components/ui'
 import { tokens } from '../../theme'
 import { api } from '../../lib/api'
@@ -13,7 +13,7 @@ import { useTasks, useTodayStatistics } from '../../hooks/useTasks'
 import { useChildSummary } from '../../hooks/useChildren'
 import { useApproveCompletion, useApproveCompletionsBatch, usePendingCompletions } from '../../hooks/useCompletions'
 import { useApproveExchange, usePendingExchanges, useRejectExchange } from '../../hooks/useExchanges'
-import { SLOTS, currentSlot, isAssignedTo, isPlannedOn, slotOf } from './task-model'
+import { isAssignedTo, isPlannedOn } from './task-model'
 
 const plural = (n: number, one: string, few: string, many: string) => {
   const m10 = n % 10, m100 = n % 100
@@ -66,6 +66,18 @@ function KidHero({ kid, today, pending, completions }: { kid: Kid; today?: { com
   const c = kidColor(kid.index)
   const { data: summary } = useChildSummary(kid.userId)
   const { week, streak } = useMemo(() => weekAndStreak(completions), [completions])
+  // Любимое задание — самое выполняемое за 2 недели (без отклонённых).
+  const favorite = useMemo(() => {
+    const by = new Map<string, number>()
+    for (const x of completions) {
+      if (x.status === 'REJECTED') continue
+      const title = x.task?.title
+      if (title) by.set(title, (by.get(title) || 0) + 1)
+    }
+    let best: { title: string; n: number } | null = null
+    for (const [title, n] of by) if (!best || n > best.n) best = { title, n }
+    return best && best.n >= 2 ? best : null
+  }, [completions])
   const todayKey = dayKey(new Date())
   const todayStars = completions.filter((x) => x.status !== 'REJECTED' && dayKey(new Date(x.performedAt)) === todayKey).reduce((s, x) => s + (x.pointsAwarded || 0), 0)
   const weekStars = week.reduce((s, w) => s + w.stars, 0)
@@ -112,6 +124,13 @@ function KidHero({ kid, today, pending, completions }: { kid: Kid; today?: { com
         <Pill icon="star" color={tokens.text2}>{formatNumber(kid.balance)} на счету</Pill>
       </Box>
 
+      {favorite && (
+        <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 0.75, fontSize: 13, color: '#3A3F55' }}>
+          <Icon name="sparkle" size={14} style={{ color: tokens.starInk }} />
+          <Box component="span" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Любимое: «{favorite.title}» · {favorite.n} {plural(favorite.n, 'раз', 'раза', 'раз')}</Box>
+        </Box>
+      )}
+
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: '#FFFFFF', borderRadius: '16px', p: '10px 14px', position: 'relative' }}>
         {goal?.imageUrl ? (
           <Box component="img" src={goal.imageUrl} alt="" sx={{ width: 40, height: 40, borderRadius: '10px', objectFit: 'cover' }} />
@@ -132,24 +151,22 @@ function KidHero({ kid, today, pending, completions }: { kid: Kid; today?: { com
 
 type FeedItem = { id: string; at: string; kid?: Kid; text: ReactNode; tone?: string }
 
-/** «Сегодня по часам» (V_Home_B): дела детей по утру/дню/вечеру, «Ок» прямо в строке. */
+/** «Сегодня» (V_Home_B): дела детей на сегодня одним списком, «Ок» прямо в строке. */
 function DaySchedule({ kids, completionsByKid, filter }: { kids: Kid[]; completionsByKid: Map<string, any[]>; filter: string }) {
   const { data: tasks = [] } = useTasks('ACTIVE')
   const approve = useApproveCompletion()
   const approveBatch = useApproveCompletionsBatch()
   const now = new Date()
   const todayKey = dayKey(now)
-  const nowSlot = currentSlot(now)
-  const order = SLOTS.map((s) => s.id)
 
   const rows = useMemo(() => {
-    const out: { key: string; kid: Kid; task: any; slot: ReturnType<typeof slotOf>; completion?: any }[] = []
+    const out: { key: string; kid: Kid; task: any; completion?: any }[] = []
     for (const kid of kids) {
       if (filter !== 'all' && filter !== kid.userId) continue
       const todays = (completionsByKid.get(kid.userId) || []).filter((c) => dayKey(new Date(c.performedAt)) === todayKey && c.status !== 'REJECTED')
       for (const t of tasks as any[]) {
         if (!isAssignedTo(t, kid) || (t.frequency !== 'DAILY' && t.frequency !== 'CUSTOM') || !isPlannedOn(t, now)) continue
-        out.push({ key: `${kid.userId}:${t.id}`, kid, task: t, slot: slotOf(t), completion: todays.find((c) => c.taskId === t.id) })
+        out.push({ key: `${kid.userId}:${t.id}`, kid, task: t, completion: todays.find((c) => c.taskId === t.id) })
       }
     }
     return out.sort((a, b) => (a.task.time || '99').localeCompare(b.task.time || '99'))
@@ -157,43 +174,29 @@ function DaySchedule({ kids, completionsByKid, filter }: { kids: Kid[]; completi
 
   const pendingIds = rows.filter((r) => r.completion?.status === 'PENDING').map((r) => r.completion.id)
 
-  if (rows.length === 0) return <Typography sx={{ py: 3, color: tokens.text3, fontSize: 14 }}>На сегодня ежедневных дел нет. Добавьте задания — они появятся здесь по утру, дню и вечеру.</Typography>
+  if (rows.length === 0) return <Typography sx={{ py: 3, color: tokens.text3, fontSize: 14 }}>На сегодня ежедневных дел нет. Добавьте задания — они появятся здесь.</Typography>
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       {pendingIds.length > 1 && (
-        <Button size="small" onClick={() => approveBatch.mutate(pendingIds)} disabled={approveBatch.isPending} sx={{ alignSelf: 'flex-end', bgcolor: tokens.doneSoft, color: '#0F6E40', minHeight: 32, '&:hover': { bgcolor: '#D2EFDF' } }}>
+        <Button size="small" onClick={() => approveBatch.mutate(pendingIds)} disabled={approveBatch.isPending} sx={{ alignSelf: 'flex-end', mb: 0.5, bgcolor: tokens.doneSoft, color: '#0F6E40', minHeight: 32, '&:hover': { bgcolor: '#D2EFDF' } }}>
           Одобрить все {pendingIds.length}
         </Button>
       )}
-      {SLOTS.map((s) => {
-        const list = rows.filter((r) => r.slot === s.id)
-        if (list.length === 0) return null
-        const past = order.indexOf(s.id) < order.indexOf(nowSlot)
+      {rows.map(({ key, kid, task, completion }) => {
+        const cat = categoryStyle(task.category)
+        const status = completion?.status === 'APPROVED' ? 'done' : completion?.status === 'PENDING' ? 'pending' : 'todo'
         return (
-          <Box key={s.id}>
-            <Typography sx={{ ...labelCaps, display: 'flex', alignItems: 'center', gap: 0.75, py: 0.75 }}>
-              <Icon name={s.id === 'MORNING' ? 'sun' : s.id === 'DAY' ? 'cloud' : 'moon'} size={14} />{s.label}
-            </Typography>
-            {list.map(({ key, kid, task, completion }) => {
-              const cat = categoryStyle(task.category)
-              const status = completion?.status === 'APPROVED' ? 'done' : completion?.status === 'PENDING' ? 'pending' : s.id === nowSlot ? 'now' : past ? 'missed' : 'ahead'
-              return (
-                <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 1.25, py: 0.9, borderTop: `1px solid ${tokens.chip}` }}>
-                  <Typography sx={{ width: 44, fontSize: 13, fontWeight: 600, color: tokens.text3 }}>{task.time || ''}</Typography>
-                  <KidDot name={kid.name} index={kid.index} pet={kid.pet} size={28} />
-                  <Box component="span" sx={{ flex: '0 0 30px', height: 30, borderRadius: '9px', bgcolor: cat.bg, color: cat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{task.icon || '•'}</Box>
-                  <Typography sx={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: status === 'done' ? tokens.text3 : tokens.text }}>{task.title}</Typography>
-                  {status === 'pending' ? (
-                    <Button size="small" variant="contained" color="success" onClick={() => approve.mutate(completion.id)} disabled={approve.isPending} sx={{ minHeight: 32, minWidth: 56 }}>Ок</Button>
-                  ) : (
-                    <Box component="span" sx={{ fontSize: 12, fontWeight: 600, px: 1, py: 0.5, borderRadius: '10px', ...({ done: { bgcolor: tokens.doneSoft, color: '#0F6E40' }, now: { bgcolor: tokens.primarySoft, color: tokens.primaryInk }, missed: { bgcolor: tokens.chip, color: tokens.text3 }, ahead: { bgcolor: 'transparent', color: tokens.text3 } } as const)[status] }}>
-                      {{ done: 'одобрено', now: 'сейчас', missed: 'не сделано', ahead: 'впереди' }[status]}
-                    </Box>
-                  )}
-                </Box>
-              )
-            })}
+          <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 1.25, py: 0.9, borderTop: `1px solid ${tokens.chip}` }}>
+            <Typography sx={{ width: 44, fontSize: 13, fontWeight: 600, color: tokens.text3 }}>{task.time || ''}</Typography>
+            <KidDot name={kid.name} index={kid.index} pet={kid.pet} size={28} />
+            <Box component="span" sx={{ flex: '0 0 30px', height: 30, borderRadius: '9px', bgcolor: cat.bg, color: cat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{task.icon || '•'}</Box>
+            <Typography sx={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: status === 'done' ? tokens.text3 : tokens.text }}>{task.title}</Typography>
+            {status === 'pending' ? (
+              <Button size="small" variant="contained" color="success" onClick={() => approve.mutate(completion.id)} disabled={approve.isPending} sx={{ minHeight: 32, minWidth: 56 }}>Ок</Button>
+            ) : status === 'done' ? (
+              <Box component="span" sx={{ fontSize: 12, fontWeight: 600, px: 1, py: 0.5, borderRadius: '10px', bgcolor: tokens.doneSoft, color: '#0F6E40' }}>одобрено</Box>
+            ) : null}
           </Box>
         )
       })}
@@ -306,7 +309,7 @@ export default function ParentHome() {
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.3fr 1fr' }, gap: 2.25, alignItems: 'start' }}>
         <Card sx={{ p: '18px 20px', display: 'flex', flexDirection: 'column' }}>
           <Box role="tablist" aria-label="Что показать" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1, flexWrap: 'wrap' }}>
-            {([['feed', 'Что происходит'], ['day', 'Сегодня по часам']] as const).map(([id, label]) => (
+            {([['feed', 'Что происходит'], ['day', 'Задания на сегодня']] as const).map(([id, label]) => (
               <Box key={id} component="button" type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
                 sx={{ border: 0, bgcolor: tab === id ? tokens.primarySoft : 'transparent', color: tab === id ? tokens.primaryInk : tokens.text2, font: 'inherit', fontSize: 15, fontWeight: 700, height: 36, px: 1.5, borderRadius: '10px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 {label}

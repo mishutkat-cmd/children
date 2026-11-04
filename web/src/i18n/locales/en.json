@@ -123,7 +123,8 @@
       "recordingFrom": "Recording from {{name}}",
       "denied": "The child declined the recording",
       "expired": "The child did not respond in time",
-      "failed": "Could not send the request"
+      "failed": "Could not send the request",
+      "micOff": "Microphone access is off on the child's phone"
     }
   },
   "achievement": {

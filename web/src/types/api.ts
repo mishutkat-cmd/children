@@ -291,7 +291,7 @@ export interface ChildLocationHistory {
 
 // ── Аудио «послушать, что вокруг» (с согласия ребёнка) ─────────
 
-export type AudioRequestStatus = 'PENDING' | 'DENIED' | 'READY' | 'EXPIRED'
+export type AudioRequestStatus = 'PENDING' | 'DENIED' | 'READY' | 'EXPIRED' | 'FAILED'
 
 export interface AudioRequest {
   id: string

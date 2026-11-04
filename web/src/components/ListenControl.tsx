@@ -28,9 +28,9 @@ export default function ListenControl({ childId, childName }: { childId: string;
 
   useEffect(() => {
     if (!request || notifiedRef.current === request.id) return
-    if (request.status === 'DENIED' || request.status === 'EXPIRED') {
+    if (request.status === 'DENIED' || request.status === 'EXPIRED' || request.status === 'FAILED') {
       notifiedRef.current = request.id
-      setNotice(t(request.status === 'DENIED' ? 'parent.audio.denied' : 'parent.audio.expired'))
+      setNotice(t(request.status === 'DENIED' ? 'parent.audio.denied' : request.status === 'FAILED' ? 'parent.audio.micOff' : 'parent.audio.expired'))
       setRequestId(null)
     }
   }, [request, t])

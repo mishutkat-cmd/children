@@ -16,7 +16,7 @@ export const DEFAULT_DURATION_SEC = 30;
 export const DEFAULT_CONSENT_DAYS = 30;
 const MAX_CONSENT_DAYS = 90;
 
-export type AudioStatus = 'PENDING' | 'DENIED' | 'READY' | 'EXPIRED';
+export type AudioStatus = 'PENDING' | 'DENIED' | 'READY' | 'EXPIRED' | 'FAILED';
 
 @Injectable()
 export class AudioService {
@@ -105,6 +105,24 @@ export class AudioService {
   async deny(userId: string, familyId: string, id: string) {
     const row = await this.assertOwnPending(userId, familyId, id);
     await this.db.update(COLLECTION, row.id, { status: 'DENIED', respondedAt: new Date() });
+    return { ok: true };
+  }
+
+  /**
+   * Запись не удалась на стороне ребёнка — чаще всего выключен доступ к
+   * микрофону. Это НЕ отказ: помечаем отдельным статусом и шлём родителю push,
+   * чтобы он знал, что дело в телефоне ребёнка, а не в его нежелании.
+   */
+  async fail(userId: string, familyId: string, id: string) {
+    const row = await this.assertOwnPending(userId, familyId, id);
+    await this.db.update(COLLECTION, row.id, { status: 'FAILED', respondedAt: new Date() });
+    void this.push
+      ?.sendToUser(row.requestedByUserId, {
+        title: 'Не получилось послушать',
+        body: 'На телефоне ребёнка выключён доступ к микрофону.',
+        data: { type: 'AUDIO_FAILED', requestId: id },
+      })
+      .catch(() => {});
     return { ok: true };
   }
 
